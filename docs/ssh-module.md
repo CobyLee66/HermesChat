@@ -70,8 +70,7 @@ export interface Transport {
   onDrop?: () => void  // 意外断开回调
 }
 ```
-- `DirectWsTransport`（开发）：`wsUrl=ws://127.0.0.1:9119/api/ws?token=<提取或手填>`。
-- `SshTunnelTransport`（生产）：走 §3 流程。
+- `SshTunnelTransport`（生产）：走 §3 流程。（开发直连 `DirectWsTransport` 已移除。）
 
 ## 6. Android 实现备注（首次落地记录）
 

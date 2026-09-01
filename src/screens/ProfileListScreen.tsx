@@ -1,6 +1,7 @@
 import React, {useEffect} from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   StyleSheet,
   Text,
@@ -35,9 +36,33 @@ export function ProfileListScreen() {
     refresh();
   }, [refresh]);
 
+  // header 右上角"退出"：确认后断开连接，由下方 effect 带回 ConnectionHome
+  useEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity
+          activeOpacity={0.7}
+          onPress={() =>
+            Alert.alert('退出连接', '确定断开与主机的连接吗？', [
+              {text: '取消', style: 'cancel'},
+              {
+                text: '退出',
+                style: 'destructive',
+                onPress: () => {
+                  useConnectionStore.getState().disconnect();
+                },
+              },
+            ])
+          }>
+          <Text style={styles.exitText}>退出</Text>
+        </TouchableOpacity>
+      ),
+    });
+  }, [navigation]);
+
   useEffect(() => {
     if (connState === 'disconnected') {
-      navigation.replace('ConnectionSetup');
+      navigation.replace('ConnectionHome');
     }
   }, [connState, navigation]);
 
@@ -104,6 +129,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   bannerText: {fontSize: 12, color: '#FF7D00'},
+  exitText: {fontSize: 15, color: Colors.danger},
   emptyWrap: {alignItems: 'center', marginTop: 48},
   error: {color: Colors.danger, fontSize: 14},
   retryBtn: {

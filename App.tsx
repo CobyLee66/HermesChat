@@ -1,6 +1,6 @@
 /**
  * HermesMobile — Hermes Agent 手机端。
- * 导航：ConnectionSetup → ProfileList → SessionList → Chat。
+ * 导航：ConnectionHome → ConnectionEdit / ProfileList → SessionList → Chat。
  */
 
 import React, {useEffect} from 'react';
@@ -15,7 +15,8 @@ import {enableScreens} from 'react-native-screens';
 
 import {Colors} from './src/components/theme';
 import {ChatScreen} from './src/screens/ChatScreen';
-import {ConnectionSetupScreen} from './src/screens/ConnectionSetupScreen';
+import {ConnectionEditScreen} from './src/screens/ConnectionEditScreen';
+import {ConnectionHomeScreen} from './src/screens/ConnectionHomeScreen';
 import {ProfileListScreen} from './src/screens/ProfileListScreen';
 import {SessionListScreen} from './src/screens/SessionListScreen';
 import {initConnectionEngine} from './src/ssh/SshManager';
@@ -49,12 +50,19 @@ function App() {
           initialRouteName={
             state === 'ready' || state === 'reconnecting'
               ? 'ProfileList'
-              : 'ConnectionSetup'
+              : 'ConnectionHome'
           }>
           <Stack.Screen
-            name="ConnectionSetup"
-            component={ConnectionSetupScreen}
-            options={{title: '连接设置', headerShown: false}}
+            name="ConnectionHome"
+            component={ConnectionHomeScreen}
+            options={{title: '连接', headerShown: false}}
+          />
+          <Stack.Screen
+            name="ConnectionEdit"
+            component={ConnectionEditScreen}
+            options={({route}) => ({
+              title: route.params?.profileId ? '编辑配置' : '添加配置',
+            })}
           />
           <Stack.Screen
             name="ProfileList"

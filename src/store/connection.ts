@@ -1,8 +1,9 @@
 /**
  * 连接状态机：disconnected → connecting → bootstrapping → ready → reconnecting
- * 配置 AsyncStorage 持久化（含私钥/口令，App 沙盒内）；密码仅存内存。
+ * 多 SSH 配置（ConnectionProfile）全字段 AsyncStorage 持久化——含密码/私钥/口令，
+ * 存于 App 沙盒内（用户明确要求记住凭据、点卡片一键直连）。
  * 重连：指数退避 1s→30s（backoffDelay），断线后重建隧道+WS 由 connector 完成，
- * 成功后被活跃会话 session.resume。
+ * 成功后被活跃会话 session.resume。重连始终使用 currentProfileId 指向的配置。
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -20,30 +21,26 @@ export type ConnectionState =
   | 'ready'
   | 'reconnecting';
 
-export interface SshFormConfig {
-  /** true = 开发直连（默认 127.0.0.1:9119），false = SSH 隧道 */
-  direct: boolean;
-  directHost: string;
-  directPort: string;
-  /** 手填 token（兜底，仅内存） */
-  directToken: string;
+export interface ConnectionProfile {
+  /** 本地生成（genProfileId） */
+  id: string;
+  /** 配置名称（卡片显示） */
+  name: string;
   host: string;
   port: string;
   username: string;
-  /** 仅存内存，不持久化 */
+  /** 持久化于 App 沙盒（用户明确要求一键直连，免每次输入） */
   password: string;
-  /** 持久化于 App 沙盒（用户要求记住上次选择的密钥，避免每次重选） */
+  /** 持久化于 App 沙盒 */
   privateKey: string;
   passphrase: string;
   /** 上次选择的密钥文件名（仅显示用，随私钥一起持久化） */
   keyFileName: string;
 }
 
-export const DEFAULT_CONFIG: SshFormConfig = {
-  direct: true,
-  directHost: '127.0.0.1',
-  directPort: '9119',
-  directToken: '',
+/** 新增配置的初始表单值。 */
+export const EMPTY_PROFILE: Omit<ConnectionProfile, 'id'> = {
+  name: '',
   host: '',
   port: '22',
   username: '',
@@ -53,7 +50,15 @@ export const DEFAULT_CONFIG: SshFormConfig = {
   keyFileName: '',
 };
 
-const STORAGE_KEY = 'hermes.connection.v1';
+/**
+ * 本地 id 生成器（不引新依赖）：时间戳 + 随机段。
+ * 本机配置表内足够唯一，无需 nanoid。
+ */
+export function genProfileId(): string {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 10);
+}
+
+export const STORAGE_KEY = 'hermes.connections.v2';
 
 /** 指数退避：1s → 2s → 4s … 封顶 30s。attempt 从 0 起。 */
 export function backoffDelay(attempt: number): number {
@@ -69,7 +74,7 @@ export interface ConnectResult {
 
 /** 连接引擎接口（生产实现 = SshManager；测试可注入 mock）。 */
 export interface Connector {
-  connect(cfg: SshFormConfig): Promise<ConnectResult>;
+  connect(cfg: ConnectionProfile): Promise<ConnectResult>;
   disconnect(): Promise<void>;
   /** 注册意外断开回调（隧道掉线/WS 断开） */
   onDrop(cb: (reason: string) => void): void;
@@ -83,14 +88,27 @@ interface ConnectionStore {
   wsUrl: string;
   httpUrl: string;
   token: string;
-  config: SshFormConfig;
+  /** 全部 SSH 配置 */
+  profiles: ConnectionProfile[];
+  /** 当前连接使用的配置（重连也用它） */
+  currentProfileId: string | null;
+  /** "打开应用后自动连接"的配置（全局最多一个） */
+  autoProfileId: string | null;
   reconnectAttempt: number;
   connector: Connector | null;
 
   setConnector(c: Connector): void;
-  setConfig(patch: Partial<SshFormConfig>): void;
+  addProfile(input: Omit<ConnectionProfile, 'id'>): ConnectionProfile;
+  updateProfile(
+    id: string,
+    patch: Partial<Omit<ConnectionProfile, 'id'>>,
+  ): void;
+  removeProfile(id: string): void;
+  /** 设新的自动连接配置（自动顶替旧的）；传 null 取消 */
+  setAutoProfile(id: string | null): void;
   loadPersisted(): Promise<void>;
-  connect(): Promise<boolean>;
+  /** 连接指定配置（缺省用 currentProfileId） */
+  connect(profileId?: string): Promise<boolean>;
   disconnect(): Promise<void>;
   handleDrop(reason: string): void;
   /** 回前台等场景：立即重试（重置退避计数）。 */
@@ -122,13 +140,27 @@ function wireEvents(rpc: RpcClient) {
 }
 
 export const useConnectionStore = create<ConnectionStore>((set, get) => {
+  /** 全字段持久化（含密码/私钥，App 沙盒内；用户明确要求）。 */
+  function persist() {
+    const {profiles, currentProfileId, autoProfileId} = get();
+    AsyncStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({profiles, currentProfileId, autoProfileId}),
+    ).catch(() => {});
+  }
+
   async function connectInternal(): Promise<boolean> {
-    const {config, connector} = get();
+    const {profiles, currentProfileId, connector} = get();
     if (!connector) {
       set({state: 'disconnected', error: 'connector 未初始化'});
       return false;
     }
-    const result = await connector.connect(config);
+    const profile = profiles.find(p => p.id === currentProfileId);
+    if (!profile) {
+      set({state: 'disconnected', error: '未找到当前连接配置'});
+      return false;
+    }
+    const result = await connector.connect(profile);
     set({state: 'bootstrapping', error: null});
     wireEvents(result.rpc);
     setRpc(result.rpc);
@@ -180,7 +212,9 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => {
     wsUrl: '',
     httpUrl: '',
     token: '',
-    config: DEFAULT_CONFIG,
+    profiles: [],
+    currentProfileId: null,
+    autoProfileId: null,
     reconnectAttempt: 0,
     connector: null,
 
@@ -189,22 +223,34 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => {
       c.onDrop(reason => get().handleDrop(reason));
     },
 
-    setConfig(patch) {
-      const next = {...get().config, ...patch};
-      set({config: next});
-      // 密码仅存内存；私钥/口令/密钥文件名持久化（App 沙盒内，用户明确要求）
-      const safe: Partial<SshFormConfig> = {
-        direct: next.direct,
-        directHost: next.directHost,
-        directPort: next.directPort,
-        host: next.host,
-        port: next.port,
-        username: next.username,
-        privateKey: next.privateKey,
-        passphrase: next.passphrase,
-        keyFileName: next.keyFileName,
-      };
-      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(safe)).catch(() => {});
+    addProfile(input) {
+      const profile: ConnectionProfile = {...input, id: genProfileId()};
+      set({profiles: [...get().profiles, profile]});
+      persist();
+      return profile;
+    },
+
+    updateProfile(id, patch) {
+      set({
+        profiles: get().profiles.map(p => (p.id === id ? {...p, ...patch} : p)),
+      });
+      persist();
+    },
+
+    removeProfile(id) {
+      const {profiles, currentProfileId, autoProfileId} = get();
+      set({
+        profiles: profiles.filter(p => p.id !== id),
+        currentProfileId: currentProfileId === id ? null : currentProfileId,
+        autoProfileId: autoProfileId === id ? null : autoProfileId,
+      });
+      persist();
+    },
+
+    setAutoProfile(id) {
+      // 单字段即天然唯一：赋新值自动顶替旧值
+      set({autoProfileId: id});
+      persist();
     },
 
     async loadPersisted() {
@@ -213,14 +259,26 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => {
         if (!raw) {
           return;
         }
-        const saved = JSON.parse(raw) as Partial<SshFormConfig>;
-        set({config: {...DEFAULT_CONFIG, ...saved}});
+        const saved = JSON.parse(raw) as {
+          profiles?: ConnectionProfile[];
+          currentProfileId?: string | null;
+          autoProfileId?: string | null;
+        };
+        set({
+          profiles: saved.profiles ?? [],
+          currentProfileId: saved.currentProfileId ?? null,
+          autoProfileId: saved.autoProfileId ?? null,
+        });
       } catch {
         // 损坏的持久化数据忽略
       }
     },
 
-    async connect() {
+    async connect(profileId) {
+      if (profileId) {
+        set({currentProfileId: profileId});
+        persist();
+      }
       if (get().state === 'connecting' || get().state === 'bootstrapping') {
         return false;
       }

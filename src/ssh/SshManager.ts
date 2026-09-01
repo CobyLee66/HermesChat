@@ -1,6 +1,6 @@
 /**
  * SshManager：连接引擎（实现 connection store 的 Connector 接口）。
- * - transport 生命周期（DirectWs / SshTunnel）
+ * - transport 生命周期（SshTunnel）
  * - RpcClient 建立与断开回调
  * - AppState 监听：回前台时若处于 reconnecting，立即重试（重置退避）
  * - 重连成功后对活跃会话 session.resume
@@ -15,10 +15,10 @@ import {RpcClient} from '../rpc/client';
 import type {
   ConnectResult,
   Connector,
-  SshFormConfig,
+  ConnectionProfile,
 } from '../store/connection';
 import {useChatStore} from '../store/chat';
-import {DirectWsTransport, SshTunnelTransport, type Transport} from './transport';
+import {SshTunnelTransport, type Transport} from './transport';
 
 export class SshManager implements Connector {
   private transport: Transport | null = null;
@@ -52,25 +52,19 @@ export class SshManager implements Connector {
     }
   }
 
-  async connect(cfg: SshFormConfig): Promise<ConnectResult> {
+  async connect(cfg: ConnectionProfile): Promise<ConnectResult> {
     this.tearingDown = false;
     // 先清理旧实例（重连路径）
     await this.teardownTransport();
 
-    const transport: Transport = cfg.direct
-      ? new DirectWsTransport({
-          host: cfg.directHost,
-          port: cfg.directPort,
-          token: cfg.directToken || undefined,
-        })
-      : new SshTunnelTransport({
-          host: cfg.host,
-          port: parseInt(cfg.port, 10) || 22,
-          username: cfg.username,
-          password: cfg.password || undefined,
-          privateKey: cfg.privateKey || undefined,
-          passphrase: cfg.passphrase || undefined,
-        });
+    const transport: Transport = new SshTunnelTransport({
+      host: cfg.host,
+      port: parseInt(cfg.port, 10) || 22,
+      username: cfg.username,
+      password: cfg.password || undefined,
+      privateKey: cfg.privateKey || undefined,
+      passphrase: cfg.passphrase || undefined,
+    });
     transport.onDrop = () => this.reportDrop('ssh tunnel dropped');
     this.transport = transport;
 

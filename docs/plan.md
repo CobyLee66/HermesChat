@@ -35,7 +35,7 @@ React Native (TS) 手机 App（Android 优先，iOS 后续），通过 **App 内
 | 框架 | React Native 0.87.1 (TS)，bare workflow，包名 HermesMobile |
 | SSH | 自研原生模块 `HermesSsh`（Android: Kotlin + JSch mwiede fork；iOS 后续 SwiftNIO SSH） |
 | WS | RN 内置 WebSocket |
-| 状态 | Zustand；非敏感配置 AsyncStorage 持久化；密码 M0 仅内存（TODO keychain） |
+| 状态 | Zustand；连接配置（含密码/私钥）AsyncStorage 持久化于 App 沙盒 |
 | 导航 | react-navigation (native-stack) |
 | UI | 自绘 QQ 风格气泡列表（inverted FlatList）；不引 reanimated（M0 保持简单） |
 
@@ -51,11 +51,11 @@ React Native (TS) 手机 App（Android 优先，iOS 后续），通过 **App 内
 
 - `SshManager`（`src/ssh/`）：连接配置 → exec 探测/拉起远端 serve → 本地端口转发 → 状态机 `disconnected→connecting→bootstrapping→tunneling→ready→reconnecting`，指数退避 1s→30s，keepalive。
 - `RpcClient`（`src/rpc/`）：JSON-RPC 请求/响应配对 + 事件按 session 分发 + 消息聚合器（事件流 → TimelineItem[]）。
-- Transport 抽象：`DirectWsTransport`（开发模式直连 127.0.0.1:9119）+ `SshTunnelTransport`（生产）。
+- Transport 抽象：仅 `SshTunnelTransport`（生产；开发直连已随多配置重构移除）。
 
 ## 5. UI 结构（QQ 风格）
 
-- 连接设置页：主机/端口/用户/认证 + 连接测试 + "开发直连"开关。
+- 连接主页：多配置卡片列表（点卡片一键直连）；编辑页：名称/主机/端口/用户/认证 + "自动连接"开关（全局唯一）。
 - Profile 列表页：头像 + 昵称 + 模型角标 + 状态点（数据 `profiles.list`）。
 - 会话列表页（按 profile）：`session.list {profile}`，左滑删除，顶部新会话。
 - 聊天页：气泡流（用户/助手）；思考块（折叠灰字）、工具卡片（名称+参数+结果，可展开）、错误红条；审批卡片内联按钮组；顶栏菜单 = 模型切换（bottom sheet）/ 重开会话 / 会话信息；输入框发送 `prompt.submit`，长 turn 显示中断按钮。

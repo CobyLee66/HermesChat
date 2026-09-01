@@ -1,8 +1,11 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
 import {
   _resetConnectionTimers,
   backoffDelay,
+  EMPTY_PROFILE,
+  STORAGE_KEY,
   useConnectionStore,
-  DEFAULT_CONFIG,
   type Connector,
 } from '../src/store/connection';
 
@@ -43,6 +46,31 @@ function makeConnector(opts: {
   return c;
 }
 
+/** 造一条测试配置并入库。 */
+function seedProfile(name = '测试机') {
+  return useConnectionStore.getState().addProfile({
+    ...EMPTY_PROFILE,
+    name,
+    host: '192.168.1.10',
+    username: 'user',
+  });
+}
+
+function resetStore() {
+  useConnectionStore.setState({
+    state: 'disconnected',
+    error: null,
+    wsUrl: '',
+    httpUrl: '',
+    token: '',
+    profiles: [],
+    currentProfileId: null,
+    autoProfileId: null,
+    reconnectAttempt: 0,
+    connector: null,
+  });
+}
+
 describe('backoffDelay 指数退避', () => {
   it('1s → 2s → 4s … 封顶 30s', () => {
     expect(backoffDelay(0)).toBe(1000);
@@ -55,20 +83,12 @@ describe('backoffDelay 指数退避', () => {
   });
 });
 
-describe('connection 状态机', () => {
-  beforeEach(() => {
+describe('profiles 管理', () => {
+  beforeEach(async () => {
     jest.useFakeTimers();
     _resetConnectionTimers();
-    useConnectionStore.setState({
-      state: 'disconnected',
-      error: null,
-      wsUrl: '',
-      httpUrl: '',
-      token: '',
-      config: DEFAULT_CONFIG,
-      reconnectAttempt: 0,
-      connector: null,
-    });
+    resetStore();
+    await AsyncStorage.clear();
   });
 
   afterEach(() => {
@@ -76,7 +96,114 @@ describe('connection 状态机', () => {
     jest.useRealTimers();
   });
 
-  it('connect 成功：disconnected → connecting → bootstrapping → ready', async () => {
+  it('addProfile 生成 id，全字段持久化（含 password/privateKey）', async () => {
+    const p = useConnectionStore.getState().addProfile({
+      name: '办公电脑',
+      host: '10.0.0.2',
+      port: '2222',
+      username: 'dev',
+      password: 'pw',
+      privateKey: 'PEM',
+      passphrase: 'pp',
+      keyFileName: 'id_rsa',
+    });
+    expect(p.id).toBeTruthy();
+    expect(useConnectionStore.getState().profiles).toHaveLength(1);
+
+    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    expect(raw).toBeTruthy();
+    const saved = JSON.parse(raw as string);
+    expect(saved.profiles).toHaveLength(1);
+    expect(saved.profiles[0]).toMatchObject({
+      id: p.id,
+      name: '办公电脑',
+      host: '10.0.0.2',
+      port: '2222',
+      username: 'dev',
+      password: 'pw',
+      privateKey: 'PEM',
+      passphrase: 'pp',
+      keyFileName: 'id_rsa',
+    });
+  });
+
+  it('updateProfile 修改字段且不改 id，并持久化', async () => {
+    const p = seedProfile();
+    useConnectionStore
+      .getState()
+      .updateProfile(p.id, {name: '新名字', port: '2200'});
+    const after = useConnectionStore.getState().profiles[0];
+    expect(after.id).toBe(p.id);
+    expect(after.name).toBe('新名字');
+    expect(after.port).toBe('2200');
+    expect(after.host).toBe('192.168.1.10');
+
+    const saved = JSON.parse(
+      (await AsyncStorage.getItem(STORAGE_KEY)) as string,
+    );
+    expect(saved.profiles[0].name).toBe('新名字');
+  });
+
+  it('removeProfile 删除并清理 current/auto 引用', () => {
+    const p = seedProfile();
+    useConnectionStore.getState().setAutoProfile(p.id);
+    useConnectionStore.setState({currentProfileId: p.id});
+    useConnectionStore.getState().removeProfile(p.id);
+    const s = useConnectionStore.getState();
+    expect(s.profiles).toHaveLength(0);
+    expect(s.autoProfileId).toBeNull();
+    expect(s.currentProfileId).toBeNull();
+  });
+
+  it('setAutoProfile 全局唯一：设新的顶替旧的，可传 null 取消', () => {
+    const a = seedProfile('A');
+    const b = seedProfile('B');
+    useConnectionStore.getState().setAutoProfile(a.id);
+    expect(useConnectionStore.getState().autoProfileId).toBe(a.id);
+    useConnectionStore.getState().setAutoProfile(b.id);
+    expect(useConnectionStore.getState().autoProfileId).toBe(b.id);
+    useConnectionStore.getState().setAutoProfile(null);
+    expect(useConnectionStore.getState().autoProfileId).toBeNull();
+  });
+
+  it('loadPersisted 回读 profiles / currentProfileId / autoProfileId', async () => {
+    const a = seedProfile('A');
+    const b = seedProfile('B');
+    useConnectionStore.getState().setAutoProfile(b.id);
+    // connect(profileId) 是唯一写 currentProfileId 并落盘的 action
+    useConnectionStore.getState().setConnector(makeConnector({}));
+    await useConnectionStore.getState().connect(a.id);
+
+    // 模拟冷启动：清空内存态后从 AsyncStorage 恢复
+    useConnectionStore.setState({
+      state: 'disconnected',
+      profiles: [],
+      currentProfileId: null,
+      autoProfileId: null,
+    });
+    await useConnectionStore.getState().loadPersisted();
+    const s = useConnectionStore.getState();
+    expect(s.profiles.map(p => p.id)).toEqual([a.id, b.id]);
+    expect(s.profiles[0].name).toBe('A');
+    expect(s.currentProfileId).toBe(a.id);
+    expect(s.autoProfileId).toBe(b.id);
+  });
+});
+
+describe('connection 状态机', () => {
+  beforeEach(async () => {
+    jest.useFakeTimers();
+    _resetConnectionTimers();
+    resetStore();
+    await AsyncStorage.clear();
+  });
+
+  afterEach(() => {
+    _resetConnectionTimers();
+    jest.useRealTimers();
+  });
+
+  it('connect 成功：disconnected → connecting → bootstrapping → ready，并记 currentProfileId', async () => {
     const connector = makeConnector({});
     const seen: string[] = [useConnectionStore.getState().state];
     useConnectionStore.subscribe(s => {
@@ -86,17 +213,29 @@ describe('connection 状态机', () => {
       }
     });
     useConnectionStore.getState().setConnector(connector);
-    const ok = await useConnectionStore.getState().connect();
+    const p = seedProfile();
+    const ok = await useConnectionStore.getState().connect(p.id);
     expect(ok).toBe(true);
     expect(useConnectionStore.getState().state).toBe('ready');
     expect(seen).toEqual(['disconnected', 'connecting', 'bootstrapping', 'ready']);
     expect(useConnectionStore.getState().token).toBe('t');
+    expect(useConnectionStore.getState().currentProfileId).toBe(p.id);
+  });
+
+  it('无配置时 connect 报错回到 disconnected', async () => {
+    const connector = makeConnector({});
+    useConnectionStore.getState().setConnector(connector);
+    const ok = await useConnectionStore.getState().connect();
+    expect(ok).toBe(false);
+    expect(useConnectionStore.getState().state).toBe('disconnected');
+    expect(useConnectionStore.getState().error).toContain('未找到当前连接配置');
   });
 
   it('connect 失败回到 disconnected 并记录 error', async () => {
     const connector = makeConnector({failFirst: true});
     useConnectionStore.getState().setConnector(connector);
-    const ok = await useConnectionStore.getState().connect();
+    const p = seedProfile();
+    const ok = await useConnectionStore.getState().connect(p.id);
     expect(ok).toBe(false);
     expect(useConnectionStore.getState().state).toBe('disconnected');
     expect(useConnectionStore.getState().error).toContain('connect failed');
@@ -106,7 +245,8 @@ describe('connection 状态机', () => {
     const connector = makeConnector({failTimes: 2});
     const store = useConnectionStore.getState();
     store.setConnector(connector);
-    await useConnectionStore.getState().connect();
+    const p = seedProfile();
+    await useConnectionStore.getState().connect(p.id);
     expect(useConnectionStore.getState().state).toBe('ready');
     expect(connector.connectCalls).toBe(1);
 
@@ -134,7 +274,8 @@ describe('connection 状态机', () => {
   it('retryNow 立即重置退避并重试', async () => {
     const connector = makeConnector({});
     useConnectionStore.getState().setConnector(connector);
-    await useConnectionStore.getState().connect();
+    const p = seedProfile();
+    await useConnectionStore.getState().connect(p.id);
     useConnectionStore.getState().handleDrop('drop');
     expect(useConnectionStore.getState().state).toBe('reconnecting');
 
@@ -148,7 +289,8 @@ describe('connection 状态机', () => {
   it('disconnect 停止重连', async () => {
     const connector = makeConnector({failTimes: 99});
     useConnectionStore.getState().setConnector(connector);
-    await useConnectionStore.getState().connect();
+    const p = seedProfile();
+    await useConnectionStore.getState().connect(p.id);
     useConnectionStore.getState().handleDrop('drop');
     await useConnectionStore.getState().disconnect();
     expect(useConnectionStore.getState().state).toBe('disconnected');
@@ -159,7 +301,8 @@ describe('connection 状态机', () => {
   it('重复 handleDrop 不叠加定时器', async () => {
     const connector = makeConnector({});
     useConnectionStore.getState().setConnector(connector);
-    await useConnectionStore.getState().connect();
+    const p = seedProfile();
+    await useConnectionStore.getState().connect(p.id);
     useConnectionStore.getState().handleDrop('a');
     useConnectionStore.getState().handleDrop('b');
     await jest.advanceTimersByTimeAsync(1000);

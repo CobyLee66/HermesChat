@@ -1,7 +1,7 @@
 /**
  * Transport 抽象（docs/ssh-module.md §5）。
- * - DirectWsTransport：开发直连，GET http://host/ 提取 token → ws url
- * - SshTunnelTransport：生产，走 docs/ssh-module.md §3 bootstrap 流程
+ * 仅 SshTunnelTransport：走 docs/ssh-module.md §3 bootstrap 流程。
+ * （开发直连 DirectWsTransport 已随多配置重构移除。）
  */
 
 import * as HermesSsh from './HermesSsh';
@@ -35,45 +35,6 @@ function randomToken(): string {
     s += Math.floor(Math.random() * 16).toString(16);
   }
   return s;
-}
-
-// ─── DirectWsTransport（开发） ──────────────────────────────────
-
-export interface DirectConfig {
-  host: string;
-  port: string;
-  /** 手填 token（兜底）；空则自动从 SPA 提取 */
-  token?: string;
-}
-
-export class DirectWsTransport implements Transport {
-  onDrop?: () => void;
-
-  constructor(private cfg: DirectConfig) {}
-
-  async connect(): Promise<TransportResult> {
-    const host = this.cfg.host.trim() || '127.0.0.1';
-    const port = this.cfg.port.trim() || '9119';
-    const httpUrl = `http://${host}:${port}`;
-    let token = this.cfg.token?.trim() ?? '';
-    if (!token) {
-      const resp = await fetch(`${httpUrl}/`);
-      const html = await resp.text();
-      token = extractToken(html) ?? '';
-    }
-    if (!token) {
-      throw new Error('无法从 dashboard 提取 session token（可手填 token 兜底）');
-    }
-    return {
-      wsUrl: `ws://${host}:${port}/api/ws?token=${encodeURIComponent(token)}`,
-      httpUrl,
-      token,
-    };
-  }
-
-  async disconnect(): Promise<void> {
-    // 直连无底层资源
-  }
 }
 
 // ─── SshTunnelTransport（生产） ─────────────────────────────────
