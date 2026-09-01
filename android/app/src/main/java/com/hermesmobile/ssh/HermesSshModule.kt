@@ -123,6 +123,7 @@ class HermesSshModule(private val reactContext: ReactApplicationContext) :
   fun connect(config: ReadableMap, promise: Promise) {
     submit(promise) {
       stateLock.lock()
+      val jsch = JSch() // 提到 try 外：catch 里做 Auth fail 诊断要用
       try {
         // 重复连接冲突：先静默断开旧会话（不触发 HermesSsh:disconnect）
         intentionalDisconnect = true
@@ -137,7 +138,6 @@ class HermesSshModule(private val reactContext: ReactApplicationContext) :
         val privateKey = config.getStringOrNull("privateKey")
         val passphrase = config.getStringOrNull("passphrase")
 
-        val jsch = JSch()
         // known_hosts 落到 app 私有文件；文件不存在时 KnownHosts 会静默跳过读取、
         // 首次 add() 时创建（mwiede jsch KnownHosts.setKnownHosts/sync 行为）。
         jsch.setKnownHosts(File(reactContext.filesDir, KNOWN_HOSTS_FILE).absolutePath)
