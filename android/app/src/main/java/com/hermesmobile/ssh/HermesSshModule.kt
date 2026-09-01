@@ -16,6 +16,7 @@ import com.jcraft.jsch.UIKeyboardInteractive
 import com.jcraft.jsch.UserInfo
 import java.io.File
 import java.io.InputStream
+import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
@@ -162,6 +163,7 @@ class HermesSshModule(private val reactContext: ReactApplicationContext) :
         newSession.connect(CONNECT_TIMEOUT_MS)
 
         val fingerprint = newSession.hostKey?.getFingerPrint(jsch) ?: ""
+        val clientKeyInfo = identitySummary(jsch)
 
         session = newSession
         intentionalDisconnect = false
@@ -169,11 +171,21 @@ class HermesSshModule(private val reactContext: ReactApplicationContext) :
 
         val result = Arguments.createMap()
         result.putString("serverFingerprint", fingerprint)
+        result.putString("clientKeyInfo", clientKeyInfo)
         promise.resolve(result)
       } catch (e: Throwable) {
         intentionalDisconnect = true
         disconnectLocked()
-        promise.reject(E_CONNECT_FAILED, e.message ?: "connect failed", e)
+        // Auth fail 时附上已加载密钥的指纹/算法，方便和服务端 authorized_keys 对照
+        val msg = e.message ?: "connect failed"
+        val detail = if (msg.contains("Auth fail")) {
+          val ids = runCatching { identitySummary(jsch) }.getOrDefault("读取失败")
+          "$msg | 已加载密钥: ${ids.ifEmpty { "无（私钥未成功解析）" }}" +
+            " | 请核对: 1) 用户名/端口 2) 密钥指纹是否与服务端 authorized_keys 一致"
+        } else {
+          msg
+        }
+        promise.reject(E_CONNECT_FAILED, detail, e)
       } finally {
         stateLock.unlock()
       }
@@ -539,6 +551,25 @@ class HermesSshModule(private val reactContext: ReactApplicationContext) :
  * - password / keyboard-interactive：用配置里的密码应答（私钥 passphrase 不走这里，
  *   已在 addIdentity 时提供）。
  */
+/**
+ * 列出 JSch 已加载身份的摘要：name[算法 SHA256指纹]，指纹 = OpenSSH 风格
+ * base64nopad(sha256(publicKeyBlob))，可直接和服务端 `ssh-keygen -lf` 输出对照。
+ */
+private fun identitySummary(jsch: JSch): String {
+  val identities = runCatching { jsch.identityRepository?.identities }.getOrNull()
+    ?: return ""
+  return identities.joinToString(", ") { id ->
+    val blob = runCatching { id.publicKeyBlob }.getOrNull()
+    val fp = blob?.let {
+      val digest = MessageDigest.getInstance("SHA-256").digest(it)
+      "SHA256:" + android.util.Base64.encodeToString(
+        digest, android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP,
+      )
+    } ?: "no-pubkey"
+    "${id.name}[${id.algName} $fp${if (id.isEncrypted) " encrypted" else ""}]"
+  }
+}
+
 private class AcceptNewUserInfo(private val password: String?) : UserInfo, UIKeyboardInteractive {
 
   override fun promptYesNo(message: String): Boolean =
