@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # build-android.sh [debug|release]   —— 在 Mac 上一键驱动 构建机 构建 Android APK
-# 流程：同步工程 -> 构建机 npm ci（如有变化）-> gradlew 构建 -> APK 取回 dist/
+# 流程：本地改动推送 GitHub -> 构建机 git pull -> npm install（增量）-> gradlew 构建 -> APK 取回 dist/
 set -euo pipefail
 
 FLAVOR="${1:-release}"           # debug | release
@@ -15,16 +15,17 @@ case "$FLAVOR" in
   *) echo "用法: $0 [debug|release]"; exit 1 ;;
 esac
 
-echo "==> [1/4] 同步工程到 $REMOTE_HOST:$REMOTE_DIR"
 cd "$LOCAL_DIR"
-tar --exclude='./node_modules' --exclude='./ios' --exclude='./.git' --exclude='./dist' \
-    --exclude='./android/.gradle' --exclude='./android/build' --exclude='./android/app/build' \
-    -czf - . | ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR & tar -xzf -"
+echo "==> [1/4] 同步 GitHub"
+[ -z "$(git status --porcelain)" ] || { echo "有未提交的改动，请先 git commit"; exit 1; }
+git fetch origin -q
+AHEAD="$(git rev-list --count origin/main..HEAD)"
+if [ "$AHEAD" != "0" ]; then echo "    推送 $AHEAD 个本地提交..."; git push origin main; fi
 
-echo "==> [2/4] 安装 JS 依赖（npm ci，锁文件未变时会很快）"
-ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR & npm ci --no-audit --no-fund --loglevel=error"
+echo "==> [2/4] 构建机 拉取代码 + 增量安装 JS 依赖"
+ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR & git pull --ff-only origin main & npm install --no-audit --no-fund --loglevel=error"
 
-echo "==> [3/4] gradlew $GRADLE_TASK（首次约 25 分钟，增量约几分钟）"
+echo "==> [3/4] gradlew $GRADLE_TASK"
 ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR\\android & gradlew.bat $GRADLE_TASK --console=plain"
 
 echo "==> [4/4] 取回 APK"

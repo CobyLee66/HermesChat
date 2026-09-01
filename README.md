@@ -117,14 +117,15 @@ node scripts/harness.mjs  # 端到端打本机 127.0.0.1:9119 的 live dashboard
 
 构建机（Windows，`~/.ssh/config` 别名 `构建机`）已配好全部工具链：Node 26 / JDK 21 / Android SDK（platforms android-36 + android-37.0、build-tools 37.0.0、ndk 27.1.12297006）、Maven 阿里云镜像（`C:\Users\Public\.gradle\init.d\mirror.gradle`，直连 Maven Central 会被断）。
 
-Mac 上一键操作：
+代码同步走 GitHub（私有仓库 `CobyLee66/HermesMobile`）：Mac 推送，构建机 拉取。Mac 上一键操作：
 
 ```bash
-scripts/build-android.sh [release|debug]   # 同步工程 -> 构建机 构建 -> APK 取回 dist/
+git add -A && git commit -m "..."        # 先提交改动
+scripts/build-android.sh [release|debug]   # 推送 -> 构建机 git pull -> 构建 -> APK 取回 dist/
 scripts/install-android.sh [apk] [序列号]   # 经 构建机 adb 安装到手机（USB 或无线调试）
 ```
 
-手动构建（在 构建机 上）：`cd C:\HermesMobile\android && gradlew.bat assembleRelease`。
+在 构建机 上手动：`cd C:\HermesMobile && git pull && cd android && gradlew.bat assembleRelease`。
 
 构建报错先修 `android/app/src/main/java/com/hermesmobile/ssh/`（`docs/ssh-module.md` §6 存疑点已于首次构建验证通过）。
 
