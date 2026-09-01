@@ -15,10 +15,15 @@ import {Colors} from '../components/theme';
 import {useChatStore} from '../store/chat';
 import {useProfilesStore} from '../store/profiles';
 import {useSessionsStore} from '../store/sessions';
+import type {SessionListRow} from '../rpc/types';
 import type {RootStackParamList} from '../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'SessionList'>;
 type Rt = RouteProp<RootStackParamList, 'SessionList'>;
+
+// zustand 选择器必须返回稳定引用：`?? []` 每次新建数组会让
+// useSyncExternalStore 认为 store 一直在变 → 无限重渲染崩溃
+const EMPTY_SESSIONS: SessionListRow[] = [];
 
 function formatTime(ts: number): string {
   if (!ts) {
@@ -40,7 +45,7 @@ export function SessionListScreen() {
     s.list.find(p => p.name === profile),
   );
   const avatarUri = useProfilesStore(s => s.avatars[profile]);
-  const sessions = useSessionsStore(s => s.byProfile[profile] ?? []);
+  const sessions = useSessionsStore(s => s.byProfile[profile] ?? EMPTY_SESSIONS);
   const {refresh, remove, create, resume} = useSessionsStore();
   const attach = useChatStore(s => s.attach);
 
