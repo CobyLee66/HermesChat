@@ -55,6 +55,7 @@ class HermesSshModule(private val reactContext: ReactApplicationContext) :
 
   companion object {
     const val NAME = "HermesSsh"
+    private const val TAG = "HermesSsh"
 
     private const val EVENT_STDOUT = "HermesSsh:stdout:"
     private const val EVENT_EXIT = "HermesSsh:exit:"
@@ -124,6 +125,7 @@ class HermesSshModule(private val reactContext: ReactApplicationContext) :
     submit(promise) {
       stateLock.lock()
       val jsch = JSch() // 提到 try 外：catch 里做 Auth fail 诊断要用
+      JSch.setLogger(JschLogcatLogger) // JSch 内部握手/认证日志 → logcat（tag: HermesSsh-Jsch）
       try {
         // 重复连接冲突：先静默断开旧会话（不触发 HermesSsh:disconnect）
         intentionalDisconnect = true
@@ -151,6 +153,7 @@ class HermesSshModule(private val reactContext: ReactApplicationContext) :
             passphrase?.toByteArray(Charsets.UTF_8)
           )
         }
+        android.util.Log.i(TAG, "connect host=$host port=$port user=$username hasPassword=${password != null} identities=[${identitySummary(jsch)}]")
 
         val newSession = jsch.getSession(username, host, port)
         if (password != null) {
@@ -178,12 +181,14 @@ class HermesSshModule(private val reactContext: ReactApplicationContext) :
         disconnectLocked()
         // Auth fail 时附上已加载密钥的指纹/算法，方便和服务端 authorized_keys 对照
         val msg = e.message ?: "connect failed"
+        android.util.Log.e(TAG, "connect failed: $msg", e)
+        val where = "${config.getStringOrNull("username")}@${config.getStringOrNull("host")}:${config.getIntOrNull("port") ?: 22}"
         val detail = if (msg.contains("Auth fail")) {
           val ids = runCatching { identitySummary(jsch) }.getOrDefault("读取失败")
-          "$msg | 已加载密钥: ${ids.ifEmpty { "无（私钥未成功解析）" }}" +
+          "$msg | 用户: $where | 已加载密钥: ${ids.ifEmpty { "无（私钥未成功解析）" }}" +
             " | 请核对: 1) 用户名/端口 2) 密钥指纹是否与服务端 authorized_keys 一致"
         } else {
-          msg
+          "$msg | $where"
         }
         promise.reject(E_CONNECT_FAILED, detail, e)
       } finally {
@@ -567,6 +572,23 @@ private fun identitySummary(jsch: JSch): String {
       )
     } ?: "no-pubkey"
     "${id.name}[${id.algName} $fp${if (id.isEncrypted) " encrypted" else ""}]"
+  }
+}
+
+/** JSch 内部日志桥到 logcat：排查认证/握手问题的第一手现场。 */
+private object JschLogcatLogger : com.jcraft.jsch.Logger {
+  override fun isEnabled(level: Int): Boolean = true
+  override fun log(level: Int, message: String?) {
+    android.util.Log.println(
+      when (level) {
+        com.jcraft.jsch.Logger.DEBUG -> android.util.Log.DEBUG
+        com.jcraft.jsch.Logger.INFO -> android.util.Log.INFO
+        com.jcraft.jsch.Logger.WARN -> android.util.Log.WARN
+        else -> android.util.Log.ERROR
+      },
+      "HermesSsh-Jsch",
+      message ?: "",
+    )
   }
 }
 

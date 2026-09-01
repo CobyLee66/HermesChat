@@ -115,6 +115,9 @@ dependencies {
 
     // HermesSsh 原生模块（ssh/ 包）：mwiede 维护分支的 JSch，无其他传递依赖（全部 optional）
     implementation("com.github.mwiede:jsch:0.2.18")
+    // JSch 的 jce.SignatureEd25519 需要 Java15+（Android 不可用）；bc.SignatureEd25519 需要
+    // BouncyCastle。显式带上 bcprov，让 ed25519 私钥签名在 Android 上有可用实现。
+    implementation("org.bouncycastle:bcprov-jdk18on:1.81")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
