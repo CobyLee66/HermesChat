@@ -3,12 +3,14 @@
  * 每个会话一个实例。所有 apply* 之后 items 数组换新引用（配合 zustand/FlatList）。
  */
 
+import {parseMessageText} from './references';
 import type {
   ApprovalCardItem,
   ApprovalRequestPayload,
   AssistantBlock,
   AssistantMsg,
   ErrorPayload,
+  ImageRef,
   MessageCompletePayload,
   MessageDeltaPayload,
   MessageInterimPayload,
@@ -73,11 +75,23 @@ export class TimelineAggregator {
         continue;
       }
       if (m.role === 'user') {
-        const text = (m.text ?? '').trim();
-        if (!text) {
+        // 历史文本里可能带 @image:/@file: 指令行和内嵌 data URL（图片 turn）
+        const parsed = parseMessageText(m.text ?? '');
+        if (
+          !parsed.text &&
+          parsed.images.length === 0 &&
+          parsed.files.length === 0
+        ) {
           continue;
         }
-        this.push({kind: 'user', id: nextId('u'), text, timestamp: m.timestamp});
+        this.push({
+          kind: 'user',
+          id: nextId('u'),
+          text: parsed.text,
+          timestamp: m.timestamp,
+          images: parsed.images,
+          files: parsed.files,
+        });
       } else if (m.role === 'assistant') {
         const blocks: AssistantBlock[] = [];
         const reasoning =
@@ -85,9 +99,15 @@ export class TimelineAggregator {
         if (reasoning) {
           blocks.push({type: 'thinking', text: reasoning});
         }
-        const text = m.text ?? '';
-        if (text.trim()) {
-          blocks.push({type: 'text', text});
+        const parsed = parseMessageText(m.text ?? '');
+        if (parsed.text) {
+          blocks.push({type: 'text', text: parsed.text});
+        }
+        for (const image of parsed.images) {
+          blocks.push({type: 'image', image});
+        }
+        for (const file of parsed.files) {
+          blocks.push({type: 'file', file});
         }
         if (blocks.length === 0) {
           continue;
@@ -280,7 +300,7 @@ export class TimelineAggregator {
       this.push({
         kind: 'assistant',
         id: nextId('a'),
-        blocks,
+        blocks: this.extractMediaBlocks(blocks),
         streaming: false,
       });
       return;
@@ -303,10 +323,41 @@ export class TimelineAggregator {
     ) {
       msg.blocks.unshift({type: 'thinking', text: p.reasoning});
     }
+    // 文本块里的 @image:/@file: 指令与内嵌图片在收尾时一次性提取
+    // （流式中途不解析，避免吃到半截指令）
+    msg.blocks = this.extractMediaBlocks(msg.blocks);
     msg.streaming = false;
     this.sealedText = false;
     this.touchCurrent();
     this.current = null;
+  }
+
+  /** 把 text 块里的图片/文件引用拆成独立块（原位展开，保持顺序）。 */
+  private extractMediaBlocks(blocks: AssistantBlock[]): AssistantBlock[] {
+    let hasMedia = false;
+    const out: AssistantBlock[] = [];
+    for (const b of blocks) {
+      if (b.type !== 'text') {
+        out.push(b);
+        continue;
+      }
+      const parsed = parseMessageText(b.text);
+      if (parsed.images.length === 0 && parsed.files.length === 0) {
+        out.push(b);
+        continue;
+      }
+      hasMedia = true;
+      if (parsed.text) {
+        out.push({type: 'text', text: parsed.text});
+      }
+      for (const image of parsed.images) {
+        out.push({type: 'image', image});
+      }
+      for (const file of parsed.files) {
+        out.push({type: 'file', file});
+      }
+    }
+    return hasMedia ? out : blocks;
   }
 
   private onTextDelta(kind: 'thinking' | 'reasoning', p: TextDeltaPayload) {
@@ -445,8 +496,20 @@ export class TimelineAggregator {
 
   // ─── 用户消息（本地回显） ─────────────────────────────────
 
-  appendUserMessage(text: string): UserMsg {
-    const msg: UserMsg = {kind: 'user', id: nextId('u'), text};
+  /**
+   * 追加用户气泡。text 里的 @file:/@image: 指令会被剥离成卡片/图片；
+   * images 为已通过 image.attach_bytes 排队到 session 的图片（随本条 prompt
+   * 进上下文，本地直接回显缩略图，不等 resume 的历史投影）。
+   */
+  appendUserMessage(text: string, images: ImageRef[] = []): UserMsg {
+    const parsed = parseMessageText(text);
+    const msg: UserMsg = {
+      kind: 'user',
+      id: nextId('u'),
+      text: parsed.text,
+      images: [...images, ...parsed.images],
+      files: parsed.files,
+    };
     this.push(msg);
     return msg;
   }

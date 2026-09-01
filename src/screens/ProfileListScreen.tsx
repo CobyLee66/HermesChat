@@ -112,6 +112,14 @@ export function ProfileListScreen() {
                     `${item.skill_count ?? 0} 个技能`}
                 </Text>
               </View>
+              <TouchableOpacity
+                style={styles.editBtn}
+                hitSlop={8}
+                onPress={() =>
+                  navigation.navigate('ProfileEdit', {profile: item.name})
+                }>
+                <Text style={styles.editText}>编辑</Text>
+              </TouchableOpacity>
             </TouchableOpacity>
           )}
         />
@@ -161,5 +169,14 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   preview: {fontSize: 13, color: Colors.textSecondary, marginTop: 3},
+  editBtn: {
+    marginLeft: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+  },
+  editText: {fontSize: 13, color: Colors.textSecondary},
   sep: {height: StyleSheet.hairlineWidth, backgroundColor: Colors.border, marginLeft: 72},
 });

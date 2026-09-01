@@ -17,6 +17,7 @@ import {Colors} from './src/components/theme';
 import {ChatScreen} from './src/screens/ChatScreen';
 import {ConnectionEditScreen} from './src/screens/ConnectionEditScreen';
 import {ConnectionHomeScreen} from './src/screens/ConnectionHomeScreen';
+import {ProfileEditScreen} from './src/screens/ProfileEditScreen';
 import {ProfileListScreen} from './src/screens/ProfileListScreen';
 import {SessionListScreen} from './src/screens/SessionListScreen';
 import {initConnectionEngine} from './src/ssh/SshManager';
@@ -68,6 +69,11 @@ function App() {
             name="ProfileList"
             component={ProfileListScreen}
             options={{title: 'Hermes', headerBackVisible: false}}
+          />
+          <Stack.Screen
+            name="ProfileEdit"
+            component={ProfileEditScreen}
+            options={{title: '编辑资料'}}
           />
           <Stack.Screen name="SessionList" component={SessionListScreen} />
           <Stack.Screen name="Chat" component={ChatScreen} />

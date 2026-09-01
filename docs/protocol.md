@@ -46,6 +46,8 @@
 ### profile / 模型 / 配置
 - `profiles.list` → `{profiles: [{name, path, is_default, model, provider, description, skill_count, last_session, ui_meta?, has_avatar}]}`。**已实测**：返回外层确有 `profiles` 键（保留 `result.profiles ?? result` 兼容即可）；`last_session` 含 `{id,title,preview,started_at,last_active,message_count}` 或 null；本机 profile 均未设 `ui_meta`（昵称兜底顺序：ui_meta.nickname → description → name）。
 - `profiles.get_asset` **已落实**（methods_profiles.py:866 + 实测）：params `{name, asset?="avatar"}` → `{found, mime?, size?, data?}`，`data` 是 `data:<mime>;base64,...` 可直接喂 `<Image source={{uri}}>`；无头像返回 `{found:false}`（**不是错误**，实测 main 即如此）→ 昵称首字符色块兜底。
+- `profiles.configure` **已从源码确认**（methods_profiles.py:577）：params `{name, ...}`，其中 `ui_meta` 为 dict 时**键级合并**进 profile.yaml 的 ui_meta 块——值为 `null` 删除该键；整体 JSON ≤64KB（拒绝大 blob，头像走 set_asset）。昵称 = `profiles.configure {name, ui_meta:{nickname:"..."}}`。结果 `{ok, applied:{ui_meta:true|false,...}}`——分节独立应用，务必检查 `applied.ui_meta`。
+- `profiles.set_asset` **已从源码确认**（methods_profiles.py:780）：params `{name, asset:"avatar", data}`（data URL 或裸 base64）→ `{ok, asset, size}`；删除 `{name, asset:"avatar", clear:true}` → `{ok, asset, size:0, removed}`。限制：PNG/JPEG/WebP（**magic-byte 校验**，不信声明的 mime）、解码后 ≤2MB；落盘为 profile 目录下 `assets/avatar.<ext>`（先清其他扩展名，一个 asset 一份文件）。
 - `model.options` **已实测落实**：→ `{providers: [{slug, name, is_current, is_user_defined, models: string[], total_models, source, authenticated, auth_type, warning, capabilities, featured_models}], model, provider}`。按 provider 分组渲染 `models` 数组即可；注意 `session.info` 里 provider 是 `custom` 而 profiles/model.options 里可能带大小写不同的 `custom:DeepSeek` 形式。
 - 切模型：`config.set` params `{key:"model", value:"<model> [--provider <slug>]", session_id}`（turn 进行中返回 `deferred:true`，defer 到下一 turn；其余字段 `{key,value,warning,confirm_required,confirm_message,scope}`）。读当前：`config.get` params `{key:"model"|"provider"|"full"|..., session_id?}`。
 
@@ -54,9 +56,13 @@
 - `approval.received` params `{session_id, request_id}` → `{acknowledged}`：UI 展示审批卡时回执（desktop 同款做法）。
 - `clarify.respond {request_id, answer}`、`sudo.respond {password}`、`secret.respond {value}`。
 
-### 附件（v2，先留接口）
-- `image.attach_bytes {session_id, content_base64, filename?, ext?}`（远程客户端 base64 上传）。
-- REST：`POST /api/audio/transcribe {data_url(base64), mime_type?, profile?}`（STT）。
+### 附件（M3 已实现，全部从源码确认）
+- `image.attach_bytes {session_id, content_base64, filename?, ext?}`（methods_prompt.py:823）→ `{attached, path, count, remainder:"", text, bytes, name, width?, height?, token_estimate?}`。远程客户端 base64 上传；`content_base64` 接受裸 base64 或 `data:image/...;base64,` 前缀（可含空白），解码后 ≤25MB（`_ATTACH_BYTES_MAX_BYTES`）。**扩展名优先采信 filename 后缀**，其次 magic bytes（PNG/JPEG/GIF/WebP/BMP）——所以客户端重编码成 JPEG 后必须把文件名改成 .jpg。写入 `<profile_home>/images/upload_<ts>_<n>.<ext>` 并进 session 的 `attached_images` 队列，**随下一条 `prompt.submit` 进上下文**；空文本 prompt 也合法（服务端补 "What do you see in this image?"）。错误码：4001 session not found、4015 缺参数、4016 不支持的扩展名、4017 非 base64/空、4018 超 25MB。
+- `image.detach {session_id, path}` → `{detached, count}`：从队列摘除（path 须与 attach 返回的一致）。
+- `file.attach {session_id, path?, data_url?, name?}`（methods_prompt.py:1010）→ `{attached, name, path, ref_path, ref_text, uploaded}`。非图片文件落盘到 session workspace 并返回 `@file:` 引用：`ref_text` 形如 `@file:attachments/…`（含空格时值带引号），**追加到输入框文本末尾**随 prompt 一起发，agent 的文件工具可据引用读取。path 与 data_url 二选一；远程客户端用 data_url（`data:<mime>;base64,…`）。
+- REST `POST /api/audio/transcribe`（web_server.py:4637）：**请求体 JSON `{data_url, mime_type?}`；`profile` 是查询参数**（FastAPI 函数形参，不在 body 模型里——desktop 客户端同时放 query 和 body，真正生效的是 `?profile=`）。header 认证 `X-Hermes-Session-Token`。响应 `{ok:true, transcript, provider?}`；**未检测到语音不是错误**：返回 `{ok:true, transcript:""}`。失败为 HTTP 错误 + `{detail}`（400 非法 payload/非音频/非 base64/空、413 超 25MB、500 转写失败）。m4a（AAC）可用，mime 须 `audio/*`（或 video/webm）。
+- REST 文件下载（渲染消息里的图片）：`GET /api/files/download?path=<gateway 绝对路径>&token=<SESSION_TOKEN>`（web_server.py:2630）——path 须为**绝对路径**（无 locked_root 时）；这是**唯一允许 `?token=` 查询参数认证**的路由（`_QUERY_TOKEN_API_PATHS`，desktop `mediaExternalUrl` 同款），RN `<Image>` 用它。⚠️ **不要用 `/api/files/stream`**：它 `media_only=True`，只放行音视频扩展名（.avi/.flac/.m4a/.mkv/.mov/.mp3/.mp4/.ogg/.opus/.wav/.webm），图片会 415。download 路由同样接受 header 认证，上限 100MB（`_MANAGED_FILE_MAX_BYTES`）。
+- WS 帧上限 384MB（`_DESKTOP_ATTACHMENT_WS_MAX_BYTES`）——理论上限而已，客户端应先压缩再传（App：图片长边 2048 JPEG 80，头像 512×512 JPEG 80）。
 
 ## 3. 服务端事件（`params.type` → `params.payload`）
 
@@ -74,6 +80,11 @@
 - 存储为 OpenAI chat 格式：`{"role":"user|assistant|tool|system","content":<str|parts>,"tool_calls":[...],"timestamp","_row_id","display_kind","reasoning"?...}`。
 - 客户端投影：`{role, text, timestamp?, row_id?, display_kind?, display_metadata?, reasoning?}`；工具行 `{role:"tool", name, context(80字预览), args?}`。
 - 图片消息 content parts：`[{"type":"text","text":...},{"type":"image_url","image_url":{"url":...}}]`；持久化文本为 `@image:<path>` 指令（渲染端还原）。
+- **图片/文件引用的持久化与还原**（已从源码确认，M3 按此实现）：
+  - 带图用户消息持久化时，文本部分尾部追加 `@image:<path>` 指令行（每行一张，caption 在前——server.py `_build_persist_message_with_image_refs`；路径含空格时按 `format_reference_value` 加反引号/引号）。
+  - 原生视觉 turn 的 content parts 经 `_coerce_message_text` 拍平成 text 时，每个 image part 的 URL（多为 `data:image/…;base64,…`）以**独立行**追加——投影 text 里会同时出现 `@image:` 指令行和内嵌 data URL 行，两者都要还原成图片（desktop 参考：`apps/desktop/src/components/assistant-ui/directive-text.tsx` + `src/lib/embedded-images.ts`；指令正则 `/@(file|folder|url|image|tool|line|terminal|session):(`…`|"…"|'…'|\S+)/`）。
+  - `@file:<ref>` 同理（file.attach 写入历史的引用），渲染成文件卡片即可。
+  - App 端实现：`src/rpc/references.ts` 的 `parseMessageText`（ aggregator hydrate / message.complete / 本地回显三处接入）。
 
 ## 5. 本机联调环境
 

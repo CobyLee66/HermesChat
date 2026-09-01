@@ -14,7 +14,7 @@ React Native (TS) 手机 App（Android 优先，iOS 后续），通过 **App 内
 - 模型切换：底部弹出选择器（`model.options` + `config.set`）
 - 连接持久化：SSH 断线自动重连 + WS 断线 `session.resume` 恢复
 
-**v2 预留**：图片（`image.attach_bytes`）、文件、语音（`/api/audio/transcribe` STT + 手机录音）。
+**v2 预留**（已于 M3 提前实现）：图片（`image.attach_bytes`）、文件（`file.attach`）、语音（`/api/audio/transcribe` STT + 手机录音）、profile 昵称/头像编辑（`profiles.configure` ui_meta / `profiles.set_asset`）。
 
 **构建策略（用户决定）**：不在本 Mac 装 Android/iOS 工具链；Android 构建在远端 构建机 上进行。本地只做 JS/TS 开发 + Node harness 验证 + jest/tsc 静态验证。iOS 暂缓。
 
@@ -65,7 +65,7 @@ React Native (TS) 手机 App（Android 优先，iOS 后续），通过 **App 内
 - **M0**：工程初始化 ✓；Node harness 跑通 `session.create→prompt.submit→事件流→session.close`；RpcClient+聚合器 jest 测试；最小聊天 UI 代码完成（本地无法构建，交 构建机 构建验证）；原生 SSH 模块 Android 代码完成（不可本地编译，静态审查）。
 - **M1**：多 profile 多会话完整 UI（头像/昵称/会话管理）、thinking/工具卡片/错误渲染。
 - **M2**：审批按钮组、模型切换、会话重开、中断、连接状态条、断线重连真机验证。
-- **M3**：图片/文件/语音。
+- **M3**：图片/文件/语音。代码完成（2026-09-02）：聊天"＋"附件面板（相册图片多选→压缩上传→待发横条、文件→@file: 引用入输入框、语音录音→/api/audio/transcribe→文本入输入框）；图片/文件消息渲染（`@image:`/`@file:` 指令 + data URL 还原，走 /api/files/download?token=）；profile 昵称/头像编辑页。本地 tsc/lint/jest（69 测试）全绿；真机验证交 构建机。
 
 ## 7. 风险
 

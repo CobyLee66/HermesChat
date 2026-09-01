@@ -2,9 +2,11 @@ import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
   Alert,
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -13,14 +15,24 @@ import {
 } from 'react-native';
 import {useNavigation, useRoute, type RouteProp} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {
+  pick,
+  keepLocalCopy,
+  types,
+  errorCodes,
+  isErrorWithCode,
+} from '@react-native-documents/picker';
 
 import {ApprovalCard} from '../components/ApprovalCard';
 import {Avatar} from '../components/Avatar';
 import {Bubble} from '../components/Bubble';
+import {ChatImage} from '../components/ChatImage';
+import {FileRefCard} from '../components/FileRefCard';
 import {ModelPicker} from '../components/ModelPicker';
 import {Colors} from '../components/theme';
 import {StreamCursor, ThinkingBlock} from '../components/ThinkingBlock';
 import {ToolCallCard} from '../components/ToolCallCard';
+import {VoiceButton} from '../components/VoiceButton';
 import type {AssistantMsg, TimelineItem} from '../rpc/types';
 import {useChatStore} from '../store/chat';
 import {useConnectionStore} from '../store/connection';
@@ -37,8 +49,16 @@ export function ChatScreen() {
   const {sessionId, profile, title} = route.params;
 
   const chat = useChatStore(s => s.bySession[sessionId]);
-  const {sendPrompt, interrupt, respondApproval, switchModel, fetchModelOptions} =
-    useChatStore();
+  const {
+    sendPrompt,
+    interrupt,
+    respondApproval,
+    switchModel,
+    fetchModelOptions,
+    attachImages,
+    removeAttachment,
+    attachFile,
+  } = useChatStore();
   const detach = useChatStore(s => s.detach);
   const createSession = useSessionsStore(s => s.create);
   const attach = useChatStore(s => s.attach);
@@ -49,12 +69,18 @@ export function ChatScreen() {
   const [menuVisible, setMenuVisible] = useState(false);
   const [modelPickerVisible, setModelPickerVisible] = useState(false);
   const [infoVisible, setInfoVisible] = useState(false);
+  const [attachPanelOpen, setAttachPanelOpen] = useState(false);
+  const [attaching, setAttaching] = useState(false);
 
   const items = useMemo(() => chat?.items ?? [], [chat?.items]);
   const invertedItems = useMemo(() => [...items].reverse(), [items]);
   const busy = chat?.busy ?? false;
   const info = chat?.info ?? null;
   const status = chat?.status ?? null;
+  const pending = useMemo(
+    () => chat?.pendingAttachments ?? [],
+    [chat?.pendingAttachments],
+  );
 
   useEffect(() => {
     navigation.setOptions({
@@ -72,6 +98,92 @@ export function ChatScreen() {
     setInput('');
     sendPrompt(sessionId, text);
   }, [input, sendPrompt, sessionId]);
+
+  /** 附件面板：相册图片（多选 → 压缩 → image.attach_bytes → 待发横条）。 */
+  const onPickImages = useCallback(async () => {
+    try {
+      const results = await pick({
+        type: [types.images],
+        allowMultiSelection: true,
+      });
+      if (!results || results.length === 0) {
+        return;
+      }
+      setAttaching(true);
+      // content:// URI 先落地到沙盒，RNFS/image-resizer 才能读
+      const files: {uri: string; name?: string | null}[] = [];
+      let idx = 0;
+      for (const r of results) {
+        idx += 1;
+        const [copy] = await keepLocalCopy({
+          files: [
+            {uri: r.uri, fileName: r.name ?? `image_${Date.now()}_${idx}.jpg`},
+          ],
+          destination: 'cachesDirectory',
+        });
+        if (copy.status === 'success') {
+          files.push({uri: copy.localUri, name: r.name});
+        }
+      }
+      if (files.length > 0) {
+        await attachImages(sessionId, files);
+      }
+      setAttachPanelOpen(false);
+    } catch (e) {
+      if (isErrorWithCode(e) && e.code === errorCodes.OPERATION_CANCELED) {
+        return;
+      }
+      Alert.alert('选择图片失败', e instanceof Error ? e.message : String(e));
+    } finally {
+      setAttaching(false);
+    }
+  }, [attachImages, sessionId]);
+
+  /** 附件面板：文件（单选 → file.attach → @file: 引用追加到输入框）。 */
+  const onPickFile = useCallback(async () => {
+    try {
+      const [res] = await pick({type: [types.allFiles]});
+      if (!res) {
+        return;
+      }
+      setAttaching(true);
+      const [copy] = await keepLocalCopy({
+        files: [{uri: res.uri, fileName: res.name ?? 'file'}],
+        destination: 'cachesDirectory',
+      });
+      if (copy.status !== 'success') {
+        throw new Error(copy.copyError);
+      }
+      const refText = await attachFile(sessionId, {
+        uri: copy.localUri,
+        name: res.name,
+        mimeType: res.type,
+      });
+      if (refText) {
+        setInput(v => {
+          const base = v.trimEnd();
+          return base ? `${base} ${refText}` : refText;
+        });
+      }
+      setAttachPanelOpen(false);
+    } catch (e) {
+      if (isErrorWithCode(e) && e.code === errorCodes.OPERATION_CANCELED) {
+        return;
+      }
+      Alert.alert('添加文件失败', e instanceof Error ? e.message : String(e));
+    } finally {
+      setAttaching(false);
+    }
+  }, [attachFile, sessionId]);
+
+  /** 语音识别文本：追加到输入框末尾（可再编辑）。 */
+  const onVoiceText = useCallback((text: string) => {
+    setInput(v => {
+      const base = v.trimEnd();
+      return base ? `${base} ${text}` : text;
+    });
+    setAttachPanelOpen(false);
+  }, []);
 
   const onResetSession = useCallback(() => {
     Alert.alert('重开会话', '将放弃当前上下文，开启全新会话。确定吗？', [
@@ -109,7 +221,23 @@ export function ChatScreen() {
     ({item}: {item: TimelineItem}) => {
       switch (item.kind) {
         case 'user':
-          return <Bubble text={item.text} isUser />;
+          return (
+            <View style={styles.userCol}>
+              {item.images && item.images.length > 0 ? (
+                <View style={styles.userImages}>
+                  {item.images.map((img, i) => (
+                    <ChatImage key={i} image={img} />
+                  ))}
+                </View>
+              ) : null}
+              {item.files?.map((f, i) => (
+                <View key={i} style={styles.userFile}>
+                  <FileRefCard file={f} isUser />
+                </View>
+              ))}
+              {item.text ? <Bubble text={item.text} isUser /> : null}
+            </View>
+          );
         case 'system':
           return (
             <View
@@ -181,7 +309,34 @@ export function ChatScreen() {
           </Text>
         </View>
       ) : null}
+      {pending.length > 0 ? (
+        <ScrollView
+          horizontal
+          style={styles.pendingStrip}
+          contentContainerStyle={styles.pendingStripContent}
+          keyboardShouldPersistTaps="handled">
+          {pending.map(a => (
+            <View key={a.path} style={styles.pendingItem}>
+              <Image source={{uri: a.localUri}} style={styles.pendingThumb} />
+              <TouchableOpacity
+                style={styles.pendingRemove}
+                hitSlop={8}
+                onPress={() => removeAttachment(sessionId, a.path)}>
+                <Text style={styles.pendingRemoveText}>×</Text>
+              </TouchableOpacity>
+            </View>
+          ))}
+        </ScrollView>
+      ) : null}
       <View style={styles.inputBar}>
+        <TouchableOpacity
+          style={styles.plusBtn}
+          onPress={() => setAttachPanelOpen(v => !v)}
+          disabled={connState !== 'ready'}
+          activeOpacity={0.7}
+          hitSlop={6}>
+          <Text style={styles.plusText}>{attachPanelOpen ? '−' : '＋'}</Text>
+        </TouchableOpacity>
         <TextInput
           style={styles.input}
           value={input}
@@ -202,15 +357,45 @@ export function ChatScreen() {
           <TouchableOpacity
             style={[
               styles.sendBtn,
-              (!input.trim() || connState !== 'ready') && styles.sendBtnDisabled,
+              ((!input.trim() && pending.length === 0) ||
+                connState !== 'ready') &&
+                styles.sendBtnDisabled,
             ]}
-            disabled={!input.trim() || connState !== 'ready'}
+            disabled={
+              (!input.trim() && pending.length === 0) || connState !== 'ready'
+            }
             onPress={onSend}
             activeOpacity={0.8}>
             <Text style={styles.sendText}>发送</Text>
           </TouchableOpacity>
         )}
       </View>
+      {attachPanelOpen ? (
+        <View style={styles.attachPanel}>
+          <TouchableOpacity
+            style={styles.attachTile}
+            onPress={onPickImages}
+            disabled={attaching}
+            activeOpacity={0.7}>
+            <Text style={styles.attachIcon}>🖼</Text>
+            <Text style={styles.attachLabel}>相册图片</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.attachTile}
+            onPress={onPickFile}
+            disabled={attaching}
+            activeOpacity={0.7}>
+            <Text style={styles.attachIcon}>📎</Text>
+            <Text style={styles.attachLabel}>文件</Text>
+          </TouchableOpacity>
+          <VoiceButton profile={profile} onText={onVoiceText} />
+        </View>
+      ) : null}
+      {attaching ? (
+        <View style={styles.attachingBar}>
+          <Text style={styles.attachingText}>附件上传中…</Text>
+        </View>
+      ) : null}
 
       {/* 顶栏菜单 */}
       <Modal
@@ -325,6 +510,10 @@ const AssistantRow = React.memo(function AssistantRow({
               return <ThinkingBlock key={i} text={b.text} variant="reasoning" />;
             case 'tool':
               return <ToolCallCard key={b.tool.toolId} tool={b.tool} />;
+            case 'image':
+              return <ChatImage key={i} image={b.image} />;
+            case 'file':
+              return <FileRefCard key={i} file={b.file} />;
             case 'error':
               return (
                 <View key={i} style={styles.errorBar}>
@@ -396,6 +585,68 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: Colors.border,
   },
+  plusBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  plusText: {fontSize: 20, color: Colors.textSecondary, lineHeight: 24},
+  pendingStrip: {
+    backgroundColor: Colors.card,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
+  },
+  pendingStripContent: {paddingHorizontal: 10, paddingVertical: 8},
+  pendingItem: {marginRight: 8},
+  pendingThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 8,
+    backgroundColor: Colors.border,
+  },
+  pendingRemove: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pendingRemoveText: {color: '#FFF', fontSize: 12, lineHeight: 14},
+  attachPanel: {
+    flexDirection: 'row',
+    backgroundColor: Colors.card,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
+  },
+  attachTile: {alignItems: 'center', width: 88, paddingVertical: 6},
+  attachIcon: {fontSize: 26, marginBottom: 4},
+  attachLabel: {fontSize: 12, color: Colors.text},
+  attachingBar: {
+    backgroundColor: Colors.card,
+    paddingVertical: 4,
+    alignItems: 'center',
+  },
+  attachingText: {fontSize: 12, color: Colors.textSecondary},
+  userCol: {alignItems: 'flex-end'},
+  userImages: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 12,
+    gap: 6,
+  },
+  userFile: {paddingHorizontal: 12, alignSelf: 'flex-end'},
   input: {
     flex: 1,
     minHeight: 38,

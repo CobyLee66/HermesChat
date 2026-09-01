@@ -243,13 +243,83 @@ export interface SessionListRow {
   source: string;
 }
 
+// ─── 附件 / profile 编辑 RPC 结果 ──────────────────────────────
+
+/** image.attach_bytes / image.attach 结果。 */
+export interface ImageAttachResult {
+  attached: boolean;
+  /** gateway 侧绝对路径（渲染走 /api/files/download） */
+  path: string;
+  /** 该 session 当前已排队图片数 */
+  count: number;
+  name?: string;
+  width?: number;
+  height?: number;
+  bytes?: number;
+  text?: string;
+}
+
+/** image.detach 结果。 */
+export interface ImageDetachResult {
+  detached: boolean;
+  count: number;
+}
+
+/** file.attach 结果。 */
+export interface FileAttachResult {
+  attached: boolean;
+  name: string;
+  path: string;
+  ref_path: string;
+  /** 追加到输入框的引用文本（@file:…） */
+  ref_text: string;
+  uploaded?: boolean;
+}
+
+/** profiles.configure 结果：分节汇报成功。 */
+export interface ProfilesConfigureResult {
+  ok: boolean;
+  applied?: Record<string, boolean>;
+}
+
+/** profiles.set_asset 结果（clear 时 size=0）。 */
+export interface ProfilesSetAssetResult {
+  ok: boolean;
+  asset: string;
+  size: number;
+  removed?: number;
+}
+
 // ─── TimelineItem（UI 渲染模型） ────────────────────────────────
+
+/**
+ * 消息里的图片引用（见 docs/protocol.md §4）。
+ * - path：gateway 侧绝对路径（持久化文本里的 `@image:<path>` 指令），
+ *   渲染时走 `{httpUrl}/api/files/download?path=…&token=…`。
+ * - uri：可直接渲染的 `data:` URI（image_url content part 经服务端
+ *   `_coerce_message_text` 拍平进 text 后由客户端提取）。
+ */
+export interface ImageRef {
+  path?: string;
+  uri?: string;
+}
+
+/** 消息里的文件引用（`@file:<ref>` 指令）。 */
+export interface FileRef {
+  /** @file: 的原始值（可能带引号时已去除） */
+  ref: string;
+  /** 显示名（路径末段） */
+  name: string;
+}
 
 export interface UserMsg {
   kind: 'user';
   id: string;
+  /** 已剥离 @image:/@file: 指令与内嵌 data URL 的纯文本 */
   text: string;
   timestamp?: number;
+  images?: ImageRef[];
+  files?: FileRef[];
 }
 
 export type AssistantBlock =
@@ -257,6 +327,8 @@ export type AssistantBlock =
   | {type: 'thinking'; text: string}
   | {type: 'reasoning'; text: string}
   | {type: 'tool'; tool: ToolCallBlock}
+  | {type: 'image'; image: ImageRef}
+  | {type: 'file'; file: FileRef}
   | {type: 'error'; text: string};
 
 export interface ToolCallBlock {

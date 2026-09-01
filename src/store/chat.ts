@@ -9,11 +9,23 @@ import {TimelineAggregator} from '../rpc/aggregator';
 import {getRpc} from '../rpc/runtime';
 import type {
   ApprovalChoice,
+  FileAttachResult,
+  ImageAttachResult,
   ModelOptionsResult,
   ProjectedMessage,
   SessionInfoPayload,
   TimelineItem,
 } from '../rpc/types';
+import {prepareImageForUpload, readFileAsDataUrl} from '../utils/media';
+
+/** 已 attach 到 session、待下一条 prompt 带上的图片。 */
+export interface PendingAttachment {
+  /** gateway 侧绝对路径（image.attach_bytes 返回） */
+  path: string;
+  /** 压缩产物的本地 file:// URI（待发横条预览） */
+  localUri: string;
+  name: string;
+}
 
 export interface SessionChatState {
   items: TimelineItem[];
@@ -28,6 +40,8 @@ export interface SessionChatState {
   storedSessionId: string;
   /** 重连后 resume 失败标记（UI 提示重进） */
   resumeFailed?: boolean;
+  /** 待发送图片（已上传到 gateway，随下一条 prompt 进上下文） */
+  pendingAttachments: PendingAttachment[];
 }
 
 const EMPTY: SessionChatState = {
@@ -37,6 +51,7 @@ const EMPTY: SessionChatState = {
   busy: false,
   profile: '',
   storedSessionId: '',
+  pendingAttachments: [],
 };
 
 const aggregators = new Map<string, TimelineAggregator>();
@@ -75,6 +90,21 @@ interface ChatStore {
   markResumeFailed(sid: string): void;
   sendPrompt(sid: string, text: string): Promise<void>;
   interrupt(sid: string): Promise<void>;
+  /**
+   * 选图 → 压缩（长边 2048 JPEG 80）→ image.attach_bytes 逐张上传 → 进待发横条。
+   * 单张失败在时间线记错误条，不影响其余。
+   */
+  attachImages(
+    sid: string,
+    picks: {uri: string; name?: string | null}[],
+  ): Promise<void>;
+  /** 从待发横条移除（同时 image.detach 从 session 队列里摘除）。 */
+  removeAttachment(sid: string, path: string): Promise<void>;
+  /** 文件上传（file.attach），返回追加到输入框的 @file: 引用文本。 */
+  attachFile(
+    sid: string,
+    file: {uri: string; name?: string | null; mimeType?: string | null},
+  ): Promise<string>;
   respondApproval(
     sid: string,
     requestId: string,
@@ -198,12 +228,20 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     async sendPrompt(sid, text) {
       const trimmed = text.trim();
-      if (!trimmed) {
+      const pending =
+        get().bySession[sid]?.pendingAttachments ?? EMPTY.pendingAttachments;
+      // 有待发图片时允许空文本（服务端会补 "What do you see in this image?"）
+      if (!trimmed && pending.length === 0) {
         return;
       }
       const agg = aggFor(sid);
-      agg.appendUserMessage(trimmed);
-      snapshot(sid, {busy: true});
+      agg.appendUserMessage(
+        trimmed,
+        pending.map(a => ({path: a.path})),
+      );
+      // 发送即清空待发横条；若 submit 失败图片仍排在服务端队列里，
+      // 会随下一条 prompt 进上下文（时间线里有错误条提示）。
+      snapshot(sid, {busy: true, pendingAttachments: []});
       try {
         await getRpc().call('prompt.submit', {session_id: sid, text: trimmed});
       } catch (e) {
@@ -212,6 +250,77 @@ export const useChatStore = create<ChatStore>((set, get) => {
         });
         snapshot(sid, {busy: false});
       }
+    },
+
+    async attachImages(sid, picks) {
+      const rpc = getRpc();
+      for (const p of picks) {
+        try {
+          const prep = await prepareImageForUpload(p.uri, p.name);
+          const res = await rpc.call<ImageAttachResult>('image.attach_bytes', {
+            session_id: sid,
+            content_base64: prep.base64,
+            filename: prep.filename,
+          });
+          const item: PendingAttachment = {
+            path: res.path,
+            localUri: prep.localUri,
+            name: res.name ?? prep.filename,
+          };
+          set(s => {
+            const prev = s.bySession[sid] ?? EMPTY;
+            return {
+              bySession: {
+                ...s.bySession,
+                [sid]: {
+                  ...prev,
+                  pendingAttachments: [...prev.pendingAttachments, item],
+                },
+              },
+            };
+          });
+        } catch (e) {
+          aggFor(sid).applyEvent('error', {
+            message: `图片上传失败: ${e instanceof Error ? e.message : String(e)}`,
+          });
+          snapshot(sid);
+        }
+      }
+    },
+
+    async removeAttachment(sid, path) {
+      set(s => {
+        const prev = s.bySession[sid] ?? EMPTY;
+        return {
+          bySession: {
+            ...s.bySession,
+            [sid]: {
+              ...prev,
+              pendingAttachments: prev.pendingAttachments.filter(
+                a => a.path !== path,
+              ),
+            },
+          },
+        };
+      });
+      try {
+        await getRpc().call('image.detach', {session_id: sid, path});
+      } catch (e) {
+        aggFor(sid).applyEvent('error', {
+          message: `移除图片失败: ${e instanceof Error ? e.message : String(e)}`,
+        });
+        snapshot(sid);
+      }
+    },
+
+    async attachFile(sid, file) {
+      const dataUrl = await readFileAsDataUrl(file.uri, file.mimeType);
+      const res = await getRpc().call<FileAttachResult>('file.attach', {
+        session_id: sid,
+        data_url: dataUrl,
+        name: file.name ?? '',
+      });
+      return res.ref_text ?? '';
     },
 
     async interrupt(sid) {

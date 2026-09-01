@@ -265,3 +265,92 @@ describe('TimelineAggregator 本地回显', () => {
     expect(item.text).toBe('测试');
   });
 });
+
+describe('TimelineAggregator 图片/文件引用解析', () => {
+  const DATA_URL = `data:image/png;base64,${'A'.repeat(80)}`;
+
+  it('hydrate：user 文本里的 @image: 指令行剥离成 images', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([
+      {
+        role: 'user',
+        text: '看看这张\n@image:/home/u/images/upload_1.png\n@image:`/tmp/with space/2.jpg`',
+      },
+    ]);
+    const msg = agg.getItems()[0] as UserMsg;
+    expect(msg.kind).toBe('user');
+    expect(msg.text).toBe('看看这张');
+    expect(msg.images).toEqual([
+      {path: '/home/u/images/upload_1.png'},
+      {path: '/tmp/with space/2.jpg'},
+    ]);
+  });
+
+  it('hydrate：纯图片消息（无文本）也保留', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([{role: 'user', text: '@image:/p/1.png'}]);
+    const msg = agg.getItems()[0] as UserMsg;
+    expect(msg.text).toBe('');
+    expect(msg.images).toEqual([{path: '/p/1.png'}]);
+  });
+
+  it('hydrate：image_url content part 拍平成的 data URL 行还原成图片', () => {
+    const agg = new TimelineAggregator();
+    // 服务端 _coerce_message_text 把 image parts 的 url 以独立行追加进 text
+    agg.hydrate([{role: 'user', text: `拍的图\n${DATA_URL}`}]);
+    const msg = agg.getItems()[0] as UserMsg;
+    expect(msg.text).toBe('拍的图');
+    expect(msg.images).toEqual([{uri: DATA_URL}]);
+  });
+
+  it('hydrate：assistant 文本里的 @image:/@file: 拆成独立块', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([
+      {
+        role: 'assistant',
+        text: '截图好了\n@image:/tmp/shot.png\n@file:attachments/报告.pdf',
+      },
+    ]);
+    const msg = agg.getItems()[0] as AssistantMsg;
+    expect(msg.blocks).toEqual([
+      {type: 'text', text: '截图好了'},
+      {type: 'image', image: {path: '/tmp/shot.png'}},
+      {
+        type: 'file',
+        file: {ref: 'attachments/报告.pdf', name: '报告.pdf'},
+      },
+    ]);
+  });
+
+  it('live：message.complete 时把流式文本里的 @image: 拆成图片块', () => {
+    const agg = new TimelineAggregator();
+    agg.applyEvent('message.start', {});
+    agg.applyEvent('message.delta', {text: '图在这'});
+    agg.applyEvent('message.delta', {text: '\n@image:/tmp/a.png'});
+    agg.applyEvent('message.complete', {text: '图在这\n@image:/tmp/a.png'});
+    const msg = lastAssistant(agg);
+    expect(msg.blocks).toEqual([
+      {type: 'text', text: '图在这'},
+      {type: 'image', image: {path: '/tmp/a.png'}},
+    ]);
+  });
+
+  it('live：无引用的文本 complete 后保持单 text 块（不引入多余拆分）', () => {
+    const agg = new TimelineAggregator();
+    agg.applyEvent('message.start', {});
+    agg.applyEvent('message.delta', {text: '普通回复'});
+    agg.applyEvent('message.complete', {text: '普通回复'});
+    const msg = lastAssistant(agg);
+    expect(msg.blocks).toEqual([{type: 'text', text: '普通回复'}]);
+  });
+
+  it('appendUserMessage 带待发图片 + 文本里的 @file: 引用', () => {
+    const agg = new TimelineAggregator();
+    const msg = agg.appendUserMessage('分析 @file:attachments/a.pdf', [
+      {path: '/p/1.jpg'},
+    ]);
+    expect(msg.text).toBe('分析');
+    expect(msg.images).toEqual([{path: '/p/1.jpg'}]);
+    expect(msg.files).toEqual([{ref: 'attachments/a.pdf', name: 'a.pdf'}]);
+  });
+});
