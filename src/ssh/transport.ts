@@ -109,13 +109,10 @@ export class SshTunnelTransport implements Transport {
       passphrase: this.cfg.passphrase,
     });
 
-    // §3.2 探测 hermes 安装
-    const probe = await HermesSsh.exec('command -v hermes && hermes --version', 10000);
-    if (probe.exitCode !== 0) {
-      throw new Error(
-        `远端未安装 hermes: ${probe.stderr || probe.stdout || 'command -v hermes failed'}`,
-      );
-    }
+    // §3.2 解析 hermes 可执行文件路径
+    // 非交互 SSH exec 不加载用户 shell 配置（~/.zshrc 等），PATH 里没有 hermes 是常态，
+    // 必须兜底登录 shell 和常见安装目录。
+    const hermesBin = await this.resolveHermesBin();
 
     let remotePort: number | null = null;
     let token = '';
@@ -135,7 +132,7 @@ export class SshTunnelTransport implements Transport {
     if (remotePort === null) {
       token = randomToken();
       const {taskId} = await HermesSsh.startCommand(
-        `HERMES_DASHBOARD_SESSION_TOKEN=${token} hermes serve --isolated --host 127.0.0.1 --port 0`,
+        `HERMES_DASHBOARD_SESSION_TOKEN=${token} "${hermesBin}" serve --isolated --host 127.0.0.1 --port 0`,
       );
       this.serveTaskId = taskId;
       remotePort = await this.waitReadyPort(taskId, 30000);
@@ -154,6 +151,25 @@ export class SshTunnelTransport implements Transport {
       httpUrl,
       token,
     };
+  }
+
+  /** 解析远端 hermes 可执行文件绝对路径（见 §3.2 注释：非交互 SSH 无用户 PATH）。 */
+  private async resolveHermesBin(): Promise<string> {
+    const probe = await HermesSsh.exec(
+      '(command -v hermes || zsh -lc "command -v hermes" 2>/dev/null ||' +
+        ' bash -lc "command -v hermes" 2>/dev/null ||' +
+        ' ls -1 ~/.local/bin/hermes ~/.hermes/bin/hermes /usr/local/bin/hermes' +
+        ' /opt/homebrew/bin/hermes 2>/dev/null) | head -1',
+      15000,
+    );
+    const bin = probe.stdout.trim().split('\n')[0]?.trim() ?? '';
+    if (!bin) {
+      throw new Error(
+        '远端未找到 hermes 可执行文件：PATH、登录 shell 与常见安装目录' +
+          '（~/.local/bin、~/.hermes/bin、/usr/local/bin、/opt/homebrew/bin）均无。',
+      );
+    }
+    return bin;
   }
 
   /** 从 startCommand 的 stdout 行事件解析 HERMES_BACKEND_READY port=<n>。 */

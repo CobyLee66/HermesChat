@@ -46,9 +46,9 @@ keepalive：native 侧 `session.setServerAliveInterval(15000)` + `setServerAlive
 ## 3. Bootstrap 流程（JS 侧 SshManager 实现，native 只提供原语）
 
 1. `connect(config)`。
-2. `exec("command -v hermes && hermes --version")` 探测安装。
+2. 解析 hermes 绝对路径：非交互 SSH exec 不加载用户 shell 配置（PATH 无 hermes 是常态），探测链 = `command -v` → `zsh -lc`/`bash -lc` → 常见目录（`~/.local/bin`、`~/.hermes/bin`、`/usr/local/bin`、`/opt/homebrew/bin`），取第一个命中；后续命令一律用绝对路径。
 3. 复用优先：`exec("curl -s -m 2 http://127.0.0.1:9119/api/health")` 有响应 → 已运行实例，`exec("curl -s http://127.0.0.1:9119/ | grep -oE '__HERMES_SESSION_TOKEN__=\"[^\"]+\"'")` 提取 token，remotePort=9119。
-4. 否则拉起：生成随机 token，`startCommand("HERMES_DASHBOARD_SESSION_TOKEN=<token> hermes serve --isolated --host 127.0.0.1 --port 0")`，从 stdout 事件解析 `HERMES_BACKEND_READY port=(\d+)`。
+4. 否则拉起：生成随机 token，`startCommand("HERMES_DASHBOARD_SESSION_TOKEN=<token> \"<hermes绝对路径>\" serve --isolated --host 127.0.0.1 --port 0")`，从 stdout 事件解析 `HERMES_BACKEND_READY port=(\d+)`。
 5. `openLocalForward(remotePort)` → JS 连 `ws://127.0.0.1:<localPort>/api/ws?token=<token>`。
 6. 全部失败 → 允许用户手动填 host/port/token 直连（兜底）。
 
