@@ -1,0 +1,170 @@
+/**
+ * SshManager：连接引擎（实现 connection store 的 Connector 接口）。
+ * - transport 生命周期（DirectWs / SshTunnel）
+ * - RpcClient 建立与断开回调
+ * - AppState 监听：回前台时若处于 reconnecting，立即重试（重置退避）
+ * - 重连成功后对活跃会话 session.resume
+ *
+ * 重连调度（指数退避 1s→30s）在 connection store（backoffDelay），
+ * 这里负责"怎么连"与"连上之后恢复什么"。
+ */
+
+import {AppState, type AppStateStatus} from 'react-native';
+
+import {RpcClient} from '../rpc/client';
+import type {
+  ConnectResult,
+  Connector,
+  SshFormConfig,
+} from '../store/connection';
+import {useChatStore} from '../store/chat';
+import {DirectWsTransport, SshTunnelTransport, type Transport} from './transport';
+
+export class SshManager implements Connector {
+  private transport: Transport | null = null;
+  private rpc: RpcClient | null = null;
+  private dropCb: ((reason: string) => void) | null = null;
+  private foregroundCb: (() => void) | null = null;
+  private appStateSub: {remove(): void} | null = null;
+  /** 手动 disconnect 期间抑制 drop 上报 */
+  private tearingDown = false;
+
+  /** onForeground：App 回前台时调用（connection store 用来立即重试）。 */
+  constructor(opts?: {onForeground?: () => void}) {
+    this.foregroundCb = opts?.onForeground ?? null;
+    this.appStateSub = AppState.addEventListener(
+      'change',
+      (s: AppStateStatus) => {
+        if (s === 'active') {
+          this.foregroundCb?.();
+        }
+      },
+    );
+  }
+
+  onDrop(cb: (reason: string) => void): void {
+    this.dropCb = cb;
+  }
+
+  private reportDrop(reason: string) {
+    if (!this.tearingDown && this.dropCb) {
+      this.dropCb(reason);
+    }
+  }
+
+  async connect(cfg: SshFormConfig): Promise<ConnectResult> {
+    this.tearingDown = false;
+    // 先清理旧实例（重连路径）
+    await this.teardownTransport();
+
+    const transport: Transport = cfg.direct
+      ? new DirectWsTransport({
+          host: cfg.directHost,
+          port: cfg.directPort,
+          token: cfg.directToken || undefined,
+        })
+      : new SshTunnelTransport({
+          host: cfg.host,
+          port: parseInt(cfg.port, 10) || 22,
+          username: cfg.username,
+          password: cfg.password || undefined,
+          privateKey: cfg.privateKey || undefined,
+          passphrase: cfg.passphrase || undefined,
+        });
+    transport.onDrop = () => this.reportDrop('ssh tunnel dropped');
+    this.transport = transport;
+
+    const {wsUrl, httpUrl, token} = await transport.connect();
+
+    const rpc = new RpcClient({
+      onClose: reason => this.reportDrop(reason),
+    });
+    await rpc.connect(wsUrl);
+    this.rpc = rpc;
+    return {rpc, wsUrl, httpUrl, token};
+  }
+
+  /** 断线重建后对 chat store 里仍有内容的会话做 session.resume。 */
+  async resumeActiveSessions(): Promise<void> {
+    const rpc = this.rpc;
+    if (!rpc || !rpc.isOpen) {
+      return;
+    }
+    const chat = useChatStore.getState();
+    for (const [sid, state] of Object.entries(chat.bySession)) {
+      const profile = state.profile;
+      const storedId = state.storedSessionId || sid;
+      try {
+        const result = await rpc.call<{
+          session_id?: string;
+          messages?: never[];
+          running?: boolean;
+        }>('session.resume', {
+          session_id: storedId,
+          profile,
+          cols: 100,
+        });
+        const liveSid = result?.session_id || sid;
+        // resume 返回历史：重挂到原 key（live sid 相同）或迁移到新 key
+        chat.reattachAfterResume(sid, liveSid, {
+          messages: (result?.messages ?? []) as never[],
+          running: result?.running,
+        });
+      } catch {
+        // 单个会话恢复失败不阻塞其他会话（服务端可能已回收）
+        chat.markResumeFailed(sid);
+      }
+    }
+  }
+
+  async disconnect(): Promise<void> {
+    this.tearingDown = true;
+    const rpc = this.rpc;
+    this.rpc = null;
+    rpc?.disconnect();
+    await this.teardownTransport();
+  }
+
+  private async teardownTransport() {
+    const t = this.transport;
+    this.transport = null;
+    if (t) {
+      t.onDrop = undefined;
+      try {
+        await t.disconnect();
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  dispose() {
+    this.appStateSub?.remove();
+    this.appStateSub = null;
+  }
+}
+
+/** 生产连接器单例。onForeground 由 initConnectionEngine 注入 retryNow。 */
+let instance: SshManager | null = null;
+
+export function getSshManager(opts?: {onForeground?: () => void}): SshManager {
+  if (!instance) {
+    instance = new SshManager(opts);
+  }
+  return instance;
+}
+
+/** App 启动时装配一次：SshManager 注册为 connection store 的 connector。 */
+export function initConnectionEngine(): void {
+  // 延迟 require 避免模块加载期环依赖（connection ↔ SshManager 仅此处交汇）
+  const {useConnectionStore} =
+    require('../store/connection') as typeof import('../store/connection');
+  const conn = useConnectionStore.getState();
+  if (!conn.connector) {
+    conn.setConnector(
+      getSshManager({
+        onForeground: () => useConnectionStore.getState().retryNow(),
+      }),
+    );
+  }
+}

@@ -1,0 +1,500 @@
+/**
+ * 事件流 + 历史投影 → TimelineItem[] 聚合器。
+ * 每个会话一个实例。所有 apply* 之后 items 数组换新引用（配合 zustand/FlatList）。
+ */
+
+import type {
+  ApprovalCardItem,
+  ApprovalRequestPayload,
+  AssistantBlock,
+  AssistantMsg,
+  ErrorPayload,
+  MessageCompletePayload,
+  MessageDeltaPayload,
+  MessageInterimPayload,
+  ProjectedMessage,
+  StatusUpdatePayload,
+  TextDeltaPayload,
+  TimelineItem,
+  ToolCallBlock,
+  ToolCompletePayload,
+  ToolProgressPayload,
+  ToolStartPayload,
+  UserMsg,
+} from './types';
+
+let seq = 0;
+function nextId(prefix: string): string {
+  seq += 1;
+  return `${prefix}-${Date.now()}-${seq}`;
+}
+
+function stringifyResult(result: unknown): string {
+  if (result === undefined || result === null) {
+    return '';
+  }
+  if (typeof result === 'string') {
+    return result;
+  }
+  try {
+    return JSON.stringify(result, null, 2);
+  } catch {
+    return String(result);
+  }
+}
+
+export class TimelineAggregator {
+  private items: TimelineItem[] = [];
+  /** 当前流式助手消息（message.start 之后、message.complete 之前） */
+  private current: AssistantMsg | null = null;
+  /** 最近一次 status.update（UI 状态条用，不进时间线） */
+  lastStatus: {kind: string; text: string} | null = null;
+
+  getItems(): TimelineItem[] {
+    return this.items;
+  }
+
+  isStreaming(): boolean {
+    return this.current !== null && this.current.streaming;
+  }
+
+  // ─── 历史投影 ──────────────────────────────────────────────
+
+  /** 用 session.create/resume 返回的 messages 重建时间线。 */
+  hydrate(messages: ProjectedMessage[]) {
+    this.items = [];
+    this.current = null;
+    for (const m of messages) {
+      if (!m || typeof m !== 'object') {
+        continue;
+      }
+      // 压缩 handoff 等隐藏行
+      if (m.display_kind === 'hidden' || m.display_kind === 'compaction') {
+        continue;
+      }
+      if (m.role === 'user') {
+        const text = (m.text ?? '').trim();
+        if (!text) {
+          continue;
+        }
+        this.push({kind: 'user', id: nextId('u'), text, timestamp: m.timestamp});
+      } else if (m.role === 'assistant') {
+        const blocks: AssistantBlock[] = [];
+        const reasoning =
+          typeof m.reasoning === 'string' ? m.reasoning.trim() : '';
+        if (reasoning) {
+          blocks.push({type: 'thinking', text: reasoning});
+        }
+        const text = m.text ?? '';
+        if (text.trim()) {
+          blocks.push({type: 'text', text});
+        }
+        if (blocks.length === 0) {
+          continue;
+        }
+        this.push({
+          kind: 'assistant',
+          id: nextId('a'),
+          blocks,
+          streaming: false,
+          timestamp: m.timestamp,
+        });
+      } else if (m.role === 'tool') {
+        const tool: ToolCallBlock = {
+          toolId: m.row_id !== undefined ? `hist-${m.row_id}` : nextId('t'),
+          name: m.name ?? 'tool',
+          context: m.context,
+          args: m.args,
+          status: 'done',
+        };
+        this.push({
+          kind: 'assistant',
+          id: nextId('a'),
+          blocks: [{type: 'tool', tool}],
+          streaming: false,
+          timestamp: m.timestamp,
+        });
+      } else if (m.role === 'system') {
+        const text = (m.text ?? '').trim();
+        if (text) {
+          this.push({
+            kind: 'system',
+            id: nextId('s'),
+            eventKind: 'history',
+            text,
+          });
+        }
+      }
+    }
+  }
+
+  // ─── 事件应用 ──────────────────────────────────────────────
+
+  /** 返回 true 表示事件被处理（已知类型）。 */
+  applyEvent(type: string, payload: unknown): boolean {
+    const p = (payload ?? {}) as Record<string, unknown>;
+    switch (type) {
+      case 'message.start':
+        this.onMessageStart();
+        return true;
+      case 'message.delta':
+        this.onMessageDelta(p as unknown as MessageDeltaPayload);
+        return true;
+      case 'message.interim':
+        this.onMessageInterim(p as unknown as MessageInterimPayload);
+        return true;
+      case 'message.complete':
+        this.onMessageComplete(p as unknown as MessageCompletePayload);
+        return true;
+      case 'thinking.delta':
+        this.onTextDelta('thinking', p as unknown as TextDeltaPayload);
+        return true;
+      case 'reasoning.delta':
+        this.onTextDelta('reasoning', p as unknown as TextDeltaPayload);
+        return true;
+      case 'tool.start':
+        this.onToolStart(p as unknown as ToolStartPayload);
+        return true;
+      case 'tool.progress':
+        this.onToolProgress(p as unknown as ToolProgressPayload);
+        return true;
+      case 'tool.complete':
+        this.onToolComplete(p as unknown as ToolCompletePayload);
+        return true;
+      case 'approval.request':
+        this.onApprovalRequest(p as unknown as ApprovalRequestPayload);
+        return true;
+      case 'error':
+        this.onError(p as unknown as ErrorPayload);
+        return true;
+      case 'status.update':
+        this.onStatusUpdate(p as unknown as StatusUpdatePayload);
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  // ─── 审批 ──────────────────────────────────────────────────
+
+  /** 用户点选审批后调用：标记卡片已处理（UI 将其移除/禁用）。 */
+  resolveApproval(requestId: string, choice: ApprovalCardItem['choices'][number]) {
+    const idx = this.items.findIndex(
+      it => it.kind === 'approval' && it.requestId === requestId,
+    );
+    if (idx < 0) {
+      return;
+    }
+    const card = this.items[idx] as ApprovalCardItem;
+    this.replaceAt(idx, {...card, resolved: choice});
+  }
+
+  private onApprovalRequest(p: ApprovalRequestPayload) {
+    if (!p.request_id) {
+      return;
+    }
+    // 去重（断线重放同 request_id）
+    const existing = this.items.findIndex(
+      it => it.kind === 'approval' && it.requestId === p.request_id,
+    );
+    const card: ApprovalCardItem = {
+      kind: 'approval',
+      id: nextId('ap'),
+      requestId: p.request_id,
+      command: p.command,
+      description: p.description,
+      choices:
+        Array.isArray(p.choices) && p.choices.length > 0
+          ? p.choices
+          : ['once', 'session', 'always', 'deny'],
+    };
+    if (existing >= 0) {
+      this.replaceAt(existing, card);
+    } else {
+      this.push(card);
+    }
+  }
+
+  // ─── 内部：消息流 ─────────────────────────────────────────
+
+  private onMessageStart() {
+    // 上一个流式消息未正常结束时先封存
+    if (this.current && this.current.streaming) {
+      this.sealCurrent();
+    }
+    const msg: AssistantMsg = {
+      kind: 'assistant',
+      id: nextId('a'),
+      blocks: [],
+      streaming: true,
+    };
+    this.current = msg;
+    this.push(msg);
+  }
+
+  private onMessageDelta(p: MessageDeltaPayload) {
+    if (typeof p.text !== 'string' || p.text.length === 0) {
+      return;
+    }
+    const msg = this.ensureCurrent();
+    const last = msg.blocks[msg.blocks.length - 1];
+    if (last && last.type === 'text' && !this.sealedText) {
+      last.text += p.text;
+    } else {
+      msg.blocks.push({type: 'text', text: p.text});
+      this.sealedText = false;
+    }
+    this.touchCurrent();
+  }
+
+  /** interim(already_streamed) 之后，下一个 delta 必须开新 text 块 */
+  private sealedText = false;
+
+  private onMessageInterim(p: MessageInterimPayload) {
+    const msg = this.ensureCurrent();
+    if (p.already_streamed) {
+      // 文本已经通过 delta 流出过：密封当前 text 块，后续 delta 开新块
+      const last = msg.blocks[msg.blocks.length - 1];
+      if (last && last.type === 'text') {
+        this.sealedText = true;
+      }
+    } else if (typeof p.text === 'string' && p.text.trim()) {
+      msg.blocks.push({type: 'text', text: p.text});
+      // 未流出的 interim 是完整段落：后续 delta 开新块，不接在它后面
+      this.sealedText = true;
+    }
+    this.touchCurrent();
+  }
+
+  private onMessageComplete(p: MessageCompletePayload) {
+    const msg = this.current;
+    if (!msg) {
+      // 没有 message.start 的孤儿 complete：直接落成一条完整消息
+      const blocks: AssistantBlock[] = [];
+      if (p.text && p.text.trim()) {
+        blocks.push({type: 'text', text: p.text});
+      }
+      if (p.status === 'error') {
+        blocks.push({type: 'error', text: p.error || p.text || '未知错误'});
+      }
+      this.push({
+        kind: 'assistant',
+        id: nextId('a'),
+        blocks,
+        streaming: false,
+      });
+      return;
+    }
+    // 若流式 delta 未产生文本（或 complete 文本更全），用 complete 文本补齐
+    const hasText = msg.blocks.some(b => b.type === 'text' && b.text.trim());
+    if (!hasText && typeof p.text === 'string' && p.text.trim()) {
+      msg.blocks.push({type: 'text', text: p.text});
+    }
+    if (p.status === 'error') {
+      msg.blocks.push({
+        type: 'error',
+        text: p.error || p.text || '未知错误',
+      });
+    }
+    if (
+      typeof p.reasoning === 'string' &&
+      p.reasoning.trim() &&
+      !msg.blocks.some(b => b.type === 'reasoning' || b.type === 'thinking')
+    ) {
+      msg.blocks.unshift({type: 'thinking', text: p.reasoning});
+    }
+    msg.streaming = false;
+    this.sealedText = false;
+    this.touchCurrent();
+    this.current = null;
+  }
+
+  private onTextDelta(kind: 'thinking' | 'reasoning', p: TextDeltaPayload) {
+    if (typeof p.text !== 'string' || p.text.length === 0) {
+      return;
+    }
+    const msg = this.ensureCurrent();
+    const last = msg.blocks[msg.blocks.length - 1];
+    if (last && last.type === kind) {
+      last.text += p.text;
+    } else {
+      msg.blocks.push({type: kind, text: p.text});
+    }
+    this.touchCurrent();
+  }
+
+  // ─── 内部：工具 ───────────────────────────────────────────
+
+  private onToolStart(p: ToolStartPayload) {
+    if (!p.tool_id) {
+      return;
+    }
+    // 重放/重复 start：已存在同名块则忽略
+    if (this.findToolBlock(p.tool_id)) {
+      return;
+    }
+    const msg = this.ensureCurrent();
+    const tool: ToolCallBlock = {
+      toolId: p.tool_id,
+      name: p.name ?? 'tool',
+      context: p.context,
+      args: p.args,
+      status: 'running',
+    };
+    msg.blocks.push({type: 'tool', tool});
+    this.touchCurrent();
+  }
+
+  private onToolProgress(p: ToolProgressPayload) {
+    if (!p.tool_id) {
+      return;
+    }
+    const found = this.findToolBlock(p.tool_id);
+    if (!found) {
+      return;
+    }
+    const text = p.preview ?? p.text;
+    if (typeof text === 'string' && text) {
+      found.tool.progress = text;
+      this.bump();
+    }
+  }
+
+  private onToolComplete(p: ToolCompletePayload) {
+    if (!p.tool_id) {
+      return;
+    }
+    const found = this.findToolBlock(p.tool_id);
+    const resultText =
+      typeof p.result_text === 'string' && p.result_text
+        ? p.result_text
+        : stringifyResult(p.result);
+    if (found) {
+      const {tool} = found;
+      tool.status = 'done';
+      if (p.args !== undefined) {
+        tool.args = p.args;
+      }
+      if (resultText) {
+        tool.result = resultText;
+      }
+      if (p.summary) {
+        tool.summary = p.summary;
+      }
+      if (typeof p.duration_s === 'number') {
+        tool.durationS = p.duration_s;
+      }
+      if (p.inline_diff) {
+        tool.inlineDiff = p.inline_diff;
+      }
+      this.bump();
+      return;
+    }
+    // complete 没有对应 start（中途接入）：补一张已完成卡片
+    const msg = this.ensureCurrent();
+    const tool: ToolCallBlock = {
+      toolId: p.tool_id,
+      name: p.name ?? 'tool',
+      args: p.args,
+      status: 'done',
+      result: resultText || undefined,
+      summary: p.summary,
+      durationS: typeof p.duration_s === 'number' ? p.duration_s : undefined,
+      inlineDiff: p.inline_diff,
+    };
+    msg.blocks.push({type: 'tool', tool});
+    this.touchCurrent();
+  }
+
+  /** 按 tool_id 找工具块（从后往前，start/complete 合并）。 */
+  private findToolBlock(
+    toolId: string,
+  ): {msg: AssistantMsg; tool: ToolCallBlock} | null {
+    for (let i = this.items.length - 1; i >= 0; i--) {
+      const it = this.items[i];
+      if (it.kind !== 'assistant') {
+        continue;
+      }
+      for (const b of it.blocks) {
+        if (b.type === 'tool' && b.tool.toolId === toolId) {
+          return {msg: it, tool: b.tool};
+        }
+      }
+    }
+    return null;
+  }
+
+  // ─── 内部：错误与状态 ─────────────────────────────────────
+
+  private onError(p: ErrorPayload) {
+    const text = p.message || '未知错误';
+    // 流式进行中：错误块挂到当前消息；否则独立红条
+    if (this.current && this.current.streaming) {
+      this.current.blocks.push({type: 'error', text});
+      this.current.streaming = false;
+      this.touchCurrent();
+      this.current = null;
+    } else {
+      this.push({kind: 'system', id: nextId('s'), eventKind: 'error', text});
+    }
+  }
+
+  private onStatusUpdate(p: StatusUpdatePayload) {
+    this.lastStatus = {kind: p.kind ?? 'status', text: p.text ?? ''};
+  }
+
+  // ─── 用户消息（本地回显） ─────────────────────────────────
+
+  appendUserMessage(text: string): UserMsg {
+    const msg: UserMsg = {kind: 'user', id: nextId('u'), text};
+    this.push(msg);
+    return msg;
+  }
+
+  // ─── 工具方法 ─────────────────────────────────────────────
+
+  private ensureCurrent(): AssistantMsg {
+    if (!this.current || !this.current.streaming) {
+      const msg: AssistantMsg = {
+        kind: 'assistant',
+        id: nextId('a'),
+        blocks: [],
+        streaming: true,
+      };
+      this.current = msg;
+      this.push(msg);
+    }
+    return this.current;
+  }
+
+  private sealCurrent() {
+    if (this.current) {
+      this.current.streaming = false;
+      this.touchCurrent();
+      this.current = null;
+    }
+  }
+
+  private push(item: TimelineItem) {
+    this.items = [...this.items, item];
+  }
+
+  private replaceAt(idx: number, item: TimelineItem) {
+    this.items = this.items.map((it, i) => (i === idx ? item : it));
+  }
+
+  /** 当前流式消息内容变化：换引用触发 UI 更新。 */
+  private touchCurrent() {
+    if (!this.current) {
+      return;
+    }
+    const cur = this.current;
+    this.items = this.items.map(it =>
+      it.id === cur.id ? {...cur, blocks: [...cur.blocks]} : it,
+    );
+  }
+
+  private bump() {
+    this.items = [...this.items];
+  }
+}

@@ -1,0 +1,39 @@
+/**
+ * 全局样式常量（浅色 QQ 风格）。
+ */
+
+export const Colors = {
+  bg: '#F2F3F7',
+  card: '#FFFFFF',
+  accent: '#12B7F5',
+  accentDark: '#0E9BD8',
+  text: '#1A1A1A',
+  textSecondary: '#8A8F99',
+  border: '#E5E6EB',
+  userBubble: '#B9E6FF',
+  assistantBubble: '#FFFFFF',
+  danger: '#F53F3F',
+  dangerBg: '#FFECE8',
+  thinkingBg: '#F7F8FA',
+  success: '#00B42A',
+};
+
+/** 昵称首字符色块的稳定取色。 */
+const AVATAR_PALETTE = [
+  '#FF7D00',
+  '#12B7F5',
+  '#722ED1',
+  '#00B42A',
+  '#F5319D',
+  '#0FC6C2',
+  '#3491FA',
+  '#F7BA1E',
+];
+
+export function avatarColor(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) {
+    h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  }
+  return AVATAR_PALETTE[h % AVATAR_PALETTE.length];
+}
