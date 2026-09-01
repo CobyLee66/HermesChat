@@ -79,11 +79,14 @@ export class RpcClient {
       ws.onopen = () => {
         // 等 gateway.ready，不在 open 时 resolve
       };
-      ws.onerror = () => {
+      ws.onerror = (ev: unknown) => {
         if (!settled) {
           settled = true;
           clearTimeout(readyTimer);
-          reject(new Error('websocket connect failed'));
+          const m = (ev as {message?: string} | undefined)?.message;
+          reject(
+            new Error(`websocket connect failed${m ? `: ${m}` : ''} (${wsUrl.replace(/token=[^&]+/, 'token=***')})`),
+          );
         }
       };
       ws.onclose = (ev: {code?: number; reason?: string}) => {

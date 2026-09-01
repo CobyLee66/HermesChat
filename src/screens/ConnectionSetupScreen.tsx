@@ -33,8 +33,6 @@ export function ConnectionSetupScreen() {
   const navigation = useNavigation<Nav>();
   const {config, setConfig, state, error, connect, loadPersisted} =
     useConnectionStore();
-  const [keyFileName, setKeyFileName] = React.useState('');
-
   const pickKeyFile = async () => {
     try {
       const [res] = await pick({type: [types.allFiles]});
@@ -47,8 +45,7 @@ export function ConnectionSetupScreen() {
         throw new Error(copy.copyError);
       }
       const content = await RNFS.readFile(copy.localUri, 'utf8');
-      setConfig({privateKey: content});
-      setKeyFileName(res.name ?? '已选择');
+      setConfig({privateKey: content, keyFileName: res.name ?? '已选择'});
     } catch (e) {
       if (isErrorWithCode(e) && e.code === errorCodes.OPERATION_CANCELED) {
         return;
@@ -165,7 +162,7 @@ export function ConnectionSetupScreen() {
                 onPress={pickKeyFile}
                 activeOpacity={0.8}>
                 <Text style={styles.smallButtonText} numberOfLines={1}>
-                  {keyFileName ? `已选: ${keyFileName}` : '选择密钥文件'}
+                  {config.keyFileName ? `已选: ${config.keyFileName}` : '选择密钥文件'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -173,8 +170,7 @@ export function ConnectionSetupScreen() {
               style={[styles.input, styles.multiline]}
               value={config.privateKey}
               onChangeText={v => {
-                setConfig({privateKey: v});
-                if (!v) setKeyFileName('');
+                setConfig(v ? {privateKey: v} : {privateKey: '', keyFileName: ''});
               }}
               placeholder="粘贴 PEM 内容，或点上方按钮选择文件"
               multiline

@@ -1,6 +1,6 @@
 /**
  * 连接状态机：disconnected → connecting → bootstrapping → ready → reconnecting
- * 非敏感配置 AsyncStorage 持久化；密码/私钥仅存内存。
+ * 配置 AsyncStorage 持久化（含私钥/口令，App 沙盒内）；密码仅存内存。
  * 重连：指数退避 1s→30s（backoffDelay），断线后重建隧道+WS 由 connector 完成，
  * 成功后被活跃会话 session.resume。
  */
@@ -30,11 +30,13 @@ export interface SshFormConfig {
   host: string;
   port: string;
   username: string;
-  /** 仅内存，不持久化 */
+  /** 仅存内存，不持久化 */
   password: string;
-  /** 仅内存，不持久化 */
+  /** 持久化于 App 沙盒（用户要求记住上次选择的密钥，避免每次重选） */
   privateKey: string;
   passphrase: string;
+  /** 上次选择的密钥文件名（仅显示用，随私钥一起持久化） */
+  keyFileName: string;
 }
 
 export const DEFAULT_CONFIG: SshFormConfig = {
@@ -48,6 +50,7 @@ export const DEFAULT_CONFIG: SshFormConfig = {
   password: '',
   privateKey: '',
   passphrase: '',
+  keyFileName: '',
 };
 
 const STORAGE_KEY = 'hermes.connection.v1';
@@ -189,7 +192,7 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => {
     setConfig(patch) {
       const next = {...get().config, ...patch};
       set({config: next});
-      // 只持久化非敏感字段
+      // 密码仅存内存；私钥/口令/密钥文件名持久化（App 沙盒内，用户明确要求）
       const safe: Partial<SshFormConfig> = {
         direct: next.direct,
         directHost: next.directHost,
@@ -197,6 +200,9 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => {
         host: next.host,
         port: next.port,
         username: next.username,
+        privateKey: next.privateKey,
+        passphrase: next.passphrase,
+        keyFileName: next.keyFileName,
       };
       AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(safe)).catch(() => {});
     },
