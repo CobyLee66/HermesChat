@@ -24,8 +24,9 @@ git fetch origin -q
 AHEAD="$(git rev-list --count origin/main..HEAD)"
 if [ "$AHEAD" != "0" ]; then echo "    推送 $AHEAD 个本地提交..."; git push origin main; fi
 
-echo "==> [2/4] 构建机 拉取代码 + 增量安装 JS 依赖"
-ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR & git pull --ff-only origin main & npm install --no-audit --no-fund --loglevel=error"
+echo "==> [2/4] 构建机 拉取代码 + 安装 JS 依赖"
+# npm ci 不改 lockfile（npm install 会改动导致下次 pull 失败）；pull 失败时先 reset 自愈
+ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR & (git pull --ff-only origin main || (git reset --hard origin/main >nul & git pull --ff-only origin main)) & npm ci --no-audit --no-fund --loglevel=error"
 
 echo "==> [3/4] gradlew $GRADLE_TASK"
 ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR\\android & gradlew.bat $GRADLE_TASK --console=plain"
