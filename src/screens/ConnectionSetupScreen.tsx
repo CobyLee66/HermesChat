@@ -14,7 +14,13 @@ import {
 } from 'react-native';
 import {useNavigation} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
-import DocumentPicker from 'react-native-document-picker';
+import {
+  pick,
+  keepLocalCopy,
+  types,
+  errorCodes,
+  isErrorWithCode,
+} from '@react-native-documents/picker';
 import RNFS from 'react-native-fs';
 
 import {useConnectionStore} from '../store/connection';
@@ -31,18 +37,23 @@ export function ConnectionSetupScreen() {
 
   const pickKeyFile = async () => {
     try {
-      const res = await DocumentPicker.pickSingle({
-        type: DocumentPicker.types.allFiles,
-        copyTo: 'cachesDirectory',
+      const [res] = await pick({type: [types.allFiles]});
+      if (!res) return;
+      const [copy] = await keepLocalCopy({
+        files: [{uri: res.uri, fileName: res.name ?? 'ssh_key'}],
+        destination: 'cachesDirectory',
       });
-      const uri = res.fileCopyUri ?? res.uri;
-      const content = await RNFS.readFile(uri, 'utf8');
+      if (copy.status !== 'success') {
+        throw new Error(copy.copyError);
+      }
+      const content = await RNFS.readFile(copy.localUri, 'utf8');
       setConfig({privateKey: content});
       setKeyFileName(res.name ?? '已选择');
     } catch (e) {
-      if (!DocumentPicker.isCancel(e)) {
-        Alert.alert('读取密钥文件失败', String(e));
+      if (isErrorWithCode(e) && e.code === errorCodes.OPERATION_CANCELED) {
+        return;
       }
+      Alert.alert('读取密钥文件失败', String(e));
     }
   };
 
