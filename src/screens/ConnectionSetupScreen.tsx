@@ -1,6 +1,7 @@
 import React, {useEffect} from 'react';
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -13,6 +14,8 @@ import {
 } from 'react-native';
 import {useNavigation} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import DocumentPicker from 'react-native-document-picker';
+import RNFS from 'react-native-fs';
 
 import {useConnectionStore} from '../store/connection';
 import {Colors} from '../components/theme';
@@ -24,6 +27,24 @@ export function ConnectionSetupScreen() {
   const navigation = useNavigation<Nav>();
   const {config, setConfig, state, error, connect, loadPersisted} =
     useConnectionStore();
+  const [keyFileName, setKeyFileName] = React.useState('');
+
+  const pickKeyFile = async () => {
+    try {
+      const res = await DocumentPicker.pickSingle({
+        type: DocumentPicker.types.allFiles,
+        copyTo: 'cachesDirectory',
+      });
+      const uri = res.fileCopyUri ?? res.uri;
+      const content = await RNFS.readFile(uri, 'utf8');
+      setConfig({privateKey: content});
+      setKeyFileName(res.name ?? '已选择');
+    } catch (e) {
+      if (!DocumentPicker.isCancel(e)) {
+        Alert.alert('读取密钥文件失败', String(e));
+      }
+    }
+  };
 
   useEffect(() => {
     loadPersisted();
@@ -126,12 +147,25 @@ export function ConnectionSetupScreen() {
               secureTextEntry
               autoCapitalize="none"
             />
-            <Text style={styles.label}>私钥 PEM（可选，优先于密码）</Text>
+            <View style={styles.rowBetween}>
+              <Text style={styles.label}>私钥（可选，优先于密码）</Text>
+              <TouchableOpacity
+                style={styles.smallButton}
+                onPress={pickKeyFile}
+                activeOpacity={0.8}>
+                <Text style={styles.smallButtonText} numberOfLines={1}>
+                  {keyFileName ? `已选: ${keyFileName}` : '选择密钥文件'}
+                </Text>
+              </TouchableOpacity>
+            </View>
             <TextInput
               style={[styles.input, styles.multiline]}
               value={config.privateKey}
-              onChangeText={v => setConfig({privateKey: v})}
-              placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+              onChangeText={v => {
+                setConfig({privateKey: v});
+                if (!v) setKeyFileName('');
+              }}
+              placeholder="粘贴 PEM 内容，或点上方按钮选择文件"
               multiline
               autoCapitalize="none"
               autoCorrect={false}
@@ -211,6 +245,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 16,
   },
+  smallButton: {
+    backgroundColor: Colors.card,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: Colors.accent,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    maxWidth: 180,
+  },
+  smallButtonText: {color: Colors.accent, fontSize: 12},
   flex2: {flex: 2},
   flex3: {flex: 3},
   button: {
