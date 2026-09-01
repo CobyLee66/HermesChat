@@ -10,8 +10,8 @@ LOCAL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 DIST_DIR="$LOCAL_DIR/dist"
 
 case "$FLAVOR" in
-  debug)   GRADLE_TASK=assembleDebug;   APK_REL='android\app\build\outputs\apk\debug\app-debug.apk';     APK_NAME=app-debug.apk ;;
-  release) GRADLE_TASK=assembleRelease; APK_REL='android\app\build\outputs\apk\release\app-release.apk'; APK_NAME=app-release.apk ;;
+  debug)   GRADLE_TASK=assembleDebug;   APK_FWD='android/app/build/outputs/apk/debug/app-debug.apk';     APK_NAME=app-debug.apk ;;
+  release) GRADLE_TASK=assembleRelease; APK_FWD='android/app/build/outputs/apk/release/app-release.apk'; APK_NAME=app-release.apk ;;
   *) echo "用法: $0 [debug|release]"; exit 1 ;;
 esac
 
@@ -30,6 +30,6 @@ ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR\\android & gradlew.bat $GRADLE_TASK --cons
 
 echo "==> [4/4] 取回 APK"
 mkdir -p "$DIST_DIR"
-scp "$REMOTE_HOST:$REMOTE_DIR\\$APK_REL" "$DIST_DIR/$APK_NAME"
+scp "$REMOTE_HOST:C:/HermesMobile/$APK_FWD" "$DIST_DIR/$APK_NAME"
 ls -lh "$DIST_DIR/$APK_NAME"
 echo "完成。安装到手机: scripts/install-android.sh $DIST_DIR/$APK_NAME"

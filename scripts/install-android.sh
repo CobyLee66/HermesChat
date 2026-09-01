@@ -12,7 +12,7 @@ APK="$(cd "$(dirname "$APK")" && pwd)/$(basename "$APK")"
 [ -f "$APK" ] || { echo "找不到 APK: $APK（先跑 scripts/build-android.sh）"; exit 1; }
 
 echo "==> 推送 APK 到 $REMOTE_HOST"
-scp "$APK" "$REMOTE_HOST:C:\\Users\\Lucy\\hm-install.apk"
+scp "$APK" "$REMOTE_HOST:C:/Users/Public/hm-install.apk"
 
 echo "==> 当前设备列表："
 ssh "$REMOTE_HOST" "$ADB devices"
