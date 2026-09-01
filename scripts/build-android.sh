@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # build-android.sh [debug|release]   —— 在 Mac 上一键驱动 构建机 构建 Android APK
-# 流程：本地改动推送 GitHub -> 构建机 git pull -> npm install（增量）-> gradlew 构建 -> APK 取回 dist/
+# 流程：本地改动推送 GitHub -> 构建机 git pull -> npm install（增量）-> gradlew 构建
+#       -> APK 取回 dist/ -> 检测到 adb 设备时直接安装到手机
 set -euo pipefail
 
 FLAVOR="${1:-release}"           # debug | release
 REMOTE_HOST="构建机"             # ~/.ssh/config 里的别名
 REMOTE_DIR='C:\HermesMobile'
+ADB='C:\Softwares\Android\platform-tools\adb.exe'
 LOCAL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 DIST_DIR="$LOCAL_DIR/dist"
 
@@ -28,8 +30,23 @@ ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR & git pull --ff-only origin main & npm ins
 echo "==> [3/4] gradlew $GRADLE_TASK"
 ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR\\android & gradlew.bat $GRADLE_TASK --console=plain"
 
-echo "==> [4/4] 取回 APK"
+echo "==> [4/5] 取回 APK"
 mkdir -p "$DIST_DIR"
 scp "$REMOTE_HOST:C:/HermesMobile/$APK_FWD" "$DIST_DIR/$APK_NAME"
 ls -lh "$DIST_DIR/$APK_NAME"
-echo "完成。安装到手机: scripts/install-android.sh $DIST_DIR/$APK_NAME"
+
+echo "==> [5/5] 检测 adb 设备并安装"
+# adb devices 输出带 \r，先清洗；取状态为 device 的序列号
+SERIALS="$(ssh "$REMOTE_HOST" "$ADB devices" | tr -d '\r' | awk 'NR>1 && $2=="device" {print $1}')"
+if [ -z "$SERIALS" ]; then
+  echo "未检测到手机。请把手机插到 构建机（USB 调试），或开无线调试后执行："
+  echo "    ssh $REMOTE_HOST \"$ADB connect <手机IP>:<端口>\""
+  echo "之后可单独安装：scripts/install-android.sh $DIST_DIR/$APK_NAME"
+else
+  REMOTE_APK="C:/HermesMobile/$APK_FWD"
+  for S in $SERIALS; do
+    echo "    安装到设备 $S ..."
+    ssh "$REMOTE_HOST" "$ADB -s $S install -r $REMOTE_APK"
+  done
+  echo "完成，手机应用列表打开 HermesMobile 即可。"
+fi
