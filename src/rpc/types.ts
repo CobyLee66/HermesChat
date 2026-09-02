@@ -54,6 +54,14 @@ export interface UsageInfo {
   prompt_tokens?: number;
   completion_tokens?: number;
   total_tokens?: number;
+  /** 本 gateway 进程累计（input/output/total/calls）；resume 后从 0 重计 */
+  total?: number;
+  /** 上下文窗口占用（至少跑过一轮后才出现） */
+  context_used?: number;
+  /** 模型上下文窗口上限（最大 token 限制） */
+  context_max?: number;
+  /** 0-100 整数 */
+  context_percent?: number;
   [key: string]: unknown;
 }
 
@@ -114,6 +122,37 @@ export interface ApprovalRequestPayload {
   allow_permanent?: boolean;
   allow_session?: boolean;
   smart_denied?: boolean;
+}
+
+/** clarify.request 的单个子问题（批量时在 questions 数组里）。 */
+export interface ClarifyQuestion {
+  /** 服务端 wire id（q0..qN），clarify.respond 按它归答案 */
+  qid?: string;
+  question: string;
+  choices: string[];
+  multiSelect?: boolean;
+}
+
+/**
+ * clarify.request payload：单问 {question, choices, multi_select?}；
+ * 批量 {questions: [{qid, question, choices, multi_select}]}。
+ */
+export interface ClarifyRequestPayload {
+  request_id: string;
+  question?: string;
+  choices?: string[];
+  multi_select?: boolean;
+  questions?: {
+    qid?: string;
+    question?: string;
+    choices?: string[];
+    multi_select?: boolean;
+  }[];
+}
+
+/** *.expire 事件 payload（审批/澄清超时）。 */
+export interface ExpirePayload {
+  request_id?: string;
 }
 
 export interface StatusUpdatePayload {
@@ -225,6 +264,10 @@ export interface SessionResumeResult {
   status?: string;
   messages?: ProjectedMessage[];
   info?: SessionInfoPayload;
+  /** 断线期间挂起的审批（事件单播给旧 transport，靠它恢复审批卡） */
+  pending_approval?: ApprovalRequestPayload[];
+  /** 断线期间挂起的澄清提问 */
+  pending_clarify?: ClarifyRequestPayload[];
   inflight?: {
     user?: string;
     assistant?: string;
@@ -371,6 +414,19 @@ export interface ApprovalCardItem {
   choices: ApprovalChoice[];
   /** 用户点选后记录，卡片随即移除/标记 */
   resolved?: ApprovalChoice;
+  /** approval.expire：服务端已超时，迟到应答会返回 expired */
+  expired?: boolean;
+}
+
+/** clarify 卡片：agent 主动向用户提问（单问或批量）。 */
+export interface ClarifyCardItem {
+  kind: 'clarify';
+  id: string;
+  requestId: string;
+  questions: ClarifyQuestion[];
+  /** 已应答的 qid（批量逐题作答；单问题固定用 '' 作 key） */
+  answeredQids: string[];
+  expired?: boolean;
 }
 
 export interface SystemEvent {
@@ -381,4 +437,9 @@ export interface SystemEvent {
   text: string;
 }
 
-export type TimelineItem = UserMsg | AssistantMsg | ApprovalCardItem | SystemEvent;
+export type TimelineItem =
+  | UserMsg
+  | AssistantMsg
+  | ApprovalCardItem
+  | ClarifyCardItem
+  | SystemEvent;

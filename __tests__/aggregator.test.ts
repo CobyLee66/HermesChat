@@ -2,6 +2,7 @@ import {TimelineAggregator} from '../src/rpc/aggregator';
 import type {
   ApprovalCardItem,
   AssistantMsg,
+  ClarifyCardItem,
   SystemEvent,
   ToolCallBlock,
   UserMsg,
@@ -177,6 +178,62 @@ describe('TimelineAggregator 审批卡生命周期', () => {
     agg.applyEvent('approval.request', {request_id: 'r2'});
     const card = agg.getItems()[0] as ApprovalCardItem;
     expect(card.choices).toEqual(['once', 'session', 'always', 'deny']);
+  });
+
+  it('approval.expire 标记卡片已超时', () => {
+    const agg = new TimelineAggregator();
+    agg.applyEvent('approval.request', {request_id: 'r1', command: 'a'});
+    agg.applyEvent('approval.expire', {request_id: 'r1'});
+    const card = agg.getItems()[0] as ApprovalCardItem;
+    expect(card.expired).toBe(true);
+  });
+});
+
+describe('TimelineAggregator 澄清提问卡', () => {
+  it('clarify.request 单问生成卡片，resolveClarify 标记已答', () => {
+    const agg = new TimelineAggregator();
+    agg.applyEvent('clarify.request', {
+      request_id: 'c1',
+      question: '选哪个方案？',
+      choices: ['A', 'B'],
+    });
+    let card = agg.getItems()[0] as ClarifyCardItem;
+    expect(card.kind).toBe('clarify');
+    expect(card.questions).toEqual([
+      {qid: '', question: '选哪个方案？', choices: ['A', 'B'], multiSelect: false},
+    ]);
+    expect(card.answeredQids).toEqual([]);
+
+    agg.resolveClarify('c1', '');
+    card = agg.getItems()[0] as ClarifyCardItem;
+    expect(card.answeredQids).toEqual(['']);
+  });
+
+  it('clarify.request 批量问题带 qid，逐题标记', () => {
+    const agg = new TimelineAggregator();
+    agg.applyEvent('clarify.request', {
+      request_id: 'c2',
+      questions: [
+        {qid: 'q0', question: '问题一', choices: ['x']},
+        {qid: 'q1', question: '问题二', choices: ['y', 'z'], multi_select: true},
+      ],
+    });
+    const card = agg.getItems()[0] as ClarifyCardItem;
+    expect(card.questions).toHaveLength(2);
+    expect(card.questions[1].multiSelect).toBe(true);
+
+    agg.resolveClarify('c2', 'q0');
+    const after = agg.getItems()[0] as ClarifyCardItem;
+    expect(after.answeredQids).toEqual(['q0']);
+  });
+
+  it('同 request_id 重复 clarify.request 去重；clarify.expire 标记超时', () => {
+    const agg = new TimelineAggregator();
+    agg.applyEvent('clarify.request', {request_id: 'c3', question: '问'});
+    agg.applyEvent('clarify.request', {request_id: 'c3', question: '问'});
+    expect(agg.getItems().filter(i => i.kind === 'clarify')).toHaveLength(1);
+    agg.applyEvent('clarify.expire', {request_id: 'c3'});
+    expect((agg.getItems()[0] as ClarifyCardItem).expired).toBe(true);
   });
 });
 

@@ -9,7 +9,11 @@ import type {
   ApprovalRequestPayload,
   AssistantBlock,
   AssistantMsg,
+  ClarifyCardItem,
+  ClarifyQuestion,
+  ClarifyRequestPayload,
   ErrorPayload,
+  ExpirePayload,
   ImageRef,
   MessageCompletePayload,
   MessageDeltaPayload,
@@ -184,6 +188,13 @@ export class TimelineAggregator {
       case 'approval.request':
         this.onApprovalRequest(p as unknown as ApprovalRequestPayload);
         return true;
+      case 'clarify.request':
+        this.onClarifyRequest(p as unknown as ClarifyRequestPayload);
+        return true;
+      case 'approval.expire':
+      case 'clarify.expire':
+        this.onExpire(p as unknown as ExpirePayload);
+        return true;
       case 'error':
         this.onError(p as unknown as ErrorPayload);
         return true;
@@ -233,6 +244,81 @@ export class TimelineAggregator {
     } else {
       this.push(card);
     }
+  }
+
+  // ─── 澄清提问（clarify） ────────────────────────────────────
+
+  /** 用户作答后调用：把该问题标记为已答（批量逐题）。 */
+  resolveClarify(requestId: string, questionId: string) {
+    const idx = this.items.findIndex(
+      it => it.kind === 'clarify' && it.requestId === requestId,
+    );
+    if (idx < 0) {
+      return;
+    }
+    const card = this.items[idx] as ClarifyCardItem;
+    if (card.answeredQids.includes(questionId)) {
+      return;
+    }
+    this.replaceAt(idx, {
+      ...card,
+      answeredQids: [...card.answeredQids, questionId],
+    });
+  }
+
+  private onClarifyRequest(p: ClarifyRequestPayload) {
+    if (!p.request_id) {
+      return;
+    }
+    // 单问 {question, choices, multi_select?}；批量 {questions:[...]}
+    const rawQuestions =
+      Array.isArray(p.questions) && p.questions.length > 0
+        ? p.questions
+        : [{qid: '', question: p.question, choices: p.choices, multi_select: p.multi_select}];
+    const questions: ClarifyQuestion[] = rawQuestions
+      .map(q => ({
+        qid: q.qid ?? '',
+        question: q.question ?? '',
+        choices: Array.isArray(q.choices) ? q.choices : [],
+        multiSelect: q.multi_select === true,
+      }))
+      .filter(q => q.question);
+    if (questions.length === 0) {
+      return;
+    }
+    // 去重（断线重放同 request_id）
+    const existing = this.items.findIndex(
+      it => it.kind === 'clarify' && it.requestId === p.request_id,
+    );
+    const card: ClarifyCardItem = {
+      kind: 'clarify',
+      id: nextId('cl'),
+      requestId: p.request_id,
+      questions,
+      answeredQids: [],
+    };
+    if (existing >= 0) {
+      this.replaceAt(existing, card);
+    } else {
+      this.push(card);
+    }
+  }
+
+  // ─── 交互超时（approval/clarify.expire） ────────────────────
+
+  private onExpire(p: ExpirePayload) {
+    if (!p.request_id) {
+      return;
+    }
+    const idx = this.items.findIndex(
+      it =>
+        (it.kind === 'approval' || it.kind === 'clarify') &&
+        it.requestId === p.request_id,
+    );
+    if (idx < 0) {
+      return;
+    }
+    this.replaceAt(idx, {...this.items[idx], expired: true} as TimelineItem);
   }
 
   // ─── 内部：消息流 ─────────────────────────────────────────

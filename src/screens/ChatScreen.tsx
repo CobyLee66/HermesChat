@@ -27,6 +27,7 @@ import {ApprovalCard} from '../components/ApprovalCard';
 import {Bubble} from '../components/Bubble';
 import {ChatImage} from '../components/ChatImage';
 import {ChatScrollbar} from '../components/ChatScrollbar';
+import {ClarifyCard} from '../components/ClarifyCard';
 import {FileRefCard} from '../components/FileRefCard';
 import {ModelPicker} from '../components/ModelPicker';
 import {Colors} from '../components/theme';
@@ -51,6 +52,7 @@ export function ChatScreen() {
     sendPrompt,
     interrupt,
     respondApproval,
+    respondClarify,
     switchModel,
     fetchModelOptions,
     attachImages,
@@ -247,17 +249,36 @@ export function ChatScreen() {
               onRespond={(rid, choice) => respondApproval(sessionId, rid, choice)}
             />
           );
+        case 'clarify':
+          return (
+            <ClarifyCard
+              card={item}
+              onAnswer={(rid, answer, qid) =>
+                respondClarify(sessionId, rid, answer, qid)
+              }
+            />
+          );
         case 'assistant':
           return <AssistantRow msg={item} showDetail={showDetail} />;
         default:
           return null;
       }
     },
-    [respondApproval, sessionId, showDetail],
+    [respondApproval, respondClarify, sessionId, showDetail],
   );
 
-  const usage = info?.usage as {total?: number; total_tokens?: number} | undefined;
+  const usage = info?.usage;
+  // total：本 gateway 进程累计 token（resume 历史会话后从 0 重计，服务端口径）
   const totalTokens = usage?.total ?? usage?.total_tokens;
+  // context_*：模型上下文窗口占用，本进程至少跑过一轮后才出现
+  const contextText =
+    typeof usage?.context_max === 'number' && usage.context_max > 0
+      ? `${usage?.context_used ?? 0} / ${usage.context_max}${
+          typeof usage?.context_percent === 'number'
+            ? `（${usage.context_percent}%）`
+            : ''
+        }`
+      : null;
 
   return (
     <KeyboardAvoidingView
@@ -493,8 +514,13 @@ export function ChatScreen() {
             <InfoRow label="供应商" value={info?.provider || '未知'} />
             <InfoRow
               label="Token 用量"
-              value={totalTokens !== undefined ? String(totalTokens) : '未知'}
+              value={
+                totalTokens !== undefined
+                  ? `${totalTokens}（本次连接累计）`
+                  : '未知'
+              }
             />
+            {contextText ? <InfoRow label="上下文窗口" value={contextText} /> : null}
             <InfoRow label="工作目录" value={info?.cwd || '未知'} />
             <InfoRow label="分支" value={info?.branch || '—'} />
             <InfoRow label="Profile" value={info?.profile_name || profile} />

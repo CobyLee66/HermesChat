@@ -22,7 +22,7 @@ const CHOICE_LABEL: Record<ApprovalChoice, string> = {
 export function ApprovalCard({card, sessionId, onRespond}: Props) {
   const acked = useRef(false);
   useEffect(() => {
-    if (acked.current || card.resolved) {
+    if (acked.current || card.resolved || card.expired) {
       return;
     }
     acked.current = true;
@@ -36,7 +36,7 @@ export function ApprovalCard({card, sessionId, onRespond}: Props) {
     } catch {
       // 未连接时忽略回执
     }
-  }, [card.requestId, card.resolved, sessionId]);
+  }, [card.requestId, card.resolved, card.expired, sessionId]);
 
   const resolved = card.resolved;
   return (
@@ -46,7 +46,9 @@ export function ApprovalCard({card, sessionId, onRespond}: Props) {
         <Text style={styles.desc}>{card.description}</Text>
       ) : null}
       {card.command ? <Text style={styles.command}>{card.command}</Text> : null}
-      {resolved ? (
+      {card.expired ? (
+        <Text style={styles.resolved}>已超时，服务端不再等待</Text>
+      ) : resolved ? (
         <Text style={styles.resolved}>
           已选择：{CHOICE_LABEL[resolved] ?? resolved}
         </Text>

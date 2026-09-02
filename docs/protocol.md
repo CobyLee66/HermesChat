@@ -52,9 +52,10 @@
 - 切模型：`config.set` params `{key:"model", value:"<model> [--provider <slug>]", session_id}`（turn 进行中返回 `deferred:true`，defer 到下一 turn；其余字段 `{key,value,warning,confirm_required,confirm_message,scope}`）。读当前：`config.get` params `{key:"model"|"provider"|"full"|..., session_id?}`。
 
 ### 审批 / 交互（服务端阻塞等待应答）
-- `approval.respond` params `{session_id, request_id?, choice:"once"|"session"|"always"|"deny", all?}` → `{resolved: <处理条数>}`。**已从源码确认**（methods_prompt.py:1404）。
+- `approval.respond` params `{session_id, request_id?, choice:"once"|"session"|"always"|"deny", all?}` → `{resolved: <处理条数>}`。**已从源码确认**（methods_prompt.py:1881）。`request_id` 省略时按 FIFO 解最老一条；`always` 的持久化 pattern 完全由服务端自带 `pattern_keys` 决定，客户端不传。
 - `approval.received` params `{session_id, request_id}` → `{acknowledged}`：UI 展示审批卡时回执（desktop 同款做法）。
-- `clarify.respond {request_id, answer}`、`sudo.respond {password}`、`secret.respond {value}`。
+- `clarify.respond {request_id, answer, question_id?}`（allow_expired，迟到应答返回 `{status:"expired"}` 不报错）：answer 单选=选项文本、**多选=JSON 字符串数组**（desktop 参考实现如此）、自由文本=原文；批量问题逐题带 `question_id`（qid），全答完才释放（server.py `_batch_clarify`）。`sudo.respond {request_id, password}`、`secret.respond {request_id, value}` 同机制（App 暂未实现 UI）。
+- ⚠️ **事件单播**：带 session_id 的事件帧只发给会话**最后绑定的 transport**（`write_json` → `session["transport"]`；create/resume/prompt.submit 都会 re-bind）。同一会话被 dashboard/TUI 打开过后，手机端就收不到审批/澄清事件。兜底：**resume 返回 `pending_approval`/`pending_clarify` 字段**（App 已在 attach/reattachAfterResume 消费恢复卡片），另有 `approval.pending {session_id}` RPC 可主动拉取；事件帧带 per-session `seq`，可用 `session.events.since {session_id, last_seen}` 补漏。
 
 ### 附件（M3 已实现，全部从源码确认）
 - `image.attach_bytes {session_id, content_base64, filename?, ext?}`（methods_prompt.py:823）→ `{attached, path, count, remainder:"", text, bytes, name, width?, height?, token_estimate?}`。远程客户端 base64 上传；`content_base64` 接受裸 base64 或 `data:image/...;base64,` 前缀（可含空白），解码后 ≤25MB（`_ATTACH_BYTES_MAX_BYTES`）。**扩展名优先采信 filename 后缀**，其次 magic bytes（PNG/JPEG/GIF/WebP/BMP）——所以客户端重编码成 JPEG 后必须把文件名改成 .jpg。写入 `<profile_home>/images/upload_<ts>_<n>.<ext>` 并进 session 的 `attached_images` 队列，**随下一条 `prompt.submit` 进上下文**；空文本 prompt 也合法（服务端补 "What do you see in this image?"）。错误码：4001 session not found、4015 缺参数、4016 不支持的扩展名、4017 非 base64/空、4018 超 25MB。
@@ -70,9 +71,12 @@
 - 消息流：`message.start`（payload 为空）→ `message.delta {text, rendered?}`（流式）→ `message.complete {text, usage, status?, rendered?, partial?, error?, reasoning?, warning?}`；`message.interim {text, already_streamed}`（工具回合间中间文本；`already_streamed=true` 表示文本已通过 delta 流出，客户端应密封当前文本段、后续 delta 开新段）。
 - 思考/推理：`thinking.delta {text}`（可能带 `(⊙_⊙) reflecting...` 这类占位文本，也可能发空串）、`reasoning.delta {text}`、`reasoning.available {text}`（**实测其 text 是最终回复而非推理内容**，渲染可忽略）。
 - 工具：`tool.start {tool_id, name, context, args?, args_text?}` —— 注意 80 字预览字段名是 **`context`**（不是 preview）；`tool.progress {tool_id?, preview?}`、`tool.complete {tool_id, name, args, result?, summary?, duration_s?, result_text?, inline_diff?, todos?}`、`tool.generating`、`tool.output_risk`。tool 卡片按 `tool_id` 合并 start/complete。
-- 审批/交互请求：`approval.request {request_id, command(已脱敏), description, pattern_key, pattern_keys?, choices:["once","session","always","deny"], allow_permanent, allow_session?, smart_denied?}`（choices 由服务端按 smart_denied/allow_permanent 补齐）；`clarify.request`、`sudo.request`、`secret.request`。
+- 审批/交互请求：`approval.request {request_id, command(已脱敏), description, pattern_key, pattern_keys?, choices:["once","session","always","deny"], allow_permanent, allow_session?, smart_denied?}`（choices 由服务端按 smart_denied/allow_permanent 补齐）；`clarify.request {request_id, question, choices?, multi_select?}` 或批量 `{request_id, questions:[{qid, question, choices?, multi_select?}]}`；`sudo.request`、`secret.request {prompt, env_var}`。统一三段式：请求事件 → `*.respond` RPC → 超时后服务端发 **`<type>.expire {request_id}`**（App 据此把卡片标记为已超时）。
 - 状态/错误：`status.update {kind, text}`（kind 实测除 status/process/compacting/lifecycle/loop 外还有 `warn` 等，按字符串原样展示即可）、`error {message}`、`background.complete`。
-- `usage` 实测结构（session.info / message.complete）：`{model, input, output, reasoning, prompt, completion, total, calls, context_used, context_max, context_percent, compressions, active_subagents}`。
+- `usage` 实测结构（session.info / message.complete / session.usage 三者同构）：`{model, input, output, reasoning, prompt, completion, total, calls, context_used, context_max, context_percent, compressions, active_subagents}`。注意：
+  - **没有 `total_tokens` 别名**；`session.usage` 事件（turn 中每秒增量）payload 为 `{usage}`。
+  - usage 计数器是 gateway 进程内运行时状态，**resume 历史会话后从 0 重计**（「一直显示 0」是服务端口径，不是 bug）；`session.create`/冷路径 resume 的 info **无 usage 键**。
+  - `context_max`（模型上下文窗口上限）与 `context_used/context_percent` 只在本进程至少跑过一轮后才出现；无独立的上下文上限查询 RPC（`session.context_breakdown` 只认 live sid 且同样依赖跑过 turn）。
 - 子代理事件（`subagent.*`）经 `message.*`/`tool.*` 转发，M0 不需要特殊处理。
 
 ## 4. 消息数据结构

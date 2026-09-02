@@ -9,6 +9,8 @@ import {TimelineAggregator} from '../rpc/aggregator';
 import {getRpc} from '../rpc/runtime';
 import type {
   ApprovalChoice,
+  ApprovalRequestPayload,
+  ClarifyRequestPayload,
   FileAttachResult,
   ImageAttachResult,
   ModelOptionsResult,
@@ -17,6 +19,7 @@ import type {
   SessionInfoPayload,
   SessionResumeResult,
   TimelineItem,
+  UsageInfo,
 } from '../rpc/types';
 import {getExecRemote} from '../ssh/execRemote';
 import {fetchRemoteHistory, toSeedMessages} from '../ssh/remoteHistory';
@@ -83,6 +86,20 @@ function aggFor(sid: string): TimelineAggregator {
   return agg;
 }
 
+/** resume 挂起的审批/澄清补进时间线（走正常事件路径，自带 request_id 去重）。 */
+function applyPending(
+  agg: TimelineAggregator,
+  approvals?: ApprovalRequestPayload[],
+  clarifies?: ClarifyRequestPayload[],
+) {
+  for (const p of approvals ?? []) {
+    agg.applyEvent('approval.request', p);
+  }
+  for (const p of clarifies ?? []) {
+    agg.applyEvent('clarify.request', p);
+  }
+}
+
 interface ChatStore {
   bySession: Record<string, SessionChatState>;
 
@@ -96,6 +113,10 @@ interface ChatStore {
       storedSessionId?: string;
       /** foreign 只读视图标记（own 会话不传/传 null） */
       foreign?: {originId: string; hostProfile: string} | null;
+      /** resume 返回的挂起审批（事件单播给旧 transport，靠它补卡） */
+      pendingApprovals?: ApprovalRequestPayload[];
+      /** resume 返回的挂起澄清提问 */
+      pendingClarifies?: ClarifyRequestPayload[];
     },
   ): void;
   detach(sid: string): void;
@@ -104,7 +125,12 @@ interface ChatStore {
   reattachAfterResume(
     oldSid: string,
     liveSid: string,
-    opts: {messages: ProjectedMessage[]; running?: boolean},
+    opts: {
+      messages: ProjectedMessage[];
+      running?: boolean;
+      pendingApprovals?: ApprovalRequestPayload[];
+      pendingClarifies?: ClarifyRequestPayload[];
+    },
   ): void;
   /** resume 失败（服务端已回收）：标记，不清数据。 */
   markResumeFailed(sid: string): void;
@@ -136,6 +162,13 @@ interface ChatStore {
     requestId: string,
     choice: ApprovalChoice,
   ): Promise<void>;
+  /** 澄清提问作答；questionId 仅批量问题需要（服务端按 qid 归答案）。 */
+  respondClarify(
+    sid: string,
+    requestId: string,
+    answer: string,
+    questionId?: string,
+  ): Promise<void>;
   switchModel(sid: string, model: string, provider?: string): Promise<string>;
   fetchModelOptions(sid?: string): Promise<ModelOptionsResult>;
 }
@@ -166,6 +199,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       if (opts?.messages && agg.getItems().length === 0) {
         agg.hydrate(opts.messages);
       }
+      applyPending(agg, opts?.pendingApprovals, opts?.pendingClarifies);
       snapshot(sid, {
         ...(opts?.info ? {info: opts.info} : null),
         ...(opts?.profile !== undefined ? {profile: opts.profile} : null),
@@ -184,6 +218,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       const prev = get().bySession[oldSid];
       const agg = new TimelineAggregator();
       agg.hydrate(opts.messages ?? []);
+      applyPending(agg, opts.pendingApprovals, opts.pendingClarifies);
       if (liveSid !== oldSid) {
         aggregators.delete(oldSid);
         set(s => {
@@ -226,6 +261,27 @@ export const useChatStore = create<ChatStore>((set, get) => {
     },
 
     applyEvent(sid, type, payload) {
+      // session.usage（turn 中每秒增量）与 message.complete 都带 usage：
+      // 合并进 info，会话信息弹层才能显示实时 token 用量/上下文窗口。
+      // 注：usage 是 gateway 进程内计数器，resume 历史会话后从 0 重计。
+      if (type === 'session.usage' || type === 'message.complete') {
+        const usage = (payload as {usage?: UsageInfo} | null)?.usage;
+        if (usage) {
+          const prev = get().bySession[sid] ?? EMPTY;
+          set(s => ({
+            bySession: {
+              ...s.bySession,
+              [sid]: {
+                ...prev,
+                info: {...(prev.info ?? {}), usage},
+              },
+            },
+          }));
+        }
+        if (type === 'session.usage') {
+          return;
+        }
+      }
       if (type === 'session.info') {
         const prev = get().bySession[sid] ?? EMPTY;
         const info = payload as SessionInfoPayload;
@@ -304,6 +360,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
         let storedId: string;
         let messages: ProjectedMessage[];
         let info: SessionInfoPayload | undefined;
+        let pendingApprovals: ApprovalRequestPayload[] | undefined;
+        let pendingClarifies: ClarifyRequestPayload[] | undefined;
         const existingFork = await getFork(foreign.originId, profile);
         if (existingFork) {
           // 之前已派生过（如派生后 App 重启再来）：直接 resume fork，走正常人格
@@ -316,6 +374,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
           storedId = r.stored_session_id ?? existingFork.forkId;
           messages = r.messages ?? [];
           info = r.info;
+          pendingApprovals = r.pending_approval;
+          pendingClarifies = r.pending_clarify;
         } else {
           // session.history RPC 只认 live sid（持久化 id 实测 4001）→
           // 经 SSH exec 只读 sqlite 取全量历史做种子
@@ -353,6 +413,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
           info,
           profile,
           storedSessionId: storedId,
+          pendingApprovals,
+          pendingClarifies,
         });
         set(s => ({
           bySession: {
@@ -482,6 +544,26 @@ export const useChatStore = create<ChatStore>((set, get) => {
       } catch (e) {
         agg.applyEvent('error', {
           message: `审批应答失败: ${e instanceof Error ? e.message : String(e)}`,
+        });
+        snapshot(sid);
+      }
+    },
+
+    async respondClarify(sid, requestId, answer, questionId) {
+      const agg = aggFor(sid);
+      // 乐观更新：该问题立即标记已答
+      agg.resolveClarify(requestId, questionId ?? '');
+      snapshot(sid);
+      try {
+        // clarify.respond 走全局 pending 注册表，不需要 session_id
+        await getRpc().call('clarify.respond', {
+          request_id: requestId,
+          answer,
+          ...(questionId ? {question_id: questionId} : null),
+        });
+      } catch (e) {
+        agg.applyEvent('error', {
+          message: `作答失败: ${e instanceof Error ? e.message : String(e)}`,
         });
         snapshot(sid);
       }

@@ -80,6 +80,8 @@ export function SessionListScreen() {
               info: result.info,
               profile,
               storedSessionId: result.stored_session_id ?? fork.forkId,
+              pendingApprovals: result.pending_approval,
+              pendingClarifies: result.pending_clarify,
             });
             navigation.navigate('Chat', {
               sessionId: result.session_id,
@@ -120,6 +122,8 @@ export function SessionListScreen() {
           info: result.info,
           profile,
           storedSessionId: result.stored_session_id ?? row.id,
+          pendingApprovals: result.pending_approval,
+          pendingClarifies: result.pending_clarify,
         });
         navigation.navigate('Chat', {
           sessionId: liveSid,

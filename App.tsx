@@ -4,13 +4,16 @@
  */
 
 import React, {useEffect} from 'react';
-import {Platform, StatusBar} from 'react-native';
+import {Platform, StatusBar, StyleSheet, View} from 'react-native';
 import {NavigationContainer} from '@react-navigation/native';
 import {
   createNativeStackNavigator,
   type NativeStackNavigationOptions,
 } from '@react-navigation/native-stack';
-import {SafeAreaProvider} from 'react-native-safe-area-context';
+import {
+  SafeAreaProvider,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
 import {enableScreens} from 'react-native-screens';
 
 import {Colors} from './src/components/theme';
@@ -51,6 +54,20 @@ function App() {
   return (
     <SafeAreaProvider>
       <StatusBar barStyle="dark-content" />
+      <Root state={state} />
+    </SafeAreaProvider>
+  );
+}
+
+/** 全局底部安全区：内容抬到系统导航栏之上（Android 全面屏手势条）。 */
+function Root({state}: {state: string}) {
+  const insets = useSafeAreaInsets();
+  return (
+    <View
+      style={[
+        styles.root,
+        {paddingBottom: insets.bottom},
+      ]}>
       <NavigationContainer>
         <Stack.Navigator
           screenOptions={screenOptions}
@@ -85,8 +102,12 @@ function App() {
           <Stack.Screen name="Chat" component={ChatScreen} />
         </Stack.Navigator>
       </NavigationContainer>
-    </SafeAreaProvider>
+    </View>
   );
 }
+
+const styles = StyleSheet.create({
+  root: {flex: 1, backgroundColor: Colors.bg},
+});
 
 export default App;

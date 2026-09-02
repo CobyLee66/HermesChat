@@ -12,6 +12,7 @@
 import {AppState, type AppStateStatus} from 'react-native';
 
 import {RpcClient} from '../rpc/client';
+import type {SessionResumeResult} from '../rpc/types';
 import type {
   ConnectResult,
   Connector,
@@ -116,20 +117,19 @@ export class SshManager implements Connector {
       const profile = state.profile;
       const storedId = state.storedSessionId || sid;
       try {
-        const result = await rpc.call<{
-          session_id?: string;
-          messages?: never[];
-          running?: boolean;
-        }>('session.resume', {
+        const result = await rpc.call<SessionResumeResult>('session.resume', {
           session_id: storedId,
           profile,
           cols: 100,
         });
         const liveSid = result?.session_id || sid;
-        // resume 返回历史：重挂到原 key（live sid 相同）或迁移到新 key
+        // resume 返回历史 + 断线期间挂起的审批/澄清（事件单播给旧
+        // transport，错过只能靠 pending_* 恢复）：重挂到原 key 或迁移新 key
         chat.reattachAfterResume(sid, liveSid, {
-          messages: (result?.messages ?? []) as never[],
+          messages: result?.messages ?? [],
           running: result?.running,
+          pendingApprovals: result?.pending_approval,
+          pendingClarifies: result?.pending_clarify,
         });
       } catch {
         // 单个会话恢复失败不阻塞其他会话（服务端可能已回收）
