@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   Alert,
   FlatList,
@@ -26,6 +26,7 @@ import {
 import {ApprovalCard} from '../components/ApprovalCard';
 import {Bubble} from '../components/Bubble';
 import {ChatImage} from '../components/ChatImage';
+import {ChatScrollbar} from '../components/ChatScrollbar';
 import {FileRefCard} from '../components/FileRefCard';
 import {ModelPicker} from '../components/ModelPicker';
 import {Colors} from '../components/theme';
@@ -35,7 +36,6 @@ import {VoiceButton} from '../components/VoiceButton';
 import type {AssistantMsg, TimelineItem} from '../rpc/types';
 import {useChatStore} from '../store/chat';
 import {useConnectionStore} from '../store/connection';
-import {useSessionsStore} from '../store/sessions';
 import type {RootStackParamList} from '../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'Chat'>;
@@ -57,9 +57,6 @@ export function ChatScreen() {
     removeAttachment,
     attachFile,
   } = useChatStore();
-  const detach = useChatStore(s => s.detach);
-  const createSession = useSessionsStore(s => s.create);
-  const attach = useChatStore(s => s.attach);
   const connState = useConnectionStore(s => s.state);
 
   const [input, setInput] = useState('');
@@ -68,6 +65,11 @@ export function ChatScreen() {
   const [infoVisible, setInfoVisible] = useState(false);
   const [attachPanelOpen, setAttachPanelOpen] = useState(false);
   const [attaching, setAttaching] = useState(false);
+  /** 是否显示工具调用/思考/推理等非对话内容（顶栏菜单切换） */
+  const [showDetail, setShowDetail] = useState(true);
+  /** 列表滚动状态：驱动自绘滚动条与「回到底部」按钮 */
+  const [scroll, setScroll] = useState({offset: 0, content: 0, viewport: 0});
+  const listRef = useRef<FlatList<TimelineItem>>(null);
 
   const items = useMemo(() => chat?.items ?? [], [chat?.items]);
   const invertedItems = useMemo(() => [...items].reverse(), [items]);
@@ -192,37 +194,9 @@ export function ChatScreen() {
     setAttachPanelOpen(false);
   }, []);
 
-  const onResetSession = useCallback(() => {
-    Alert.alert('重开会话', '将放弃当前上下文，开启全新会话。确定吗？', [
-      {text: '取消', style: 'cancel'},
-      {
-        text: '重开',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            // 注：源码确认 /reset 是 /new 的 gateway_only 别名（commands.py），
-            // 经 slash.exec 只会在 slash worker 子进程内执行，无法重置 gateway
-            // 会话本身，故"重开会话"退化为 session.create 新会话。
-            const result = await createSession(profile);
-            detach(sessionId);
-            attach(result.session_id, {
-              messages: result.messages ?? [],
-              info: result.info,
-              profile,
-              storedSessionId: result.stored_session_id,
-            });
-            navigation.replace('Chat', {
-              sessionId: result.session_id,
-              profile,
-              title: '新会话',
-            });
-          } catch (e) {
-            Alert.alert('重开失败', e instanceof Error ? e.message : String(e));
-          }
-        },
-      },
-    ]);
-  }, [attach, createSession, detach, navigation, profile, sessionId]);
+  const scrollTo = useCallback((offset: number, animated = false) => {
+    listRef.current?.scrollToOffset({offset, animated});
+  }, []);
 
   const renderItem = useCallback(
     ({item}: {item: TimelineItem}) => {
@@ -274,12 +248,12 @@ export function ChatScreen() {
             />
           );
         case 'assistant':
-          return <AssistantRow msg={item} />;
+          return <AssistantRow msg={item} showDetail={showDetail} />;
         default:
           return null;
       }
     },
-    [respondApproval, sessionId],
+    [respondApproval, sessionId, showDetail],
   );
 
   const usage = info?.usage as {total?: number; total_tokens?: number} | undefined;
@@ -311,14 +285,43 @@ export function ChatScreen() {
           <Text style={styles.bannerGrayText}>正在派生到当前 profile…</Text>
         </View>
       ) : null}
-      <FlatList
-        data={invertedItems}
-        keyExtractor={it => it.id}
-        renderItem={renderItem}
-        inverted
-        contentContainerStyle={styles.listContent}
-        keyboardShouldPersistTaps="handled"
-      />
+      <View style={styles.listWrap}>
+        <FlatList
+          ref={listRef}
+          data={invertedItems}
+          keyExtractor={it => it.id}
+          renderItem={renderItem}
+          inverted
+          contentContainerStyle={styles.listContent}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          scrollEventThrottle={32}
+          onScroll={e =>
+            setScroll(s => ({...s, offset: e.nativeEvent.contentOffset.y}))
+          }
+          onContentSizeChange={(_w, h) =>
+            setScroll(s => ({...s, content: h}))
+          }
+          onLayout={e =>
+            setScroll(s => ({...s, viewport: e.nativeEvent.layout.height}))
+          }
+        />
+        <ChatScrollbar
+          offset={scroll.offset}
+          contentHeight={scroll.content}
+          viewportHeight={scroll.viewport}
+          onScrollTo={offset => scrollTo(offset)}
+        />
+        {/* inverted 列表 offset 即距底部的距离；超过两屏显示回到底部按钮 */}
+        {scroll.viewport > 0 && scroll.offset > scroll.viewport * 2 ? (
+          <TouchableOpacity
+            style={styles.jumpBtn}
+            activeOpacity={0.85}
+            onPress={() => scrollTo(0, true)}>
+            <Text style={styles.jumpText}>↓ 回到底部</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
       {status && busy ? (
         <View style={styles.statusBar}>
           <Text style={styles.statusText} numberOfLines={1}>
@@ -445,9 +448,11 @@ export function ChatScreen() {
               style={styles.menuItem}
               onPress={() => {
                 setMenuVisible(false);
-                onResetSession();
+                setShowDetail(v => !v);
               }}>
-              <Text style={[styles.menuText, styles.menuDanger]}>重开会话</Text>
+              <Text style={styles.menuText}>
+                {showDetail ? '隐藏工具与思考' : '显示工具与思考'}
+              </Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>
@@ -506,12 +511,21 @@ function InfoRow({label, value}: {label: string; value: string}) {
 /** 助手消息列：无头像占位，块列整宽（文本气泡/思考/工具/错误）。 */
 const AssistantRow = React.memo(function AssistantRow({
   msg,
+  showDetail,
 }: {
   msg: AssistantMsg;
+  showDetail: boolean;
 }) {
+  // showDetail=false 时隐藏工具调用/思考/推理等非对话块
+  const blocks = showDetail
+    ? msg.blocks
+    : msg.blocks.filter(
+        b =>
+          b.type !== 'tool' && b.type !== 'thinking' && b.type !== 'reasoning',
+      );
   return (
     <View style={styles.assistantCol}>
-      {msg.blocks.map((b, i) => {
+      {blocks.map((b, i) => {
         switch (b.type) {
           case 'text':
             return <Bubble key={i} text={b.text} isUser={false} />;
@@ -546,7 +560,25 @@ const AssistantRow = React.memo(function AssistantRow({
 
 const styles = StyleSheet.create({
   container: {flex: 1, backgroundColor: Colors.bg},
+  listWrap: {flex: 1},
   listContent: {paddingVertical: 10},
+  jumpBtn: {
+    position: 'absolute',
+    right: 14,
+    bottom: 14,
+    backgroundColor: Colors.card,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    shadowOffset: {width: 0, height: 2},
+    elevation: 3,
+  },
+  jumpText: {fontSize: 13, color: Colors.accentDark, fontWeight: '600'},
   menuIcon: {fontSize: 24, color: Colors.text, paddingHorizontal: 8},
   banner: {
     backgroundColor: '#FFF7E8',
@@ -707,7 +739,6 @@ const styles = StyleSheet.create({
   },
   menuItem: {paddingVertical: 14, paddingHorizontal: 20},
   menuText: {fontSize: 15, color: Colors.text},
-  menuDanger: {color: Colors.danger},
   infoCard: {
     backgroundColor: Colors.card,
     borderRadius: 12,

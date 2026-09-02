@@ -1,6 +1,7 @@
 import React from 'react';
 import {StyleSheet, Text, View} from 'react-native';
 
+import {MarkdownText} from './MarkdownText';
 import {Colors} from './theme';
 
 interface Props {
@@ -10,6 +11,7 @@ interface Props {
 
 /**
  * 聊天气泡：用户右（浅蓝）、助手左（白）。无头像占位，尽量撑满宽度。
+ * 用户消息按纯文本渲染；助手消息按 markdown 渲染（表格可横向滚动）。
  * QQ 风格角标箭头：纯 View border 三角形，压在与气泡相接的上角
  * （assistant 左上指向左，user 右上指向右），颜色与气泡一致。
  */
@@ -23,9 +25,13 @@ export function Bubble({text, isUser}: Props) {
             isUser ? styles.arrowUser : styles.arrowAssistant,
           ]}
         />
-        <Text style={styles.text} selectable>
-          {text}
-        </Text>
+        {isUser ? (
+          <Text style={styles.text} selectable>
+            {text}
+          </Text>
+        ) : (
+          <MarkdownText text={text} />
+        )}
       </View>
     </View>
   );
