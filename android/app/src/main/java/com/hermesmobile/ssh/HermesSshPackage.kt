@@ -8,7 +8,7 @@ import com.facebook.react.uimanager.ViewManager
 class HermesSshPackage : ReactPackage {
 
   override fun createNativeModules(reactContext: ReactApplicationContext): List<NativeModule> =
-    listOf(HermesSshModule(reactContext))
+    listOf(HermesSshModule(reactContext), HermesAudioModule(reactContext))
 
   override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> =
     emptyList()

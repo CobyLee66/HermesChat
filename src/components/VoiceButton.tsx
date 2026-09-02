@@ -13,11 +13,7 @@ import {
   Text,
   TouchableOpacity,
 } from 'react-native';
-import AudioRecorderPlayer, {
-  AudioEncoderAndroidType,
-  AudioSourceAndroidType,
-  OutputFormatAndroidType,
-} from 'react-native-audio-recorder-player';
+import * as HermesAudio from '../ssh/HermesAudio';
 import RNFS from 'react-native-fs';
 
 import {transcribeAudio} from '../rpc/rest';
@@ -66,7 +62,7 @@ export function VoiceButton({profile, onText}: Props) {
   useEffect(() => {
     return () => {
       clearTimer();
-      AudioRecorderPlayer.stopRecorder().catch(() => {});
+      HermesAudio.stopRecording().catch(() => {});
       if (pathRef.current) {
         RNFS.unlink(pathRef.current).catch(() => {});
       }
@@ -80,12 +76,7 @@ export function VoiceButton({profile, onText}: Props) {
     }
     const path = `${RNFS.CachesDirectoryPath}/voice_${Date.now()}.m4a`;
     pathRef.current = path;
-    await AudioRecorderPlayer.startRecorder(path, {
-      AudioSourceAndroid: AudioSourceAndroidType.MIC,
-      OutputFormatAndroid: OutputFormatAndroidType.MPEG_4,
-      AudioEncoderAndroid: AudioEncoderAndroidType.AAC,
-      AVEncodingOptionIOS: 'aac',
-    });
+    await HermesAudio.startRecording(path);
     setSecs(0);
     setPhase('recording');
     timerRef.current = setInterval(() => setSecs(s => s + 1), 1000);
@@ -96,7 +87,7 @@ export function VoiceButton({profile, onText}: Props) {
     setPhase('busy');
     const path = pathRef.current;
     try {
-      await AudioRecorderPlayer.stopRecorder();
+      await HermesAudio.stopRecording();
       const base64 = await RNFS.readFile(path, 'base64');
       const {httpUrl, token} = useConnectionStore.getState();
       const result = await transcribeAudio(

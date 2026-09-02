@@ -36,9 +36,6 @@ export default defineConfig({
       './HermesSsh': r('./src/web-stubs/HermesSsh.ts'),
       'react-native-fs': r('./src/web-stubs/react-native-fs.ts'),
       '@react-native-documents/picker': r('./src/web-stubs/documents-picker.ts'),
-      'react-native-audio-recorder-player': r(
-        './src/web-stubs/audio-recorder-player.ts',
-      ),
       '@react-native-async-storage/async-storage': r(
         './src/web-stubs/async-storage.ts',
       ),
