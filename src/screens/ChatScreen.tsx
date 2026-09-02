@@ -292,25 +292,33 @@ export function ChatScreen() {
           keyExtractor={it => it.id}
           renderItem={renderItem}
           inverted
-          contentContainerStyle={styles.listContent}
+          contentContainerStyle={[
+            styles.listContent,
+            // 内容不足一屏时视觉顶部对齐（inverted 会垂直翻转容器，
+            // flex-end 对应容器底部即视觉顶部；超过一屏时无影响）
+            styles.listContentTop,
+          ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
           scrollEventThrottle={32}
-          onScroll={e =>
-            setScroll(s => ({...s, offset: e.nativeEvent.contentOffset.y}))
-          }
+          onScroll={e => {
+            // 合成事件是池化的，必须同步取出值，不能塞进 setState updater
+            const offset = e.nativeEvent.contentOffset.y;
+            setScroll(s => (s.offset === offset ? s : {...s, offset}));
+          }}
           onContentSizeChange={(_w, h) =>
-            setScroll(s => ({...s, content: h}))
+            setScroll(s => (s.content === h ? s : {...s, content: h}))
           }
-          onLayout={e =>
-            setScroll(s => ({...s, viewport: e.nativeEvent.layout.height}))
-          }
+          onLayout={e => {
+            const viewport = e.nativeEvent.layout.height;
+            setScroll(s => (s.viewport === viewport ? s : {...s, viewport}));
+          }}
         />
         <ChatScrollbar
           offset={scroll.offset}
           contentHeight={scroll.content}
           viewportHeight={scroll.viewport}
-          onScrollTo={offset => scrollTo(offset)}
+          onScrollTo={scrollTo}
         />
         {/* inverted 列表 offset 即距底部的距离；超过两屏显示回到底部按钮 */}
         {scroll.viewport > 0 && scroll.offset > scroll.viewport * 2 ? (
@@ -562,6 +570,7 @@ const styles = StyleSheet.create({
   container: {flex: 1, backgroundColor: Colors.bg},
   listWrap: {flex: 1},
   listContent: {paddingVertical: 10},
+  listContentTop: {flexGrow: 1, justifyContent: 'flex-end'},
   jumpBtn: {
     position: 'absolute',
     right: 14,
