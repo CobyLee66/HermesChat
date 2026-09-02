@@ -18,6 +18,8 @@ import type {
   ConnectionProfile,
 } from '../store/connection';
 import {useChatStore} from '../store/chat';
+import type {ExecRemoteFn} from './execRemote';
+import * as HermesSsh from './HermesSsh';
 import {SshTunnelTransport, type Transport} from './transport';
 
 /** transport 工厂：默认 SSH 隧道；web 直连注入 WebDirectTransport（见 ssh/webDirect.ts）。 */
@@ -42,6 +44,11 @@ export class SshManager implements Connector {
   private appStateSub: {remove(): void} | null = null;
   /** 手动 disconnect 期间抑制 drop 上报 */
   private tearingDown = false;
+  /**
+   * 远端只读 exec（multiplex 归属扫描/历史查询用）。
+   * 仅 SSH 原生模块可用时提供（web 直连的 WebDirectTransport 无隧道层）。
+   */
+  readonly execRemote?: ExecRemoteFn;
 
   /** onForeground：App 回前台时调用（connection store 用来立即重试）。 */
   constructor(opts?: {
@@ -50,6 +57,10 @@ export class SshManager implements Connector {
   }) {
     this.foregroundCb = opts?.onForeground ?? null;
     this.transportFactory = opts?.transportFactory ?? defaultTransportFactory;
+    if (HermesSsh.isAvailable) {
+      this.execRemote = (command, timeoutMs) =>
+        HermesSsh.exec(command, timeoutMs ?? HermesSsh.DEFAULT_EXEC_TIMEOUT_MS);
+    }
     this.appStateSub = AppState.addEventListener(
       'change',
       (s: AppStateStatus) => {
@@ -97,6 +108,11 @@ export class SshManager implements Connector {
     }
     const chat = useChatStore.getState();
     for (const [sid, state] of Object.entries(chat.bySession)) {
+      // foreign 只读视图（物理在其它 profile 的库，本就不能 resume 到当前
+      // profile）与已派生迁移的残留条目跳过重挂
+      if (state.foreign || state.migratedTo) {
+        continue;
+      }
       const profile = state.profile;
       const storedId = state.storedSessionId || sid;
       try {

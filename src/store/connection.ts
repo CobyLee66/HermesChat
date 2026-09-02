@@ -11,6 +11,7 @@ import {create} from 'zustand';
 
 import type {RpcClient} from '../rpc/client';
 import {setRpc} from '../rpc/runtime';
+import {setExecRemote, type ExecRemoteFn} from '../ssh/execRemote';
 import {useChatStore} from './chat';
 import {useSessionsStore} from './sessions';
 
@@ -80,6 +81,11 @@ export interface Connector {
   onDrop(cb: (reason: string) => void): void;
   /** 重连成功后对活跃会话 session.resume */
   resumeActiveSessions(): Promise<void>;
+  /**
+   * 远端只读 exec（SSH 隧道可用时由 SshManager 提供；web 直连为 undefined）。
+   * 连接成功后由 connection store 注册到 ssh/execRemote 注册表。
+   */
+  execRemote?: ExecRemoteFn;
 }
 
 interface ConnectionStore {
@@ -164,6 +170,8 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => {
     set({state: 'bootstrapping', error: null});
     wireEvents(result.rpc);
     setRpc(result.rpc);
+    // 只读 exec 能力（multiplex 归属扫描用）；web 直连时为 undefined → null
+    setExecRemote(connector.execRemote ?? null);
     set({
       state: 'ready',
       wsUrl: result.wsUrl,
@@ -300,6 +308,7 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => {
       const connector = get().connector;
       set({state: 'disconnected', error: null, reconnectAttempt: 0});
       setRpc(null);
+      setExecRemote(null);
       if (connector) {
         try {
           await connector.disconnect();
@@ -315,6 +324,7 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => {
         return;
       }
       setRpc(null);
+      setExecRemote(null);
       set({state: 'reconnecting', error: reason, reconnectAttempt: 0});
       scheduleReconnect();
     },

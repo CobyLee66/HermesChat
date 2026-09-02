@@ -36,7 +36,7 @@
 - `session.interrupt` params `{session_id}` → `{"status":"interrupted"}`（中断当前 turn）。
 - `session.list` params `{limit?, profile?}` → `{sessions:[{id,title,preview,started_at,message_count,source}]}`。**已实测**（字段一致）。
 - `session.resume` params `{session_id, profile?, cols?, omit_messages?}` → 重挂会话（含历史消息，除非 omit_messages）。错误码：4007=session not found、4130=transcript 过大（`sessions.max_resume_messages`）。
-- `session.history` params `{session_id}` → `{count, messages}`。
+- `session.history` params `{session_id}` → `{count, messages}`。⚠️ **只认 live sid**（`_sess_nowait` 直查内存 `_sessions`，key 是 8 位 live id）：对 session.list 返回的持久化 id 一律 4001（已实测，见 §5）。
 - `session.delete` params `{session_id, profile?}`；`session.close` params `{session_id}` → `{"closed":true}`（删除活动会话报 4023，先 close）。**session.close 已实测**。
 - `session.title`（改名）、`session.status`（返回 `{output}` 纯文本状态块）。
 - ⚠️ **`session.info` 不是 RPC 方法**（tui_gateway 里无对应 `@method`），只是事件 + create/resume 结果里的 `info` 字段。会话信息弹层用缓存的 info 即可，不要 RPC 调用它。
@@ -86,7 +86,23 @@
   - `@file:<ref>` 同理（file.attach 写入历史的引用），渲染成文件卡片即可。
   - App 端实现：`src/rpc/references.ts` 的 `parseMessageText`（ aggregator hydrate / message.complete / 本地回显三处接入）。
 
-## 5. 本机联调环境
+## 5. multiplex_profiles 下的会话 profile 归属分组（客户端方案，2026-09-02 实现）
+
+**背景（已实测核实）**：用户启用 `multiplex_profiles` 后，qqbot 等网关会话物理上全部写在宿主 profile（本机为 main）的 state.db；`sessions.session_key` 形如 `agent:<profile名>:qqbot:dm:<hash>`，第二段是归属命名空间。本机实测分布：main 库 340 行中含 main/finance/study/work/mental-health 五个命名空间 + 269 行无 agent 前缀（App/fork 创建）。
+
+**官方 RPC 的硬限制（不可改，均已实测/源码确认）**：
+- `session.list {profile:X}` 只查 X 自己的库，投影 6 列，**不含 session_key** → RPC 层无法分辨归属。
+- `session.resume {session_id, profile:X}` 按 X 的库找行：物理在 main 库的会话用 profile=X 报 4007；profile=main 能读但 attach 出 main 人格的 agent（错人格）。
+- ⚠️ `session.history {session_id}` **只认 8 位 live sid**（`_sess_nowait` 直查 `_sessions` 内存字典，methods_session.py:2486 + server.py:2459）：对 session.list 返回的持久化 id 一律 **4001**（2026-09-02 实测 finance 命名空间会话，profile=main/finance 均 4001）。它**不能**用来读存储会话的历史。
+- `session.create {profile, parent_session_id, messages}`：官方分支链接语义；`_coerce_seed_history`（server.py:7463）接受 `[{role:"user"|"assistant"|"system", content或text: string}]`，丢弃空文本行。
+
+**客户端方案**（纯客户端，不改服务端）：
+1. **归属映射**（`src/ssh/namespaceMap.ts`）：SSH exec 一次只读扫描——逐 profile 库 + hermes 根库跑 `sqlite3 'file:<db>?mode=ro' "SELECT id || char(9) || session_key FROM sessions WHERE session_key LIKE 'agent:%'"`，`#DB` 标记行归属宿主，解析出 `sessionId → {namespace, host}`。远端无 sqlite3/exec 不可用（web 直连）→ 空映射静默降级（行为 = 现状）。库路径取自 profiles.list 的 `path`（本机实测：default → `~/.hermes`，main 等 → `~/.hermes/profiles/<name>`）。
+2. **列表分组**（`src/store/sessions.ts` refresh）：非宿主 profile = own + 从宿主列表过滤出 namespace==本 profile 的行（标记 `namespaced/hostProfile`），按 id 去重、started_at 降序；宿主 profile = own 排除 namespace 属于其他现存 profile 的行。连接后拉一次，`sessions.changed`/手动刷新重建。
+3. **打开 foreign 会话**（`SessionListScreen.openSession`）：**不 resume**（避免错人格 agent），经 SSH exec 只读 sqlite 直读 messages 表投影历史（`src/ssh/remoteHistory.ts`，hex 传输 content，跳过 tool/hidden/compaction 行，上限 800 行）。聊天页顶部常驻浅灰提示条"QQ 来源会话 · 发送消息将派生到当前 profile 继续"。
+4. **首次发送派生**（chat store `forkForeignAndSend`）：只读历史 → `session.create {profile:X, parent_session_id: 原id, messages: 种子}` → attach 切到派生会话（旧 key 标 `migratedTo`，ChatScreen 换路由）→ `prompt.submit` 发这条。AsyncStorage 记 forkMap（`hermes.forkMap.v1`：原id → {forkId, profile}），之后打开直接 resume fork（正常 own 会话）。fork 失败在时间线出错误条。
+
+## 6. 本机联调环境
 
 - 本机已有一个 live dashboard：`127.0.0.1:9119`（`hermes dashboard --open-profile main`，qqbot 已连接，**是用户的真实环境，测试动作要克制**）。
 - token：见上文 SPA 提取（当前实测值可复用，但 dashboard 重启会变，脚本应每次重新提取）。

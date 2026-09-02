@@ -66,6 +66,7 @@ React Native (TS) 手机 App（Android 优先，iOS 后续），通过 **App 内
 - **M1**：多 profile 多会话完整 UI（头像/昵称/会话管理）、thinking/工具卡片/错误渲染。
 - **M2**：审批按钮组、模型切换、会话重开、中断、连接状态条、断线重连真机验证。
 - **M3**：图片/文件/语音。代码完成（2026-09-02）：聊天"＋"附件面板（相册图片多选→压缩上传→待发横条、文件→@file: 引用入输入框、语音录音→/api/audio/transcribe→文本入输入框）；图片/文件消息渲染（`@image:`/`@file:` 指令 + data URL 还原，走 /api/files/download?token=）；profile 昵称/头像编辑页。本地 tsc/lint/jest（69 测试）全绿；真机验证交 构建机。
+- **M4**：multiplex 会话 profile 归属分组。代码完成（2026-09-02）：SSH exec 只读 sqlite 构建 sessionId→归属映射（`src/ssh/namespaceMap.ts`），会话列表按归属分组（own+大库 foreign 合并、宿主排除他者）；foreign 会话不 resume（避免错人格 agent），只读 sqlite 直读历史展示 + 顶部提示条，首次发送经 `session.create {parent_session_id, messages}` 派生到当前 profile（forkMap 持久化，之后正常 resume）。关键协议限制（session.history 只认 live sid、持久化 id 4001）已实测并写入 `docs/protocol.md` §5。本地 tsc/lint/jest（93 测试）全绿；真机验证交 构建机。
 
 ## 7. 风险
 

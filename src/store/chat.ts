@@ -13,9 +13,16 @@ import type {
   ImageAttachResult,
   ModelOptionsResult,
   ProjectedMessage,
+  SessionCreateResult,
   SessionInfoPayload,
+  SessionResumeResult,
   TimelineItem,
 } from '../rpc/types';
+import {getExecRemote} from '../ssh/execRemote';
+import {fetchRemoteHistory, toSeedMessages} from '../ssh/remoteHistory';
+import {getFork, setFork} from './forkMap';
+import {useProfilesStore} from './profiles';
+import {useSessionsStore} from './sessions';
 import {prepareImageForUpload, readFileAsDataUrl} from '../utils/media';
 
 /** 已 attach 到 session、待下一条 prompt 带上的图片。 */
@@ -40,6 +47,16 @@ export interface SessionChatState {
   storedSessionId: string;
   /** 重连后 resume 失败标记（UI 提示重进） */
   resumeFailed?: boolean;
+  /**
+   * foreign 只读视图：multiplex 大库里归属本 profile、但物理在其它库的会话。
+   * 不 resume（避免错人格 agent），历史经 SSH exec 只读 sqlite 展示；
+   * 首次发送时派生（session.create parent_session_id）到当前 profile。
+   */
+  foreign?: {originId: string; hostProfile: string} | null;
+  /** 派生进行中（fork-on-send） */
+  forking?: boolean;
+  /** 已派生迁移：本 key 的会话已迁到新的 own 会话 sid（UI 据此换路由） */
+  migratedTo?: string;
   /** 待发送图片（已上传到 gateway，随下一条 prompt 进上下文） */
   pendingAttachments: PendingAttachment[];
 }
@@ -51,6 +68,7 @@ const EMPTY: SessionChatState = {
   busy: false,
   profile: '',
   storedSessionId: '',
+  foreign: null,
   pendingAttachments: [],
 };
 
@@ -76,6 +94,8 @@ interface ChatStore {
       info?: SessionInfoPayload;
       profile?: string;
       storedSessionId?: string;
+      /** foreign 只读视图标记（own 会话不传/传 null） */
+      foreign?: {originId: string; hostProfile: string} | null;
     },
   ): void;
   detach(sid: string): void;
@@ -89,6 +109,12 @@ interface ChatStore {
   /** resume 失败（服务端已回收）：标记，不清数据。 */
   markResumeFailed(sid: string): void;
   sendPrompt(sid: string, text: string): Promise<void>;
+  /**
+   * foreign 会话的首次发送：forkMap 命中 → resume 派生会话；否则
+   * 只读 sqlite 取全量历史 → session.create(parent_session_id) 派生 →
+   * attach 切到派生会话 → prompt.submit。旧 key 标记 migratedTo。
+   */
+  forkForeignAndSend(sid: string, trimmed: string): Promise<void>;
   interrupt(sid: string): Promise<void>;
   /**
    * 选图 → 压缩（长边 2048 JPEG 80）→ image.attach_bytes 逐张上传 → 进待发横条。
@@ -146,6 +172,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
         ...(opts?.storedSessionId !== undefined
           ? {storedSessionId: opts.storedSessionId}
           : null),
+        // attach = 重新进入会话：foreign 标记以本次传入为准（own 会话清除）
+        foreign: opts?.foreign ?? null,
+        forking: false,
+        migratedTo: undefined,
         resumeFailed: false,
       });
     },
@@ -234,6 +264,11 @@ export const useChatStore = create<ChatStore>((set, get) => {
       if (!trimmed && pending.length === 0) {
         return;
       }
+      // foreign 只读会话：首次发送先派生到当前 profile，再在派生会话里发
+      if (get().bySession[sid]?.foreign) {
+        await get().forkForeignAndSend(sid, trimmed);
+        return;
+      }
       const agg = aggFor(sid);
       agg.appendUserMessage(
         trimmed,
@@ -249,6 +284,105 @@ export const useChatStore = create<ChatStore>((set, get) => {
           message: `发送失败: ${e instanceof Error ? e.message : String(e)}`,
         });
         snapshot(sid, {busy: false});
+      }
+    },
+
+    async forkForeignAndSend(sid, trimmed) {
+      const st = get().bySession[sid];
+      const foreign = st?.foreign;
+      if (!foreign || st?.forking || !trimmed) {
+        return;
+      }
+      const profile = st?.profile ?? '';
+      if (!profile) {
+        return;
+      }
+      const rpc = getRpc();
+      snapshot(sid, {forking: true});
+      try {
+        let liveSid: string;
+        let storedId: string;
+        let messages: ProjectedMessage[];
+        let info: SessionInfoPayload | undefined;
+        const existingFork = await getFork(foreign.originId, profile);
+        if (existingFork) {
+          // 之前已派生过（如派生后 App 重启再来）：直接 resume fork，走正常人格
+          const r = await rpc.call<SessionResumeResult>('session.resume', {
+            session_id: existingFork.forkId,
+            profile,
+            cols: 100,
+          });
+          liveSid = r.session_id;
+          storedId = r.stored_session_id ?? existingFork.forkId;
+          messages = r.messages ?? [];
+          info = r.info;
+        } else {
+          // session.history RPC 只认 live sid（持久化 id 实测 4001）→
+          // 经 SSH exec 只读 sqlite 取全量历史做种子
+          const exec = getExecRemote();
+          const hostPath = useProfilesStore
+            .getState()
+            .list.find(p => p.name === foreign.hostProfile)?.path;
+          if (!exec || !hostPath) {
+            throw new Error('需要 SSH 连接才能读取该会话的历史');
+          }
+          const history = await fetchRemoteHistory(
+            exec,
+            `${hostPath}/state.db`,
+            foreign.originId,
+          );
+          const created = await rpc.call<SessionCreateResult>(
+            'session.create',
+            {
+              profile,
+              parent_session_id: foreign.originId,
+              messages: toSeedMessages(history),
+              cols: 100,
+              title: '',
+            },
+          );
+          storedId = created.stored_session_id ?? created.session_id;
+          await setFork(foreign.originId, profile, storedId);
+          liveSid = created.session_id;
+          messages = created.messages ?? [];
+          info = created.info;
+        }
+        // 派生会话挂正常 chat 状态；旧 key 标记迁移（ChatScreen 换路由过去）
+        get().attach(liveSid, {
+          messages,
+          info,
+          profile,
+          storedSessionId: storedId,
+        });
+        set(s => ({
+          bySession: {
+            ...s.bySession,
+            [sid]: {
+              ...(s.bySession[sid] ?? EMPTY),
+              forking: false,
+              migratedTo: liveSid,
+            },
+          },
+        }));
+        // 会话列表出现新 fork（sessions.changed 也会触发，双保险）
+        useSessionsStore.getState().markStale();
+        // 在派生会话里发出这条
+        const agg = aggFor(liveSid);
+        agg.appendUserMessage(trimmed);
+        snapshot(liveSid, {busy: true});
+        try {
+          await rpc.call('prompt.submit', {session_id: liveSid, text: trimmed});
+        } catch (e) {
+          agg.applyEvent('error', {
+            message: `发送失败: ${e instanceof Error ? e.message : String(e)}`,
+          });
+          snapshot(liveSid, {busy: false});
+        }
+      } catch (e) {
+        aggFor(sid).applyEvent('error', {
+          message: `派生到当前 profile 失败: ${e instanceof Error ? e.message : String(e)}`,
+        });
+        snapshot(sid, {forking: false});
       }
     },
 

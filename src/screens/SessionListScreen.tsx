@@ -12,7 +12,10 @@ import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 
 import {Avatar} from '../components/Avatar';
 import {Colors} from '../components/theme';
+import {getExecRemote} from '../ssh/execRemote';
+import {fetchRemoteHistory} from '../ssh/remoteHistory';
 import {useChatStore} from '../store/chat';
+import {getFork} from '../store/forkMap';
 import {useProfilesStore} from '../store/profiles';
 import {useSessionsStore} from '../store/sessions';
 import type {SessionListRow} from '../rpc/types';
@@ -44,6 +47,7 @@ export function SessionListScreen() {
   const profileInfo = useProfilesStore(s =>
     s.list.find(p => p.name === profile),
   );
+  const profileList = useProfilesStore(s => s.list);
   const avatarUri = useProfilesStore(s => s.avatars[profile]);
   const sessions = useSessionsStore(s => s.byProfile[profile] ?? EMPTY_SESSIONS);
   const {refresh, remove, create, resume} = useSessionsStore();
@@ -60,15 +64,62 @@ export function SessionListScreen() {
   }, [navigation, nicknameText, refresh, profile]);
 
   const openSession = useCallback(
-    async (sessionId: string, title: string) => {
+    async (row: SessionListRow) => {
+      const title = row.title;
       try {
-        const result = await resume(profile, sessionId);
+        // foreign 会话（multiplex 大库，物理不在本 profile 库）：
+        // 有 fork 记录 → fork 是 own 会话，走正常 resume；
+        // 否则不 resume（避免错人格 agent），经 SSH exec 只读 sqlite 展示，
+        // 首次发送时再派生（见 chat store forkForeignAndSend）。
+        if (row.namespaced && row.hostProfile && row.hostProfile !== profile) {
+          const fork = await getFork(row.id, profile);
+          if (fork) {
+            const result = await resume(profile, fork.forkId);
+            attach(result.session_id, {
+              messages: result.messages ?? [],
+              info: result.info,
+              profile,
+              storedSessionId: result.stored_session_id ?? fork.forkId,
+            });
+            navigation.navigate('Chat', {
+              sessionId: result.session_id,
+              profile,
+              title: title || '会话',
+            });
+            return;
+          }
+          const exec = getExecRemote();
+          const hostPath = profileList.find(
+            p => p.name === row.hostProfile,
+          )?.path;
+          if (!exec || !hostPath) {
+            throw new Error('需要 SSH 连接才能读取该会话的历史');
+          }
+          const messages = await fetchRemoteHistory(
+            exec,
+            `${hostPath}/state.db`,
+            row.id,
+          );
+          attach(row.id, {
+            messages,
+            profile,
+            storedSessionId: row.id,
+            foreign: {originId: row.id, hostProfile: row.hostProfile},
+          });
+          navigation.navigate('Chat', {
+            sessionId: row.id,
+            profile,
+            title: title || '会话',
+          });
+          return;
+        }
+        const result = await resume(profile, row.id);
         const liveSid = result.session_id;
         attach(liveSid, {
           messages: result.messages ?? [],
           info: result.info,
           profile,
-          storedSessionId: result.stored_session_id ?? sessionId,
+          storedSessionId: result.stored_session_id ?? row.id,
         });
         navigation.navigate('Chat', {
           sessionId: liveSid,
@@ -79,7 +130,7 @@ export function SessionListScreen() {
         Alert.alert('打开会话失败', e instanceof Error ? e.message : String(e));
       }
     },
-    [attach, navigation, profile, resume],
+    [attach, navigation, profile, profileList, resume],
   );
 
   const onNewSession = useCallback(async () => {
@@ -137,7 +188,7 @@ export function SessionListScreen() {
           <TouchableOpacity
             style={styles.row}
             activeOpacity={0.7}
-            onPress={() => openSession(item.id, item.title)}
+            onPress={() => openSession(item)}
             onLongPress={() => onDelete(item.id, item.title)}>
             <Avatar
               name={nicknameText}
@@ -149,6 +200,9 @@ export function SessionListScreen() {
                 <Text style={styles.title} numberOfLines={1}>
                   {item.title || '未命名会话'}
                 </Text>
+                {item.namespaced ? (
+                  <Text style={styles.nsBadge}>QQ</Text>
+                ) : null}
                 <Text style={styles.time}>{formatTime(item.started_at)}</Text>
               </View>
               <Text style={styles.preview} numberOfLines={1}>
@@ -181,6 +235,17 @@ const styles = StyleSheet.create({
   rowBody: {flex: 1, marginLeft: 12},
   rowTop: {flexDirection: 'row', alignItems: 'center'},
   title: {fontSize: 15, fontWeight: '500', color: Colors.text, flex: 1},
+  nsBadge: {
+    fontSize: 10,
+    color: Colors.textSecondary,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    marginLeft: 6,
+    overflow: 'hidden',
+  },
   time: {fontSize: 11, color: Colors.textSecondary, marginLeft: 8},
   preview: {fontSize: 13, color: Colors.textSecondary, marginTop: 2},
   sep: {height: StyleSheet.hairlineWidth, backgroundColor: Colors.border, marginLeft: 68},

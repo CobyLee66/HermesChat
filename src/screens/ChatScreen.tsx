@@ -74,6 +74,9 @@ export function ChatScreen() {
   const busy = chat?.busy ?? false;
   const info = chat?.info ?? null;
   const status = chat?.status ?? null;
+  const foreign = chat?.foreign ?? null;
+  const forking = chat?.forking ?? false;
+  const migratedTo = chat?.migratedTo;
   const pending = useMemo(
     () => chat?.pendingAttachments ?? [],
     [chat?.pendingAttachments],
@@ -89,6 +92,13 @@ export function ChatScreen() {
       ),
     });
   }, [navigation, title]);
+
+  // foreign 会话首次发送完成派生：切到派生出的 own 会话（事件流都走新 sid）
+  useEffect(() => {
+    if (migratedTo) {
+      navigation.replace('Chat', {sessionId: migratedTo, profile, title});
+    }
+  }, [migratedTo, navigation, profile, title]);
 
   const onSend = useCallback(() => {
     const text = input;
@@ -287,6 +297,18 @@ export function ChatScreen() {
       {chat?.resumeFailed ? (
         <View style={styles.banner}>
           <Text style={styles.bannerText}>会话已被服务端回收，请返回重新进入</Text>
+        </View>
+      ) : null}
+      {foreign ? (
+        <View style={styles.bannerGray}>
+          <Text style={styles.bannerGrayText}>
+            QQ 来源会话 · 发送消息将派生到当前 profile 继续
+          </Text>
+        </View>
+      ) : null}
+      {forking ? (
+        <View style={styles.bannerGray}>
+          <Text style={styles.bannerGrayText}>正在派生到当前 profile…</Text>
         </View>
       ) : null}
       <FlatList
@@ -532,6 +554,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   bannerText: {fontSize: 12, color: '#FF7D00'},
+  bannerGray: {
+    backgroundColor: '#ECEDF2',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+  },
+  bannerGrayText: {fontSize: 12, color: Colors.textSecondary},
   systemBar: {
     alignSelf: 'center',
     maxWidth: '86%',

@@ -241,6 +241,13 @@ export interface SessionListRow {
   started_at: number;
   message_count: number;
   source: string;
+  /**
+   * multiplex 归属标记：该行物理上在其它 profile 的 state.db
+   * （客户端分组时打上，RPC 不返回——见 src/ssh/namespaceMap.ts）。
+   */
+  namespaced?: boolean;
+  /** namespaced=true 时的物理宿主 profile（历史读取/派生用） */
+  hostProfile?: string;
 }
 
 // ─── 附件 / profile 编辑 RPC 结果 ──────────────────────────────
