@@ -140,15 +140,19 @@ Host/Origin，绕过 dashboard 的 WS Host/Origin 防护；token 从 SPA HTML �
 
 构建机（Windows，`~/.ssh/config` 别名 `构建机`）已配好全部工具链：Node 26 / JDK 21 / Android SDK（platforms android-36 + android-37.0、build-tools 37.0.0、ndk 27.1.12297006）、Maven 阿里云镜像（`C:\Users\Public\.gradle\init.d\mirror.gradle`，直连 Maven Central 会被断）。
 
-代码同步走 GitHub（私有仓库 `CobyLee66/HermesMobile`）：Mac 推送，构建机 拉取。Mac 上一键操作：
+代码同步走 GitHub（私有仓库 `CobyLee66/HermesMobile`）：Mac 推送，构建机 拉取。Mac 上一键操作（推 GitHub → 构建机 拉取 → 远端构建 → APK 取回 dist/）：
 
 ```bash
-git add -A && git commit -m "..."        # 先提交改动
-scripts/build-android.sh [release|debug]   # 推送 -> 构建机 git pull -> 构建 -> APK 取回 dist/
-scripts/install-android.sh [apk] [序列号]   # 经 构建机 adb 安装到手机（USB 或无线调试）
+git add -A && git commit -m "..."              # 先提交改动
+scripts/build-android-remote.sh [release|debug]  # 远程驱动 构建机 构建并取回 APK
+scripts/install-android.sh [apk] [序列号]        # 经 构建机 adb 安装到手机（USB 或无线调试）
 ```
 
-在 构建机 上手动：`cd C:\HermesMobile && git pull && cd android && gradlew.bat assembleRelease`。
+在 构建机 本机（Git Bash）直接构建并安装，不做任何 git 同步：
+
+```bash
+scripts/build-android.sh [release|debug] [--no-npm]   # npm ci -> gradlew 构建 -> 检测到手机则安装
+```
 
 构建报错先修 `android/app/src/main/java/com/hermesmobile/ssh/`（`docs/ssh-module.md` §6 存疑点已于首次构建验证通过）。
 

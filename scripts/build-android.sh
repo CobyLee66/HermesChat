@@ -1,53 +1,59 @@
 #!/usr/bin/env bash
-# build-android.sh [debug|release]   —— 在 Mac 上一键驱动 构建机 构建 Android APK
-# 流程：本地改动推送 GitHub -> 构建机 git pull -> npm install（增量）-> gradlew 构建
-#       -> APK 取回 dist/ -> 检测到 adb 设备时直接安装到手机
+# build-android.sh [debug|release] [--no-npm]   —— 在本机（Windows，Git Bash）构建并安装 Android APK
+# 仅做：npm ci -> gradlew 构建 -> 检测到 adb 设备则安装。不含任何 git 同步；
+# 从 Mac 远程驱动 构建机 的完整流程见 scripts/build-android-remote.sh
 set -euo pipefail
 
-FLAVOR="${1:-release}"           # debug | release
-REMOTE_HOST="构建机"             # ~/.ssh/config 里的别名
-REMOTE_DIR='C:\HermesMobile'
-ADB='C:\Softwares\Android\platform-tools\adb.exe'
-LOCAL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-DIST_DIR="$LOCAL_DIR/dist"
+FLAVOR="release"
+DO_NPM=1
+for arg in "$@"; do
+  case "$arg" in
+    debug|release) FLAVOR="$arg" ;;
+    --no-npm) DO_NPM=0 ;;
+    *) echo "用法: $0 [debug|release] [--no-npm]"; exit 1 ;;
+  esac
+done
 
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 case "$FLAVOR" in
-  debug)   GRADLE_TASK=assembleDebug;   APK_FWD='android/app/build/outputs/apk/debug/app-debug.apk';     APK_NAME=app-debug.apk ;;
-  release) GRADLE_TASK=assembleRelease; APK_FWD='android/app/build/outputs/apk/release/app-release.apk'; APK_NAME=app-release.apk ;;
-  *) echo "用法: $0 [debug|release]"; exit 1 ;;
+  debug)   GRADLE_TASK=assembleDebug;   APK_PATH='android/app/build/outputs/apk/debug/app-debug.apk' ;;
+  release) GRADLE_TASK=assembleRelease; APK_PATH='android/app/build/outputs/apk/release/app-release.apk' ;;
 esac
 
-cd "$LOCAL_DIR"
-echo "==> [1/4] 同步 GitHub"
-[ -z "$(git status --porcelain)" ] || { echo "有未提交的改动，请先 git commit"; exit 1; }
-git fetch origin -q
-AHEAD="$(git rev-list --count origin/main..HEAD)"
-if [ "$AHEAD" != "0" ]; then echo "    推送 $AHEAD 个本地提交..."; git push origin main; fi
-
-echo "==> [2/4] 构建机 拉取代码 + 安装 JS 依赖"
-# npm ci 不改 lockfile（npm install 会改动导致下次 pull 失败）；pull 失败时先 reset 自愈
-ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR & (git pull --ff-only origin main || (git reset --hard origin/main >nul & git pull --ff-only origin main)) & npm ci --no-audit --no-fund --loglevel=error"
-
-echo "==> [3/4] gradlew $GRADLE_TASK"
-ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR\\android & gradlew.bat $GRADLE_TASK --console=plain"
-
-echo "==> [4/5] 取回 APK"
-mkdir -p "$DIST_DIR"
-scp "$REMOTE_HOST:C:/HermesMobile/$APK_FWD" "$DIST_DIR/$APK_NAME"
-ls -lh "$DIST_DIR/$APK_NAME"
-
-echo "==> [5/5] 检测 adb 设备并安装"
-# adb devices 输出带 \r，先清洗；取状态为 device 的序列号
-SERIALS="$(ssh "$REMOTE_HOST" "$ADB devices" | tr -d '\r' | awk 'NR>1 && $2=="device" {print $1}')"
-if [ -z "$SERIALS" ]; then
-  echo "未检测到手机。请把手机插到 构建机（USB 调试），或开无线调试后执行："
-  echo "    ssh $REMOTE_HOST \"$ADB connect <手机IP>:<端口>\""
-  echo "之后可单独安装：scripts/install-android.sh $DIST_DIR/$APK_NAME"
+# adb：优先 PATH，否则回退到 构建机 的默认安装位置（Git Bash 风格路径）
+if command -v adb >/dev/null 2>&1; then
+  ADB="adb"
 else
-  REMOTE_APK="C:/HermesMobile/$APK_FWD"
+  ADB='/c/Softwares/Android/platform-tools/adb.exe'
+fi
+
+cd "$ROOT"
+
+if [ "$DO_NPM" = 1 ]; then
+  echo "==> [1/3] 安装 JS 依赖（npm ci）"
+  npm ci --no-audit --no-fund --loglevel=error
+else
+  echo "==> [1/3] 跳过 npm（--no-npm）"
+fi
+
+echo "==> [2/3] gradlew $GRADLE_TASK"
+# Git Bash 下通过 cmd 调 gradlew.bat
+(cd android && cmd //c "gradlew.bat $GRADLE_TASK --console=plain")
+ls -lh "$APK_PATH"
+
+echo "==> [3/3] 检测 adb 设备并安装"
+# adb devices 输出带 \r，先清洗；取状态为 device 的序列号
+SERIALS="$("$ADB" devices | tr -d '\r' | awk 'NR>1 && $2=="device" {print $1}')"
+if [ -z "$SERIALS" ]; then
+  echo "未检测到手机。请插线开 USB 调试，或开无线调试后执行："
+  echo "    $ADB connect <手机IP>:<端口>"
+  echo "连接后重跑本脚本（可加 --no-npm 跳过依赖安装）。"
+else
+  # adb.exe 需要 Windows 路径；pwd -W 是 Git Bash 的 Windows 路径输出
+  APK_WIN="$(cd "$(dirname "$APK_PATH")" && pwd -W)/$(basename "$APK_PATH")"
   for S in $SERIALS; do
     echo "    安装到设备 $S ..."
-    ssh "$REMOTE_HOST" "$ADB -s $S install -r $REMOTE_APK"
+    "$ADB" -s "$S" install -r "$APK_WIN"
   done
   echo "完成，手机应用列表打开 HermesMobile 即可。"
 fi

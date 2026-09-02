@@ -12,7 +12,7 @@
 ## 构建与验证
 
 - 本机（MacBook）无 Android 工具链：JS 改动用 `npx tsc --noEmit`、`npm run lint`、`npm test`、`npm run web`（浏览器调试）验证。
-- APK 构建在 构建机（Windows，SSH 别名 `构建机`）：`scripts/build-android.sh`（推 GitHub → 构建机 拉取构建 → 取回 dist/ → 检测到手机则自动安装）。不要在这台 Mac 上装 Android/iOS 工具链。
+- APK 构建在 构建机（Windows，SSH 别名 `构建机`）：Mac 远程驱动用 `scripts/build-android-remote.sh`（推 GitHub → 构建机 拉取 → 远端构建 → 取回 dist/ → 检测到手机则自动安装）；构建机 本机（Git Bash）构建用 `scripts/build-android.sh`（仅 npm ci + gradlew 构建 + adb 安装，不做 git 同步）。不要在这台 Mac 上装 Android/iOS 工具链。
 - 构建机 上的 `C:\HermesMobile` 是构建副本，一切修改从 GitHub 拉取，不要在上面手改。
 
 ## 代码约定
