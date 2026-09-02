@@ -20,18 +20,36 @@ import type {
 import {useChatStore} from '../store/chat';
 import {SshTunnelTransport, type Transport} from './transport';
 
+/** transport 工厂：默认 SSH 隧道；web 直连注入 WebDirectTransport（见 ssh/webDirect.ts）。 */
+export type TransportFactory = (cfg: ConnectionProfile) => Transport;
+
+const defaultTransportFactory: TransportFactory = cfg =>
+  new SshTunnelTransport({
+    host: cfg.host,
+    port: parseInt(cfg.port, 10) || 22,
+    username: cfg.username,
+    password: cfg.password || undefined,
+    privateKey: cfg.privateKey || undefined,
+    passphrase: cfg.passphrase || undefined,
+  });
+
 export class SshManager implements Connector {
   private transport: Transport | null = null;
   private rpc: RpcClient | null = null;
   private dropCb: ((reason: string) => void) | null = null;
   private foregroundCb: (() => void) | null = null;
+  private transportFactory: TransportFactory;
   private appStateSub: {remove(): void} | null = null;
   /** 手动 disconnect 期间抑制 drop 上报 */
   private tearingDown = false;
 
   /** onForeground：App 回前台时调用（connection store 用来立即重试）。 */
-  constructor(opts?: {onForeground?: () => void}) {
+  constructor(opts?: {
+    onForeground?: () => void;
+    transportFactory?: TransportFactory;
+  }) {
     this.foregroundCb = opts?.onForeground ?? null;
+    this.transportFactory = opts?.transportFactory ?? defaultTransportFactory;
     this.appStateSub = AppState.addEventListener(
       'change',
       (s: AppStateStatus) => {
@@ -57,15 +75,8 @@ export class SshManager implements Connector {
     // 先清理旧实例（重连路径）
     await this.teardownTransport();
 
-    const transport: Transport = new SshTunnelTransport({
-      host: cfg.host,
-      port: parseInt(cfg.port, 10) || 22,
-      username: cfg.username,
-      password: cfg.password || undefined,
-      privateKey: cfg.privateKey || undefined,
-      passphrase: cfg.passphrase || undefined,
-    });
-    transport.onDrop = () => this.reportDrop('ssh tunnel dropped');
+    const transport: Transport = this.transportFactory(cfg);
+    transport.onDrop = () => this.reportDrop('transport dropped');
     this.transport = transport;
 
     const {wsUrl, httpUrl, token} = await transport.connect();

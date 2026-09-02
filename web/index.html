@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HermesMobile（Web 调试）</title>
+    <style>
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+      }
+      /* RNW AppContainer 根节点是 flex:1，要求 #root 为纵向 flex 容器 */
+      #root {
+        display: flex;
+        flex-direction: column;
+      }
+      body {
+        font-family:
+          system-ui,
+          -apple-system,
+          'PingFang SC',
+          'Helvetica Neue',
+          sans-serif;
+        background: #f2f3f7;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./index.web.js"></script>
+  </body>
+</html>

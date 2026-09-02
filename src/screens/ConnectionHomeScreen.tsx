@@ -2,6 +2,7 @@ import React, {useEffect} from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,6 +16,7 @@ import {
   useConnectionStore,
   type ConnectionProfile,
 } from '../store/connection';
+import {connectWebDirect} from '../ssh/webDirect';
 import {Colors} from '../components/theme';
 import type {RootStackParamList} from '../navigation/types';
 
@@ -137,6 +139,20 @@ export function ConnectionHomeScreen() {
           <Text style={styles.reconnecting}>连接已断开，正在重连…</Text>
         ) : null}
 
+        {Platform.OS === 'web' ? (
+          <TouchableOpacity
+            style={styles.directButton}
+            activeOpacity={0.8}
+            disabled={connecting}
+            onPress={() => {
+              connectWebDirect();
+            }}>
+            <Text style={styles.directButtonText}>
+              ⚡ 浏览器直连（本机 127.0.0.1:9119）
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+
         <TouchableOpacity
           style={styles.addButton}
           activeOpacity={0.8}
@@ -211,6 +227,16 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   addButtonText: {color: '#FFF', fontSize: 16, fontWeight: '600'},
+  directButton: {
+    backgroundColor: Colors.card,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.accent,
+    paddingVertical: 13,
+    alignItems: 'center',
+    marginTop: 14,
+  },
+  directButtonText: {color: Colors.accentDark, fontSize: 15, fontWeight: '600'},
   error: {color: Colors.danger, fontSize: 13, marginTop: 4},
   reconnecting: {
     color: Colors.textSecondary,

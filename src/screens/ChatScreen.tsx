@@ -24,7 +24,6 @@ import {
 } from '@react-native-documents/picker';
 
 import {ApprovalCard} from '../components/ApprovalCard';
-import {Avatar} from '../components/Avatar';
 import {Bubble} from '../components/Bubble';
 import {ChatImage} from '../components/ChatImage';
 import {FileRefCard} from '../components/FileRefCard';
@@ -36,7 +35,6 @@ import {VoiceButton} from '../components/VoiceButton';
 import type {AssistantMsg, TimelineItem} from '../rpc/types';
 import {useChatStore} from '../store/chat';
 import {useConnectionStore} from '../store/connection';
-import {useProfilesStore} from '../store/profiles';
 import {useSessionsStore} from '../store/sessions';
 import type {RootStackParamList} from '../navigation/types';
 
@@ -63,7 +61,6 @@ export function ChatScreen() {
   const createSession = useSessionsStore(s => s.create);
   const attach = useChatStore(s => s.attach);
   const connState = useConnectionStore(s => s.state);
-  const avatarUri = useProfilesStore(s => s.avatars[profile]);
 
   const [input, setInput] = useState('');
   const [menuVisible, setMenuVisible] = useState(false);
@@ -235,7 +232,11 @@ export function ChatScreen() {
                   <FileRefCard file={f} isUser />
                 </View>
               ))}
-              {item.text ? <Bubble text={item.text} isUser /> : null}
+              {item.text ? (
+                <View style={styles.userBubbleWrap}>
+                  <Bubble text={item.text} isUser />
+                </View>
+              ) : null}
             </View>
           );
         case 'system':
@@ -263,18 +264,12 @@ export function ChatScreen() {
             />
           );
         case 'assistant':
-          return (
-            <AssistantRow
-              msg={item}
-              avatarUri={avatarUri}
-              profile={profile}
-            />
-          );
+          return <AssistantRow msg={item} />;
         default:
           return null;
       }
     },
-    [avatarUri, profile, respondApproval, sessionId],
+    [respondApproval, sessionId],
   );
 
   const usage = info?.usage as {total?: number; total_tokens?: number} | undefined;
@@ -486,50 +481,43 @@ function InfoRow({label, value}: {label: string; value: string}) {
   );
 }
 
-/** 助手消息行：头像 + 块列（文本/思考/工具/错误）。 */
+/** 助手消息列：无头像占位，块列整宽（文本气泡/思考/工具/错误）。 */
 const AssistantRow = React.memo(function AssistantRow({
   msg,
-  avatarUri,
-  profile,
 }: {
   msg: AssistantMsg;
-  avatarUri?: string;
-  profile: string;
 }) {
   return (
-    <View style={styles.assistantRow}>
-      <Avatar name={profile} uri={avatarUri} size={34} />
-      <View style={styles.assistantCol}>
-        {msg.blocks.map((b, i) => {
-          switch (b.type) {
-            case 'text':
-              return <Bubble key={i} text={b.text} isUser={false} />;
-            case 'thinking':
-              return <ThinkingBlock key={i} text={b.text} variant="thinking" />;
-            case 'reasoning':
-              return <ThinkingBlock key={i} text={b.text} variant="reasoning" />;
-            case 'tool':
-              return <ToolCallCard key={b.tool.toolId} tool={b.tool} />;
-            case 'image':
-              return <ChatImage key={i} image={b.image} />;
-            case 'file':
-              return <FileRefCard key={i} file={b.file} />;
-            case 'error':
-              return (
-                <View key={i} style={styles.errorBar}>
-                  <Text style={styles.errorText}>{b.text}</Text>
-                </View>
-              );
-            default:
-              return null;
-          }
-        })}
-        {msg.streaming ? (
-          <View style={styles.cursorWrap}>
-            <StreamCursor />
-          </View>
-        ) : null}
-      </View>
+    <View style={styles.assistantCol}>
+      {msg.blocks.map((b, i) => {
+        switch (b.type) {
+          case 'text':
+            return <Bubble key={i} text={b.text} isUser={false} />;
+          case 'thinking':
+            return <ThinkingBlock key={i} text={b.text} variant="thinking" />;
+          case 'reasoning':
+            return <ThinkingBlock key={i} text={b.text} variant="reasoning" />;
+          case 'tool':
+            return <ToolCallCard key={b.tool.toolId} tool={b.tool} />;
+          case 'image':
+            return <ChatImage key={i} image={b.image} />;
+          case 'file':
+            return <FileRefCard key={i} file={b.file} />;
+          case 'error':
+            return (
+              <View key={i} style={styles.errorBar}>
+                <Text style={styles.errorText}>{b.text}</Text>
+              </View>
+            );
+          default:
+            return null;
+        }
+      })}
+      {msg.streaming ? (
+        <View style={styles.cursorWrap}>
+          <StreamCursor />
+        </View>
+      ) : null}
     </View>
   );
 });
@@ -556,12 +544,7 @@ const styles = StyleSheet.create({
   systemBarError: {backgroundColor: Colors.dangerBg},
   systemText: {fontSize: 12, color: Colors.textSecondary},
   systemTextError: {color: Colors.danger},
-  assistantRow: {
-    flexDirection: 'row',
-    paddingHorizontal: 12,
-    marginVertical: 3,
-  },
-  assistantCol: {flex: 1, marginLeft: 8},
+  assistantCol: {paddingHorizontal: 12, marginVertical: 3},
   cursorWrap: {paddingHorizontal: 4, paddingTop: 2},
   errorBar: {
     backgroundColor: Colors.dangerBg,
@@ -647,6 +630,8 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   userFile: {paddingHorizontal: 12, alignSelf: 'flex-end'},
+  /** user 文本气泡的 12px 内边距（Bubble 自身不带水平边距） */
+  userBubbleWrap: {paddingHorizontal: 12, alignSelf: 'flex-end'},
   input: {
     flex: 1,
     minHeight: 38,

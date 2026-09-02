@@ -4,7 +4,7 @@
  */
 
 import React, {useEffect} from 'react';
-import {StatusBar} from 'react-native';
+import {Platform, StatusBar} from 'react-native';
 import {NavigationContainer} from '@react-navigation/native';
 import {
   createNativeStackNavigator,
@@ -21,6 +21,7 @@ import {ProfileEditScreen} from './src/screens/ProfileEditScreen';
 import {ProfileListScreen} from './src/screens/ProfileListScreen';
 import {SessionListScreen} from './src/screens/SessionListScreen';
 import {initConnectionEngine} from './src/ssh/SshManager';
+import {initWebDirectEngine} from './src/ssh/webDirect';
 import {useConnectionStore} from './src/store/connection';
 import type {RootStackParamList} from './src/navigation/types';
 
@@ -39,7 +40,12 @@ function App() {
   const state = useConnectionStore(s => s.state);
 
   useEffect(() => {
-    initConnectionEngine();
+    // web 构建（vite + react-native-web）无 SSH 能力，改用浏览器直连引擎
+    if (Platform.OS === 'web') {
+      initWebDirectEngine();
+    } else {
+      initConnectionEngine();
+    }
   }, []);
 
   return (

@@ -113,6 +113,29 @@ npm test                # jest 单测（aggregator / connection 状态机）
 node scripts/harness.mjs  # 端到端打本机 127.0.0.1:9119 的 live dashboard（限一次真实 prompt）
 ```
 
+### 浏览器本地调试（react-native-web，免 APK）
+
+```bash
+npm run web   # vite dev server，默认 http://localhost:5188
+```
+
+浏览器打开后点连接主页的「⚡ 浏览器直连（本机 127.0.0.1:9119）」即可连上本机
+live dashboard（vite 把 `/api/**` 与 `/__hermes/**` 代理到 9119 并重写
+Host/Origin，绕过 dashboard 的 WS Host/Origin 防护；token 从 SPA HTML 提取）。
+可直接进 profile → 会话列表 → 会话，看聊天气泡/工具卡片等 UI。
+
+注意：
+
+- web 构建把 `react-native` 别名到 `react-native-web`，原生模块
+  （HermesSsh / RNFS / documents-picker / audio-recorder-player /
+  async-storage / image-resizer）打桩在 `src/web-stubs/`
+  （async-storage 用 localStorage 实现，其余方法 reject）。
+- SSH 隧道配置在浏览器里不可用（直连入口是 web 唯一连接方式）；
+  附件上传/语音输入/头像上传等依赖原生模块的功能在浏览器里不可用（按钮点击会报打桩错误）。
+- `vite.config.ts` 已排除在 tsconfig 之外（vite 的类型依赖会把 DOM/node 全局
+  类型引入程序，与 RN 的 WebSocket 等声明冲突）。
+
+
 ## 构建机 构建与安装（Android）
 
 构建机（Windows，`~/.ssh/config` 别名 `构建机`）已配好全部工具链：Node 26 / JDK 21 / Android SDK（platforms android-36 + android-37.0、build-tools 37.0.0、ndk 27.1.12297006）、Maven 阿里云镜像（`C:\Users\Public\.gradle\init.d\mirror.gradle`，直连 Maven Central 会被断）。
