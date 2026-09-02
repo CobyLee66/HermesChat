@@ -27,8 +27,9 @@ import {
 
 import {Avatar} from '../components/Avatar';
 import {Colors} from '../components/theme';
+import {useConnectionStore} from '../store/connection';
 import {useProfilesStore} from '../store/profiles';
-import {prepareAvatarDataUrl} from '../utils/media';
+import {deleteTempFile, prepareAvatarDataUrl} from '../utils/media';
 import type {RootStackParamList} from '../navigation/types';
 
 type Rt = RouteProp<RootStackParamList, 'ProfileEdit'>;
@@ -67,7 +68,16 @@ export function ProfileEditScreen() {
         throw new Error(copy.copyError);
       }
       setBusy('avatar');
-      const dataUrl = await prepareAvatarDataUrl(copy.localUri);
+      let dataUrl: string;
+      try {
+        dataUrl = await prepareAvatarDataUrl(copy.localUri);
+      } finally {
+        // picker 副本（keepLocalCopy）用完即删，避免缓存目录堆积
+        await deleteTempFile(copy.localUri);
+      }
+      // 选图期间 App 退后台可能断线重连中：等连接就绪再发 RPC，
+      // 否则偶发 "rpc not connected"
+      await useConnectionStore.getState().waitReady();
       await setAvatar(profileName, dataUrl);
       setPreviewUri(dataUrl);
     } catch (e) {

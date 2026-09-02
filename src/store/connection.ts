@@ -10,7 +10,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {create} from 'zustand';
 
 import type {RpcClient} from '../rpc/client';
-import {setRpc} from '../rpc/runtime';
+import {hasRpc, setRpc} from '../rpc/runtime';
 import {setExecRemote, type ExecRemoteFn} from '../ssh/execRemote';
 import {useChatStore} from './chat';
 import {useSessionsStore} from './sessions';
@@ -119,6 +119,8 @@ interface ConnectionStore {
   handleDrop(reason: string): void;
   /** 回前台等场景：立即重试（重置退避计数）。 */
   retryNow(): void;
+  /** 等待连接就绪（重连中先立即触发一次重试）；已断开或超时则抛错。 */
+  waitReady(timeoutMs?: number): Promise<void>;
 }
 
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -335,6 +337,27 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => {
       }
       set({reconnectAttempt: 0});
       scheduleReconnect();
+    },
+
+    async waitReady(timeoutMs = 15000) {
+      if (get().state === 'ready' && hasRpc()) {
+        return;
+      }
+      if (get().state === 'disconnected') {
+        throw new Error('未连接');
+      }
+      // 重连中：立即触发一次重试，不傻等退避计时
+      get().retryNow();
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        if (get().state === 'ready' && hasRpc()) {
+          return;
+        }
+        if (Date.now() >= deadline) {
+          throw new Error('连接恢复超时，请稍后重试');
+        }
+        await new Promise<void>(r => setTimeout(r, 200));
+      }
     },
   };
 });

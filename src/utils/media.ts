@@ -57,6 +57,20 @@ export async function prepareImageForUpload(
   };
 }
 
+/** 删除沙盒内临时文件（picker 副本/压缩产物），清理失败不影响主流程。 */
+export async function deleteTempFile(
+  uri: string | null | undefined,
+): Promise<void> {
+  if (!uri) {
+    return;
+  }
+  try {
+    await RNFS.unlink(uri.replace(/^file:\/\//, ''));
+  } catch {
+    // 已不存在或路径差异：忽略
+  }
+}
+
 /** 头像预处理：512×512 cover 裁剪成正方形 JPEG q80，输出 data URL（远小于 2MB 上限）。 */
 export async function prepareAvatarDataUrl(uri: string): Promise<string> {
   const resized = await ImageResizer.createResizedImage(
@@ -70,8 +84,13 @@ export async function prepareAvatarDataUrl(uri: string): Promise<string> {
     false,
     {mode: 'cover'},
   );
-  const base64 = await RNFS.readFile(resized.uri, 'base64');
-  return `data:image/jpeg;base64,${base64}`;
+  try {
+    const base64 = await RNFS.readFile(resized.uri, 'base64');
+    return `data:image/jpeg;base64,${base64}`;
+  } finally {
+    // 压缩产物只用于读 base64，读完即删，避免缓存目录堆积
+    await deleteTempFile(resized.uri);
+  }
 }
 
 /** 读文件成 data URL（file.attach 的 data_url）。 */
