@@ -5,7 +5,9 @@ buildscript {
         compileSdkVersion = 37
         targetSdkVersion = 36
         ndkVersion = "27.1.12297006"
-        kotlinVersion = "2.2.0"
+        # 需与构建实际解析到的 kotlin-gradle-plugin 版本一致（RN/依赖会拉到 2.2.10），
+        # 否则 async-storage 按此版本挑 ksp 会报 "ksp is too old for kotlin"。
+        kotlinVersion = "2.2.10"
     }
     repositories {
         google()

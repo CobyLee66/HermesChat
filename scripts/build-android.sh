@@ -30,8 +30,17 @@ fi
 cd "$ROOT"
 
 if [ "$DO_NPM" = 1 ]; then
-  echo "==> [1/3] 安装 JS 依赖（npm ci）"
-  npm ci --no-audit --no-fund --loglevel=error
+  echo "==> [1/3] 检查 JS 依赖"
+  # npm ci 每次都会删掉整个 node_modules 重装，很慢。
+  # npm 安装后会在 node_modules/.package-lock.json 留标记；
+  # package.json / package-lock.json 都没比它新，说明依赖没变，直接跳过。
+  if [ -f node_modules/.package-lock.json ] \
+     && [ ! package-lock.json -nt node_modules/.package-lock.json ] \
+     && [ ! package.json -nt node_modules/.package-lock.json ]; then
+    echo "    依赖未变化，跳过 npm ci"
+  else
+    npm ci --no-audit --no-fund --loglevel=error
+  fi
 else
   echo "==> [1/3] 跳过 npm（--no-npm）"
 fi
