@@ -49,7 +49,8 @@ const styles = StyleSheet.create({
   rowRight: {justifyContent: 'flex-end'},
   rowLeft: {justifyContent: 'flex-start'},
   bubble: {
-    maxWidth: '92%',
+    // 横向占满可用宽度（外层 12px 边距保留），不因对话者在一侧留白
+    maxWidth: '100%',
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 9,

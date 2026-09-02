@@ -320,8 +320,8 @@ export function ChatScreen() {
           viewportHeight={scroll.viewport}
           onScrollTo={scrollTo}
         />
-        {/* inverted 列表 offset 即距底部的距离；超过两屏显示回到底部按钮 */}
-        {scroll.viewport > 0 && scroll.offset > scroll.viewport * 2 ? (
+        {/* inverted 列表 offset 即距底部的距离；超过半屏显示回到底部按钮 */}
+        {scroll.viewport > 0 && scroll.offset > scroll.viewport * 0.5 ? (
           <TouchableOpacity
             style={styles.jumpBtn}
             activeOpacity={0.85}
