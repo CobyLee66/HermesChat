@@ -1,5 +1,6 @@
 import React, {useState} from 'react';
 import {
+  Keyboard,
   Modal,
   StyleSheet,
   Text,
@@ -55,7 +56,9 @@ export function Bubble({text, isUser}: Props) {
         </View>
       </TouchableOpacity>
 
-      {/* 文本选择窗口：原始 markdown 源码，系统拖选 + 复制；框内自动滚动 */}
+      {/* 文本选择窗口：原始 markdown 源码。承载控件用可编辑但阻止软键盘的
+          多行 TextInput（EditText）：长按选择/系统复制、选区拖到上下边缘
+          自动滚动都走原生行为；readOnly 会让 Android 整段不可选，故不用。 */}
       <Modal
         visible={selectVisible}
         transparent
@@ -63,17 +66,16 @@ export function Bubble({text, isUser}: Props) {
         onRequestClose={() => setSelectVisible(false)}>
         <View style={styles.backdrop}>
           <View style={styles.selectCard}>
-            <Text style={styles.selectHint}>
-              长按文本选择，拖到上下边缘自动滚动，再通过系统菜单复制
-            </Text>
             <TextInput
               style={styles.selectInput}
               value={text}
               multiline
-              readOnly
               textAlignVertical="top"
               autoCorrect={false}
               spellCheck={false}
+              showSoftInputOnFocus={false}
+              caretHidden
+              onFocus={() => Keyboard.dismiss()}
             />
             <TouchableOpacity
               style={styles.selectClose}
@@ -157,12 +159,7 @@ const styles = StyleSheet.create({
     width: '90%',
     maxHeight: '75%',
   },
-  selectHint: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    marginBottom: 10,
-  },
-  /** 只读多行输入框：内容超高时在框内滚动，选择拖拽越过边缘能自动滚动 */
+  /** 多行输入框：内容超高时在框内滚动，选择拖拽越过边缘自动滚动 */
   selectInput: {
     minHeight: 90,
     maxHeight: 400,
