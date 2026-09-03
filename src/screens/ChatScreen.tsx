@@ -1,6 +1,7 @@
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   Alert,
+  BackHandler,
   FlatList,
   Image,
   Modal,
@@ -73,6 +74,22 @@ export function ChatScreen() {
   /** 列表滚动状态：驱动自绘滚动条与「回到底部」按钮 */
   const [scroll, setScroll] = useState({offset: 0, content: 0, viewport: 0});
   const listRef = useRef<FlatList<TimelineItem>>(null);
+  /** 文本选择层内容（助手气泡长按弹出；不用 Modal，见 Bubble 注释） */
+  const [selectText, setSelectText] = useState<string | null>(null);
+
+  // 选择层打开时硬件返回键负责关闭（无 Modal 时默认会退出页面）
+  useEffect(() => {
+    if (!selectText) {
+      return;
+    }
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setSelectText(null);
+      return true;
+    });
+    return () => sub.remove();
+  }, [selectText]);
+
+  const openTextSelect = useCallback((text: string) => setSelectText(text), []);
 
   const items = useMemo(() => chat?.items ?? [], [chat?.items]);
   const invertedItems = useMemo(() => [...items].reverse(), [items]);
@@ -260,12 +277,18 @@ export function ChatScreen() {
             />
           );
         case 'assistant':
-          return <AssistantRow msg={item} showDetail={showDetail} />;
+          return (
+            <AssistantRow
+              msg={item}
+              showDetail={showDetail}
+              onSelectText={openTextSelect}
+            />
+          );
         default:
           return null;
       }
     },
-    [respondApproval, respondClarify, sessionId, showDetail],
+    [openTextSelect, respondApproval, respondClarify, sessionId, showDetail],
   );
 
   const usage = info?.usage;
@@ -529,6 +552,30 @@ export function ChatScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* 文本选择层：直接在屏幕窗口树里渲染（Modal 对话框里可编辑 EditText
+          的系统选择菜单会被立刻关掉，普通窗口才稳定），尽量占满可用高度 */}
+      {selectText !== null ? (
+        <View style={styles.selectOverlay}>
+          <View style={styles.selectCard}>
+            <TextInput
+              style={styles.selectInput}
+              value={selectText}
+              multiline
+              textAlignVertical="top"
+              autoCorrect={false}
+              spellCheck={false}
+              showSoftInputOnFocus={false}
+            />
+            <TouchableOpacity
+              style={styles.selectClose}
+              activeOpacity={0.8}
+              onPress={() => setSelectText(null)}>
+              <Text style={styles.selectCloseText}>关闭</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -548,9 +595,11 @@ function InfoRow({label, value}: {label: string; value: string}) {
 const AssistantRow = React.memo(function AssistantRow({
   msg,
   showDetail,
+  onSelectText,
 }: {
   msg: AssistantMsg;
   showDetail: boolean;
+  onSelectText: (text: string) => void;
 }) {
   // showDetail=false 时隐藏工具调用/思考/推理等非对话块
   const blocks = showDetail
@@ -564,7 +613,14 @@ const AssistantRow = React.memo(function AssistantRow({
       {blocks.map((b, i) => {
         switch (b.type) {
           case 'text':
-            return <Bubble key={i} text={b.text} isUser={false} />;
+            return (
+              <Bubble
+                key={i}
+                text={b.text}
+                isUser={false}
+                onSelectText={onSelectText}
+              />
+            );
           case 'thinking':
             return <ThinkingBlock key={i} text={b.text} variant="thinking" />;
           case 'reasoning':
@@ -796,4 +852,36 @@ const styles = StyleSheet.create({
   infoRow: {flexDirection: 'row', marginVertical: 3},
   infoLabel: {width: 80, fontSize: 13, color: Colors.textSecondary},
   infoValue: {flex: 1, fontSize: 13, color: Colors.text},
+  /** 文本选择层：盖满整屏，白卡尽量占高，输入框 flex:1 内部滚动 */
+  selectOverlay: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    padding: 12,
+    zIndex: 10,
+  },
+  selectCard: {
+    flex: 1,
+    backgroundColor: Colors.card,
+    borderRadius: 12,
+    padding: 12,
+  },
+  selectInput: {
+    flex: 1,
+    fontSize: 15,
+    lineHeight: 22,
+    color: Colors.text,
+    backgroundColor: Colors.bg,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 10,
+  },
+  selectClose: {
+    alignSelf: 'center',
+    borderRadius: 17,
+    paddingHorizontal: 28,
+    paddingVertical: 8,
+    backgroundColor: Colors.accent,
+  },
+  selectCloseText: {fontSize: 14, color: '#FFFFFF', fontWeight: '500'},
 });
