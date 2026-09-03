@@ -1,7 +1,6 @@
 import React, {useEffect, useState} from 'react';
 import {
   Alert,
-  KeyboardAvoidingView,
   ScrollView,
   StyleSheet,
   Switch,
@@ -16,7 +15,6 @@ import {
   type RouteProp,
 } from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
-import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {
   pick,
   keepLocalCopy,
@@ -32,6 +30,7 @@ import {
   type ConnectionProfile,
 } from '../store/connection';
 import {Colors} from '../components/theme';
+import {useKeyboardHeight} from '../utils/useKeyboardHeight';
 import type {RootStackParamList} from '../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'ConnectionEdit'>;
@@ -42,7 +41,7 @@ type ProfileForm = Omit<ConnectionProfile, 'id'>;
 export function ConnectionEditScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<EditRoute>();
-  const insets = useSafeAreaInsets();
+  const {bottomPad} = useKeyboardHeight();
   const profileId = route.params?.profileId;
   const {
     profiles,
@@ -115,13 +114,12 @@ export function ConnectionEditScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior="padding">
+    <View style={styles.flex}>
       <ScrollView
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={[
           styles.container,
-          {paddingBottom: insets.bottom},
+          {paddingBottom: bottomPad},
         ]}>
         <Text style={styles.label}>配置名称</Text>
         <TextInput
@@ -224,7 +222,7 @@ export function ConnectionEditScreen() {
           <Text style={styles.buttonText}>保存</Text>
         </TouchableOpacity>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 

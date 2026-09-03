@@ -3,7 +3,6 @@ import {
   Alert,
   FlatList,
   Image,
-  KeyboardAvoidingView,
   Modal,
   ScrollView,
   StyleSheet,
@@ -14,7 +13,6 @@ import {
 } from 'react-native';
 import {useNavigation, useRoute, type RouteProp} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
-import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {
   pick,
   keepLocalCopy,
@@ -36,6 +34,7 @@ import {ToolCallCard} from '../components/ToolCallCard';
 import {VoiceButton} from '../components/VoiceButton';
 import type {AssistantMsg, TimelineItem} from '../rpc/types';
 import {useChatStore} from '../store/chat';
+import {useKeyboardHeight} from '../utils/useKeyboardHeight';
 import {useConnectionStore} from '../store/connection';
 import type {RootStackParamList} from '../navigation/types';
 
@@ -67,7 +66,8 @@ export function ChatScreen() {
   const [infoVisible, setInfoVisible] = useState(false);
   const [attachPanelOpen, setAttachPanelOpen] = useState(false);
   const [attaching, setAttaching] = useState(false);
-  const insets = useSafeAreaInsets();
+  // 输入法高度（手动测量，替代 KeyboardAvoidingView）
+  const {bottomPad} = useKeyboardHeight();
   /** 是否显示工具调用/思考/推理等非对话内容（顶栏菜单切换） */
   const [showDetail, setShowDetail] = useState(true);
   /** 列表滚动状态：驱动自绘滚动条与「回到底部」按钮 */
@@ -282,7 +282,7 @@ export function ChatScreen() {
       : null;
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior="padding">
+    <View style={styles.container}>
       {connState === 'reconnecting' ? (
         <View style={styles.banner}>
           <Text style={styles.bannerText}>连接已断开，正在重连…</Text>
@@ -350,8 +350,8 @@ export function ChatScreen() {
           </TouchableOpacity>
         ) : null}
       </View>
-      {/* 底部操作区整体包一层：白底 + 底部安全区，与输入框同色系 */}
-      <View style={[styles.bottomBar, {paddingBottom: insets.bottom}]}>
+      {/* 底部操作区整体包一层：白底 + 底部安全区/输入法高度垫高 */}
+      <View style={[styles.bottomBar, {paddingBottom: bottomPad}]}>
         {status && busy ? (
           <View style={styles.statusBar}>
             <Text style={styles.statusText} numberOfLines={1}>
@@ -529,7 +529,7 @@ export function ChatScreen() {
           </View>
         </TouchableOpacity>
       </Modal>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 

@@ -1,13 +1,5 @@
-import React, {useState} from 'react';
-import {
-  Clipboard,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import React from 'react';
+import {StyleSheet, Text, View} from 'react-native';
 
 import {MarkdownText} from './MarkdownText';
 import {Colors} from './theme';
@@ -19,94 +11,29 @@ interface Props {
 
 /**
  * 聊天气泡：用户右（浅蓝）、助手左（白）。无头像占位，尽量撑满宽度。
- * 用户消息按纯文本渲染；助手消息按 markdown 渲染（表格可横向滚动）。
- * 长按约 1 秒弹出「全选 / 部分选择」：
- * - 全选：整条文本直接进剪贴板；
- * - 部分选择：弹层里展示可选文本，手指拖选（单句/单段落）后系统菜单复制。
+ * 两侧文本都支持系统原生长按选择复制：用户消息为纯文本 Text(selectable)，
+ * 助手消息经 MarkdownText 渲染（selectable 落在段落/代码块粒度上）。
  * QQ 风格角标箭头：纯 View border 三角形，压在与气泡相接的上角
  * （assistant 左上指向左，user 右上指向右），颜色与气泡一致。
  */
 export function Bubble({text, isUser}: Props) {
-  const [menuVisible, setMenuVisible] = useState(false);
-  const [selectVisible, setSelectVisible] = useState(false);
-
-  const copyAll = () => {
-    setMenuVisible(false);
-    Clipboard.setString(text);
-  };
-
   return (
     <View style={[styles.row, isUser ? styles.rowRight : styles.rowLeft]}>
-      <TouchableOpacity
-        activeOpacity={0.85}
-        delayLongPress={800}
-        onLongPress={() => setMenuVisible(true)}>
-        <View style={[styles.bubble, isUser ? styles.user : styles.assistant]}>
-          <View
-            style={[
-              styles.arrow,
-              isUser ? styles.arrowUser : styles.arrowAssistant,
-            ]}
-          />
-          {isUser ? (
-            <Text style={styles.text}>{text}</Text>
-          ) : (
-            <MarkdownText text={text} />
-          )}
-        </View>
-      </TouchableOpacity>
-
-      {/* 长按菜单：全选 / 部分选择 */}
-      <Modal
-        visible={menuVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setMenuVisible(false)}>
-        <TouchableOpacity
-          style={styles.backdrop}
-          activeOpacity={1}
-          onPress={() => setMenuVisible(false)}>
-          <View style={styles.menu}>
-            <TouchableOpacity style={styles.menuItem} onPress={copyAll}>
-              <Text style={styles.menuText}>全选（复制整条）</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => {
-                setMenuVisible(false);
-                setSelectVisible(true);
-              }}>
-              <Text style={styles.menuText}>部分选择</Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* 部分选择：可选文本弹层（拖选后由系统菜单复制） */}
-      <Modal
-        visible={selectVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setSelectVisible(false)}>
-        <View style={styles.backdrop}>
-          <View style={styles.selectCard}>
-            <Text style={styles.selectHint}>
-              长按下方文本拖动选择，通过系统菜单复制
-            </Text>
-            <ScrollView style={styles.selectScroll}>
-              <Text style={styles.selectText} selectable>
-                {text}
-              </Text>
-            </ScrollView>
-            <TouchableOpacity
-              style={styles.selectClose}
-              activeOpacity={0.8}
-              onPress={() => setSelectVisible(false)}>
-              <Text style={styles.selectCloseText}>关闭</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      <View style={[styles.bubble, isUser ? styles.user : styles.assistant]}>
+        <View
+          style={[
+            styles.arrow,
+            isUser ? styles.arrowUser : styles.arrowAssistant,
+          ]}
+        />
+        {isUser ? (
+          <Text style={styles.text} selectable>
+            {text}
+          </Text>
+        ) : (
+          <MarkdownText text={text} />
+        )}
+      </View>
     </View>
   );
 }
@@ -167,41 +94,4 @@ const styles = StyleSheet.create({
     lineHeight: 23,
     color: Colors.text,
   },
-  backdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  menu: {
-    backgroundColor: Colors.card,
-    borderRadius: 12,
-    minWidth: 200,
-    overflow: 'hidden',
-  },
-  menuItem: {paddingVertical: 14, paddingHorizontal: 20},
-  menuText: {fontSize: 15, color: Colors.text},
-  selectCard: {
-    backgroundColor: Colors.card,
-    borderRadius: 12,
-    padding: 16,
-    width: '88%',
-    maxHeight: '70%',
-  },
-  selectHint: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    marginBottom: 10,
-  },
-  selectScroll: {flexGrow: 0},
-  selectText: {fontSize: 15, lineHeight: 22, color: Colors.text},
-  selectClose: {
-    alignSelf: 'center',
-    marginTop: 12,
-    borderRadius: 17,
-    paddingHorizontal: 24,
-    paddingVertical: 8,
-    backgroundColor: Colors.accent,
-  },
-  selectCloseText: {fontSize: 14, color: '#FFFFFF', fontWeight: '500'},
 });

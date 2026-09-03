@@ -7,7 +7,6 @@ import React, {useState} from 'react';
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
   ScrollView,
   StyleSheet,
   Text,
@@ -16,7 +15,6 @@ import {
   View,
 } from 'react-native';
 import {useRoute, type RouteProp} from '@react-navigation/native';
-import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {
   pick,
   keepLocalCopy,
@@ -27,6 +25,7 @@ import {
 
 import {Avatar} from '../components/Avatar';
 import {Colors} from '../components/theme';
+import {useKeyboardHeight} from '../utils/useKeyboardHeight';
 import {useConnectionStore} from '../store/connection';
 import {useProfilesStore} from '../store/profiles';
 import {deleteTempFile, prepareAvatarDataUrl} from '../utils/media';
@@ -37,7 +36,7 @@ type Rt = RouteProp<RootStackParamList, 'ProfileEdit'>;
 export function ProfileEditScreen() {
   const route = useRoute<Rt>();
   const profileName = route.params.profile;
-  const insets = useSafeAreaInsets();
+  const {bottomPad} = useKeyboardHeight();
 
   const profile = useProfilesStore(s =>
     s.list.find(p => p.name === profileName),
@@ -131,11 +130,12 @@ export function ProfileEditScreen() {
   const displayName = nickname.trim() || fallbackName;
 
   return (
-    <KeyboardAvoidingView style={styles.flex} behavior="padding">
+    <View style={styles.flex}>
       <ScrollView
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={[
           styles.container,
-          {paddingBottom: insets.bottom},
+          {paddingBottom: bottomPad},
         ]}>
         <View style={styles.avatarWrap}>
           <Avatar name={displayName} uri={shownAvatar} size={96} />
@@ -188,7 +188,7 @@ export function ProfileEditScreen() {
           )}
         </TouchableOpacity>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 

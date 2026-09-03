@@ -1,5 +1,5 @@
 import React, {useMemo, useState} from 'react';
-import {Platform, ScrollView, StyleSheet, View} from 'react-native';
+import {Platform, ScrollView, StyleSheet, Text, View} from 'react-native';
 import Markdown from 'react-native-markdown-display';
 
 import {Colors} from './theme';
@@ -12,7 +12,9 @@ interface Props {
  * 助手消息的 markdown 渲染（react-native-markdown-display）。
  * - 表格用自定义 rule 包一层横向 ScrollView：列宽随内容（flexShrink:0），
  *   窄表至少撑满气泡内容宽（minWidth），宽表可左右滑动；
- * - 链接沿用库默认行为（系统浏览器打开）。
+ * - 链接沿用库默认行为（系统浏览器打开）；
+ * - textgroup/fence/code_block 加 selectable：恢复系统原生文本选择
+ *   （RN 局限：按段落粒度——长按一段出现手柄，可拖动调整范围后复制）。
  */
 export function MarkdownText({text}: Props) {
   // 量取气泡内容宽度，作为表格的最小宽度基准
@@ -30,6 +32,24 @@ export function MarkdownText({text}: Props) {
             {children}
           </View>
         </ScrollView>
+      ),
+      // eslint-disable-next-line react/no-unstable-nested-components -- 同上
+      textgroup: (node: {key: string}, children: React.ReactNode) => (
+        <Text key={node.key} selectable>
+          {children}
+        </Text>
+      ),
+      // eslint-disable-next-line react/no-unstable-nested-components -- 同上
+      fence: (node: {key: string; content: string}) => (
+        <Text key={node.key} style={mdStyles.fence} selectable>
+          {node.content}
+        </Text>
+      ),
+      // eslint-disable-next-line react/no-unstable-nested-components -- 同上
+      code_block: (node: {key: string; content: string}) => (
+        <Text key={node.key} style={mdStyles.code_block} selectable>
+          {node.content}
+        </Text>
       ),
     }),
     [width],
