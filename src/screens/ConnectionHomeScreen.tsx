@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import {useNavigation} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {
   useConnectionStore,
@@ -30,6 +31,7 @@ let autoConnectAttempted = false;
 
 export function ConnectionHomeScreen() {
   const navigation = useNavigation<Nav>();
+  const insets = useSafeAreaInsets();
   const {
     profiles,
     currentProfileId,
@@ -84,7 +86,11 @@ export function ConnectionHomeScreen() {
 
   return (
     <View style={styles.flex}>
-      <ScrollView contentContainerStyle={styles.container}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.container,
+          {paddingBottom: insets.bottom},
+        ]}>
         <Text style={styles.logo}>Hermes</Text>
         <Text style={styles.subtitle}>选择配置，连接到你的 Hermes Agent</Text>
 

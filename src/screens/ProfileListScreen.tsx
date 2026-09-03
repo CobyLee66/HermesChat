@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import {useNavigation} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {Avatar} from '../components/Avatar';
 import {Colors} from '../components/theme';
@@ -28,6 +29,7 @@ function nickname(p: ProfileInfo): string {
 
 export function ProfileListScreen() {
   const navigation = useNavigation<Nav>();
+  const insets = useSafeAreaInsets();
   const {list, avatars, loading, error, refresh} = useProfilesStore();
   const connState = useConnectionStore(s => s.state);
   const reconnecting = connState === 'reconnecting';
@@ -67,7 +69,7 @@ export function ProfileListScreen() {
   }, [connState, navigation]);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, {paddingBottom: insets.bottom}]}>
       {reconnecting ? (
         <View style={styles.banner}>
           <Text style={styles.bannerText}>连接已断开，正在重连…</Text>

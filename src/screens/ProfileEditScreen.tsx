@@ -8,7 +8,6 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -17,6 +16,7 @@ import {
   View,
 } from 'react-native';
 import {useRoute, type RouteProp} from '@react-navigation/native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {
   pick,
   keepLocalCopy,
@@ -37,6 +37,7 @@ type Rt = RouteProp<RootStackParamList, 'ProfileEdit'>;
 export function ProfileEditScreen() {
   const route = useRoute<Rt>();
   const profileName = route.params.profile;
+  const insets = useSafeAreaInsets();
 
   const profile = useProfilesStore(s =>
     s.list.find(p => p.name === profileName),
@@ -130,10 +131,12 @@ export function ProfileEditScreen() {
   const displayName = nickname.trim() || fallbackName;
 
   return (
-    <KeyboardAvoidingView
-      style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={styles.container}>
+    <KeyboardAvoidingView style={styles.flex} behavior="padding">
+      <ScrollView
+        contentContainerStyle={[
+          styles.container,
+          {paddingBottom: insets.bottom},
+        ]}>
         <View style={styles.avatarWrap}>
           <Avatar name={displayName} uri={shownAvatar} size={96} />
           {busy === 'avatar' || busy === 'clear' ? (

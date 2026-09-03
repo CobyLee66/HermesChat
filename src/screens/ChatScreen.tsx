@@ -5,7 +5,6 @@ import {
   Image,
   KeyboardAvoidingView,
   Modal,
-  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -15,6 +14,7 @@ import {
 } from 'react-native';
 import {useNavigation, useRoute, type RouteProp} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {
   pick,
   keepLocalCopy,
@@ -67,6 +67,7 @@ export function ChatScreen() {
   const [infoVisible, setInfoVisible] = useState(false);
   const [attachPanelOpen, setAttachPanelOpen] = useState(false);
   const [attaching, setAttaching] = useState(false);
+  const insets = useSafeAreaInsets();
   /** 是否显示工具调用/思考/推理等非对话内容（顶栏菜单切换） */
   const [showDetail, setShowDetail] = useState(true);
   /** 列表滚动状态：驱动自绘滚动条与「回到底部」按钮 */
@@ -281,9 +282,7 @@ export function ChatScreen() {
       : null;
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView style={styles.container} behavior="padding">
       {connState === 'reconnecting' ? (
         <View style={styles.banner}>
           <Text style={styles.bannerText}>连接已断开，正在重连…</Text>
@@ -351,33 +350,35 @@ export function ChatScreen() {
           </TouchableOpacity>
         ) : null}
       </View>
-      {status && busy ? (
-        <View style={styles.statusBar}>
-          <Text style={styles.statusText} numberOfLines={1}>
-            {status.text}
-          </Text>
-        </View>
-      ) : null}
-      {pending.length > 0 ? (
-        <ScrollView
-          horizontal
-          style={styles.pendingStrip}
-          contentContainerStyle={styles.pendingStripContent}
-          keyboardShouldPersistTaps="handled">
-          {pending.map(a => (
-            <View key={a.path} style={styles.pendingItem}>
-              <Image source={{uri: a.localUri}} style={styles.pendingThumb} />
-              <TouchableOpacity
-                style={styles.pendingRemove}
-                hitSlop={8}
-                onPress={() => removeAttachment(sessionId, a.path)}>
-                <Text style={styles.pendingRemoveText}>×</Text>
-              </TouchableOpacity>
-            </View>
-          ))}
-        </ScrollView>
-      ) : null}
-      <View style={styles.inputBar}>
+      {/* 底部操作区整体包一层：白底 + 底部安全区，与输入框同色系 */}
+      <View style={[styles.bottomBar, {paddingBottom: insets.bottom}]}>
+        {status && busy ? (
+          <View style={styles.statusBar}>
+            <Text style={styles.statusText} numberOfLines={1}>
+              {status.text}
+            </Text>
+          </View>
+        ) : null}
+        {pending.length > 0 ? (
+          <ScrollView
+            horizontal
+            style={styles.pendingStrip}
+            contentContainerStyle={styles.pendingStripContent}
+            keyboardShouldPersistTaps="handled">
+            {pending.map(a => (
+              <View key={a.path} style={styles.pendingItem}>
+                <Image source={{uri: a.localUri}} style={styles.pendingThumb} />
+                <TouchableOpacity
+                  style={styles.pendingRemove}
+                  hitSlop={8}
+                  onPress={() => removeAttachment(sessionId, a.path)}>
+                  <Text style={styles.pendingRemoveText}>×</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+          </ScrollView>
+        ) : null}
+        <View style={styles.inputBar}>
         <TouchableOpacity
           style={styles.plusBtn}
           onPress={() => setAttachPanelOpen(v => !v)}
@@ -445,6 +446,7 @@ export function ChatScreen() {
           <Text style={styles.attachingText}>附件上传中…</Text>
         </View>
       ) : null}
+      </View>
 
       {/* 顶栏菜单 */}
       <Modal
@@ -655,6 +657,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#ECEDF2',
   },
   statusText: {fontSize: 12, color: Colors.textSecondary},
+  /** 底部操作区（状态条/附件横条/输入栏/附件面板）的统一底色与安全区承载 */
+  bottomBar: {backgroundColor: Colors.card},
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -731,7 +735,9 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     minHeight: 38,
-    maxHeight: 120,
+    // 多行自动撑高，上限 8 行（8×22 行高 + 上下 padding）
+    maxHeight: 8 * 22 + 18,
+    lineHeight: 22,
     backgroundColor: Colors.bg,
     borderRadius: 19,
     paddingHorizontal: 14,

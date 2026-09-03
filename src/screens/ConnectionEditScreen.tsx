@@ -2,7 +2,6 @@ import React, {useEffect, useState} from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
-  Platform,
   ScrollView,
   StyleSheet,
   Switch,
@@ -17,6 +16,7 @@ import {
   type RouteProp,
 } from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {
   pick,
   keepLocalCopy,
@@ -42,6 +42,7 @@ type ProfileForm = Omit<ConnectionProfile, 'id'>;
 export function ConnectionEditScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<EditRoute>();
+  const insets = useSafeAreaInsets();
   const profileId = route.params?.profileId;
   const {
     profiles,
@@ -116,8 +117,12 @@ export function ConnectionEditScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView contentContainerStyle={styles.container}>
+      behavior="padding">
+      <ScrollView
+        contentContainerStyle={[
+          styles.container,
+          {paddingBottom: insets.bottom},
+        ]}>
         <Text style={styles.label}>配置名称</Text>
         <TextInput
           style={styles.input}

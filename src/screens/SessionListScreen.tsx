@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import {useNavigation, useRoute, type RouteProp} from '@react-navigation/native';
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {Avatar} from '../components/Avatar';
 import {Colors} from '../components/theme';
@@ -43,6 +44,7 @@ export function SessionListScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Rt>();
   const {profile} = route.params;
+  const insets = useSafeAreaInsets();
 
   const profileInfo = useProfilesStore(s =>
     s.list.find(p => p.name === profile),
@@ -175,7 +177,7 @@ export function SessionListScreen() {
   );
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, {paddingBottom: insets.bottom}]}>
       <TouchableOpacity style={styles.newBtn} onPress={onNewSession} activeOpacity={0.8}>
         <Text style={styles.newBtnText}>＋ 新建会话</Text>
       </TouchableOpacity>
