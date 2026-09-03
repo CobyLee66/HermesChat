@@ -1,18 +1,15 @@
 import React, {useState} from 'react';
 import {
-  Clipboard,
   Modal,
-  Pressable,
-  ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 
 import {MarkdownText} from './MarkdownText';
 import {Colors} from './theme';
-import {markdownToPlain} from '../utils/markdownPlain';
 
 interface Props {
   text: string;
@@ -21,16 +18,16 @@ interface Props {
 
 /**
  * 聊天气泡：用户右（浅蓝）、助手左（白）。无头像占位，尽量撑满宽度。
- * 文本复制策略：
- * - 用户消息：纯文本 Text(selectable)，直接用系统原生长按选择；
- * - 助手消息：markdown 渲染无法整条连贯可选（段落/表格是独立控件），
- *   改为长按 0.5s 弹「全选 / 部分选择」菜单——全选把整条转成纯文本进剪贴板；
- *   部分选择打开可选文本弹层，用系统拖选手柄逐句/逐段选择后复制。
+ * 文本选择/复制策略：
+ * - 用户消息：纯文本 Text(selectable)，系统原生长按选择；
+ * - 助手消息：markdown 渲染在 RN 里无法整条连贯选择（段落/表格是独立控件），
+ *   改为长按 0.5s 直接弹出文本选择窗口，内容为**原始 markdown 源码**（保留
+ *   格式符号），用系统选择菜单操作。承载控件用只读多行 TextInput：内容超出
+ *   高度时在框内滚动，选择拖拽到边缘可自动滚动，不像外层 ScrollView 会卡住。
  * QQ 风格角标箭头：纯 View border 三角形，压在与气泡相接的上角
  * （assistant 左上指向左，user 右上指向右），颜色与气泡一致。
  */
 export function Bubble({text, isUser}: Props) {
-  const [menuVisible, setMenuVisible] = useState(false);
   const [selectVisible, setSelectVisible] = useState(false);
 
   if (isUser) {
@@ -46,53 +43,19 @@ export function Bubble({text, isUser}: Props) {
     );
   }
 
-  // 助手消息：复制内容为 markdown 去语法后的纯文本（表格转制表符分隔）
-  const plain = markdownToPlain(text);
-
   return (
     <View style={[styles.row, styles.rowLeft]}>
-      <Pressable
+      <TouchableOpacity
+        activeOpacity={0.9}
         delayLongPress={500}
-        onLongPress={() => setMenuVisible(true)}
-        style={styles.pressable}>
+        onLongPress={() => setSelectVisible(true)}>
         <View style={[styles.bubble, styles.assistant]}>
           <View style={[styles.arrow, styles.arrowAssistant]} />
           <MarkdownText text={text} />
         </View>
-      </Pressable>
+      </TouchableOpacity>
 
-      {/* 长按菜单：全选 / 部分选择 */}
-      <Modal
-        visible={menuVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setMenuVisible(false)}>
-        <TouchableOpacity
-          style={styles.backdrop}
-          activeOpacity={1}
-          onPress={() => setMenuVisible(false)}>
-          <View style={styles.menu}>
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => {
-                setMenuVisible(false);
-                Clipboard.setString(plain || text);
-              }}>
-              <Text style={styles.menuText}>全选</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.menuItem}
-              onPress={() => {
-                setMenuVisible(false);
-                setSelectVisible(true);
-              }}>
-              <Text style={styles.menuText}>部分选择</Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* 部分选择：整条纯文本可选弹层（系统手柄拖选 + 系统复制菜单） */}
+      {/* 文本选择窗口：原始 markdown 源码，系统拖选 + 复制；框内自动滚动 */}
       <Modal
         visible={selectVisible}
         transparent
@@ -101,13 +64,17 @@ export function Bubble({text, isUser}: Props) {
         <View style={styles.backdrop}>
           <View style={styles.selectCard}>
             <Text style={styles.selectHint}>
-              长按下方文本拖动选择，通过系统菜单复制
+              长按文本选择，拖到上下边缘自动滚动，再通过系统菜单复制
             </Text>
-            <ScrollView style={styles.selectScroll}>
-              <Text style={styles.selectText} selectable>
-                {plain || text}
-              </Text>
-            </ScrollView>
+            <TextInput
+              style={styles.selectInput}
+              value={text}
+              multiline
+              readOnly
+              textAlignVertical="top"
+              autoCorrect={false}
+              spellCheck={false}
+            />
             <TouchableOpacity
               style={styles.selectClose}
               activeOpacity={0.8}
@@ -132,8 +99,6 @@ const styles = StyleSheet.create({
   },
   rowRight: {justifyContent: 'flex-end'},
   rowLeft: {justifyContent: 'flex-start'},
-  /** Pressable 整块包住气泡，避免内容区吃掉长按手势 */
-  pressable: {maxWidth: '100%'},
   bubble: {
     // 横向占满可用宽度（外层 12px 边距保留），不因对话者在一侧留白
     maxWidth: '100%',
@@ -185,28 +150,30 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  menu: {
-    backgroundColor: Colors.card,
-    borderRadius: 12,
-    minWidth: 180,
-    overflow: 'hidden',
-  },
-  menuItem: {paddingVertical: 13, paddingHorizontal: 20},
-  menuText: {fontSize: 15, color: Colors.text},
   selectCard: {
     backgroundColor: Colors.card,
     borderRadius: 12,
     padding: 16,
-    width: '88%',
-    maxHeight: '70%',
+    width: '90%',
+    maxHeight: '75%',
   },
   selectHint: {
     fontSize: 12,
     color: Colors.textSecondary,
     marginBottom: 10,
   },
-  selectScroll: {flexGrow: 0},
-  selectText: {fontSize: 15, lineHeight: 22, color: Colors.text},
+  /** 只读多行输入框：内容超高时在框内滚动，选择拖拽越过边缘能自动滚动 */
+  selectInput: {
+    minHeight: 90,
+    maxHeight: 400,
+    fontSize: 15,
+    lineHeight: 22,
+    color: Colors.text,
+    backgroundColor: Colors.bg,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
   selectClose: {
     alignSelf: 'center',
     marginTop: 12,
