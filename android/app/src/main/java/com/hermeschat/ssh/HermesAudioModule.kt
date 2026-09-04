@@ -1,4 +1,4 @@
-package com.hermesmobile.ssh
+package com.hermeschat.ssh
 
 import android.media.MediaRecorder
 import android.os.Build

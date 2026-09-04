@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /**
- * HermesMobile 端到端 harness（纯 Node 22，全局 fetch/WebSocket）。
+ * HermesChat 端到端 harness（纯 Node 22，全局 fetch/WebSocket）。
  *
  * 流程：
  *   1. GET / 提取 __HERMES_SESSION_TOKEN__
  *   2. 连 WS /api/ws?token=...，等 gateway.ready
  *   3. profiles.list（打印原始结构）
  *   4. session.list {profile:"main"}
- *   5. session.create {profile:"main", cols:100, title:"HermesMobile-harness"}
+ *   5. session.create {profile:"main", cols:100, title:"HermesChat-harness"}
  *   6. prompt.submit 一次（"回复 pong 两个字即可"）→ 收集事件直到 message.complete
  *   7. session.close 清理
  *   8. 结构 probe：model.options、profiles.get_asset（profile "main"）
@@ -171,7 +171,7 @@ async function main() {
     const created = await rpc.call('session.create', {
       profile: PROFILE,
       cols: 100,
-      title: 'HermesMobile-harness',
+      title: 'HermesChat-harness',
     });
     const sid = created.session_id;
     log(`session.create → session_id=${sid} stored=${created.stored_session_id} info.model=${created.info?.model} profile=${created.info?.profile_name}`);

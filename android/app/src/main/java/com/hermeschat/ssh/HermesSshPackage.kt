@@ -1,4 +1,4 @@
-package com.hermesmobile.ssh
+package com.hermeschat.ssh
 
 import com.facebook.react.ReactPackage
 import com.facebook.react.bridge.NativeModule

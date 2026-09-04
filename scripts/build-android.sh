@@ -64,5 +64,5 @@ else
     echo "    安装到设备 $S ..."
     "$ADB" -s "$S" install -r "$APK_WIN"
   done
-  echo "完成，手机应用列表打开 HermesMobile 即可。"
+  echo "完成，手机应用列表打开 HermesChat 即可。"
 fi

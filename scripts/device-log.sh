@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# device-log.sh [dump|watch|clear]   —— 通过 构建机 adb 抓 HermesMobile 的手机日志
+# device-log.sh [dump|watch|clear]   —— 通过 构建机 adb 抓 HermesChat 的手机日志
 #   dump : 抓当前日志缓冲并过滤 App 相关行（默认）
 #   watch: 实时跟踪（Ctrl+C 停止）
 #   clear: 清空日志缓冲（复现前先清一下再看最干净）

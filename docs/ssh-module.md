@@ -54,9 +54,9 @@ keepalive：native 侧 `session.setServerAliveInterval(15000)` + `setServerAlive
 
 ## 4. 文件清单（Android）
 
-- `android/app/src/main/java/com/hermesmobile/ssh/HermesSshModule.kt` — 模块实现
-- `android/app/src/main/java/com/hermesmobile/ssh/HermesSshPackage.kt` — Package 注册
-- `android/app/src/main/java/com/hermesmobile/MainApplication.kt` — 注册 HermesSshPackage（按模板实际包名/语言调整，模板可能是 .kt）
+- `android/app/src/main/java/com/hermeschat/ssh/HermesSshModule.kt` — 模块实现
+- `android/app/src/main/java/com/hermeschat/ssh/HermesSshPackage.kt` — Package 注册
+- `android/app/src/main/java/com/hermeschat/MainApplication.kt` — 注册 HermesSshPackage（按模板实际包名/语言调整，模板可能是 .kt）
 - `android/app/build.gradle` — JSch 依赖
 - `src/ssh/HermesSsh.ts` — JS 侧 typed wrapper
 - `src/ssh/SshManager.ts` — 状态机 + bootstrap + 重连（由 JS core 任务实现，本契约只规定它消费上面的 API）

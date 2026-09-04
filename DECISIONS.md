@@ -10,7 +10,7 @@
 | ID | 决策 | 不可让步 | 日期 |
 |----|------|---------|------|
 | D001 | React Native + TypeScript 技术栈（Android 优先，iOS 后续），对齐 web dashboard 的对话体验；本机只做 JS/TS 开发 | UI/协议层保持平台无关（桌面端复用的前提） | 2026-09-01 |
-| D002 | 本机（MacBook）不装 Android/iOS 工具链；APK 构建在 构建机，经 GitHub 同步（推 GitHub → 构建机 拉取构建 → 取回 dist/） | Mac 上仅 tsc/lint/jest/web 静态验证；构建机 的 `C:\HermesMobile` 是构建副本，禁止手改 | 2026-09-01 |
+| D002 | 本机（MacBook）不装 Android/iOS 工具链；APK 构建在 构建机，经 GitHub 同步（推 GitHub → 构建机 拉取构建 → 取回 dist/） | Mac 上仅 tsc/lint/jest/web 静态验证；构建机 的 `C:\HermesChat` 是构建副本，禁止手改 | 2026-09-01 |
 | D003 | 适配官方版 hermes 公开协议（WS JSON-RPC + REST），绝不修改服务端源码/配置/数据 | 遇「不改服务端实现不了」时停下来交用户决策，禁止擅自打补丁；对 live 服务禁写（除非用户批准当次验证） | 2026-09-01 |
 | D004 | 自研 SSH 隧道原生模块 HermesSsh（Android = Kotlin + JSch），否决 `@dylankenneally/react-native-ssh-sftp` | 必须有端口转发 API（该库没有）；iOS 侧不依赖其 NMSSH 实现（模拟器不支持） | 2026-09-01 |
 | D005 | 原生能力差异全部收敛在 `src/ssh/`（HermesSsh/HermesAudio 契约 + 各平台实现） | UI/协议层禁止 import 平台 API（`docs/desktop.md` 桌面端方案依赖此边界） | 2026-09-01 |
@@ -29,3 +29,4 @@
 | D018 | 界面图标用现成 Tabler Icons PNG（240px base64 data URI 存 `src/assets/icons.ts`，`IconImage` tintColor 着色），否决手绘 View 图标与 react-native-vector-icons 图标库 | 零原生/零字体配置（数据 URI 原生与 web 通吃，tsc+web 即可完全验证，不需等 构建机）；图标库要改安卓 gradle 引字体，违背 D002 的本机验证边界；新图标一律先查 Tabler（MIT）补进 icons.ts | 2026-09-05 |
 | D019 | 所有 REST 调用必须带超时：`rest.ts` 统一 AbortController 30s（对齐 WS RPC 层 requestTimeoutMs），长流程外层再加 Promise.race 兜底 | RN fetch 默认永不超时——SSH 隧道半开（锁屏/切网后静默断开）时请求无限挂起，是「语音一直识别中」类卡死 UI 的根因；新 REST 端点不得裸 fetch | 2026-09-05 |
 | D020 | 语音识别语言问题**暂不处理**（用户 2026-09-05 决定）：识别语言完全由服务端决定，`/api/audio/transcribe` 无 language 参数，客户端无法指定 | 不改服务端（D003）；实测 faster-whisper `base` 自动检测把 ≤7s 中文全误判 `lang=en`（服务端日志实锤），要修只能用户自己改服务端配置（`stt.local.language: zh` / 换 `small` 模型）或给上游提 issue 加 language 参数；App 侧留待上游支持后再传语言 | 2026-09-05 |
+| D021 | 项目改名 HermesMobile → HermesChat（GitHub 仓库、本地目录、Android applicationId `com.hermeschat`、iOS 工程、App 显示名、文档与脚本全量替换）；构建机 构建副本随之从 `C:\HermesMobile` 迁到 `C:\HermesChat` | 改名必须零残留（含包名路径）；applicationId 即应用身份，变更后手机上需全新安装、旧 App 数据不迁移（用户接受）；iOS 仅文本级改名，本机无 Xcode 不做构建验证，首次构建需重跑 `pod install` | 2026-09-05 |

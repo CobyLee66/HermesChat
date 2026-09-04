@@ -1,4 +1,4 @@
-package com.hermesmobile.ssh
+package com.hermeschat.ssh
 
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise

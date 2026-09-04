@@ -14,6 +14,7 @@
 
 ### 最近完成
 
+- [x] 项目改名 HermesMobile → HermesChat（2026-09-05，D021）— GitHub 仓库（HermesChat）/本地目录/Android 包名 `com.hermeschat`（applicationId + 源码目录）/iOS 工程目录/App 显示名/文档与脚本全量替换，零残留；构建机 构建副本重建到 `C:\HermesChat`。⚠ 踩坑：applicationId 变更 = 手机上是全新应用（旧 HermesMobile 图标与数据不迁移，需手动卸载）；旧 `C:\HermesMobile` 被进程占用暂未删除，确认无用后手动删；iOS 工程仅文本级改名，本机无 Xcode 未构建验证
 - [x] 项目初版 v0.1：RN Android 客户端连 Hermes serve（2026-09-01，D001~D005）— QQ 风格多 profile / 多会话聊天，WS JSON-RPC 经自研 SSH 隧道（Kotlin HermesSsh 模块 + JSch）；流式文本/思考/工具调用/报错渲染、权限审批卡片、模型切换；Node harness + jest 测试；构建机 构建脚本
 - [x] 构建机 构建链路打通（2026-09-01，D002）— GitHub 同步工作流：推 GitHub → 构建机 拉取 → gradle 构建 → 取回 dist/ → 检测到手机自动 adb 安装。⚠ 踩坑：Windows OpenSSH 的 scp 路径必须用正斜杠；构建机用 `npm ci` + 拉取前自愈脏树
 - [x] SSH 认证与连接排障包（2026-09-01~02，D007/D008）— 认证失败报错附已加载密钥指纹/算法（先对照实验确认密钥本身可用，再怀疑手机侧文件）；JSch 实例移出 try 作用域保留诊断；JSch 内部日志桥到 logcat（tag `HermesSsh-Jsch`）。⚠ 踩坑：JSch 的 ed25519 `jce.SignatureEd25519` 需 Java15+，Android 不可用，必须打包 bcprov；非交互 SSH 无用户 PATH，hermes 启动路径须运行时探测绝对路径（`command -v` → 登录 shell → `~/.local/bin`）

@@ -1,5 +1,5 @@
 /**
- * HermesMobile — Hermes Agent 手机端。
+ * HermesChat — Hermes Agent 手机端。
  * 导航：ConnectionHome → ConnectionEdit / ProfileList → SessionList → Chat。
  */
 

@@ -1,4 +1,4 @@
-# HermesMobile — Hermes 远程操控手机端 App 设计方案（已批准）
+# HermesChat — Hermes 远程操控手机端 App 设计方案（已批准）
 
 > 本文档是已批准的总体设计。协议细节见 `docs/protocol.md`，SSH 原生模块契约见 `docs/ssh-module.md`。
 
@@ -32,7 +32,7 @@ React Native (TS) 手机 App（Android 优先，iOS 后续），通过 **App 内
 
 | 层 | 选择 |
 |---|---|
-| 框架 | React Native 0.87.1 (TS)，bare workflow，包名 HermesMobile |
+| 框架 | React Native 0.87.1 (TS)，bare workflow，包名 HermesChat |
 | SSH | 自研原生模块 `HermesSsh`（Android: Kotlin + JSch mwiede fork；iOS 后续 SwiftNIO SSH） |
 | WS | RN 内置 WebSocket |
 | 状态 | Zustand；连接配置（含密码/私钥）AsyncStorage 持久化于 App 沙盒 |

@@ -6,7 +6,7 @@ set -euo pipefail
 
 FLAVOR="${1:-release}"           # debug | release
 REMOTE_HOST="构建机"             # ~/.ssh/config 里的别名
-REMOTE_DIR='C:\HermesMobile'
+REMOTE_DIR='C:\HermesChat'
 # Git for Windows 自带的 bash（远端 Windows 的 cmd 里 bash 不一定在 PATH）
 REMOTE_BASH='C:\Program Files\Git\bin\bash.exe'
 LOCAL_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -31,6 +31,6 @@ ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR & (git pull --ff-only origin main || (git 
 
 echo "==> [3/3] 取回 APK"
 mkdir -p "$DIST_DIR"
-scp "$REMOTE_HOST:C:/HermesMobile/$APK_FWD" "$DIST_DIR/$APK_NAME"
+scp "$REMOTE_HOST:C:/HermesChat/$APK_FWD" "$DIST_DIR/$APK_NAME"
 ls -lh "$DIST_DIR/$APK_NAME"
 echo "完成。如需重新安装到手机：scripts/install-android.sh $DIST_DIR/$APK_NAME"
