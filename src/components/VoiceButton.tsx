@@ -6,6 +6,7 @@
 
 import React, {useEffect, useRef, useState} from 'react';
 import {
+  ActivityIndicator,
   Alert,
   PermissionsAndroid,
   Platform,
@@ -18,9 +19,17 @@ import RNFS from 'react-native-fs';
 
 import {transcribeAudio} from '../rpc/rest';
 import {useConnectionStore} from '../store/connection';
+import {IconImage} from './icons';
 import {Colors} from './theme';
 
 type Phase = 'idle' | 'recording' | 'busy';
+
+/**
+ * 整个「停止→转文字」流程的兜底超时。REST 层已有 30s fetch 超时（rest.ts），
+ * 这里再兜住原生 stopRecording / RNFS.readFile 极端挂起的情况，
+ * 保证 finally 必定执行，界面不会永远停在「识别中」。
+ */
+const BUSY_TIMEOUT_MS = 35_000;
 
 interface Props {
   /** 转文字时按会话 profile 走（?profile= 查询参数） */
@@ -43,6 +52,15 @@ async function ensureRecordPermission(): Promise<boolean> {
     },
   );
   return granted === PermissionsAndroid.RESULTS.GRANTED;
+}
+
+function timeoutReject(ms: number): Promise<never> {
+  return new Promise((_, reject) => {
+    setTimeout(
+      () => reject(new Error(`语音识别超时（${Math.round(ms / 1000)} 秒），请重试`)),
+      ms,
+    );
+  });
 }
 
 export function VoiceButton({profile, onText}: Props) {
@@ -82,34 +100,41 @@ export function VoiceButton({profile, onText}: Props) {
     timerRef.current = setInterval(() => setSecs(s => s + 1), 1000);
   };
 
-  const stopAndTranscribe = async () => {
+  const stopAndTranscribe = () => {
     clearTimer();
     setPhase('busy');
     const path = pathRef.current;
-    try {
-      await HermesAudio.stopRecording();
-      const base64 = await RNFS.readFile(path, 'base64');
-      const {httpUrl, token} = useConnectionStore.getState();
-      const result = await transcribeAudio(
-        httpUrl,
-        token,
-        `data:audio/m4a;base64,${base64}`,
-        profile,
-      );
-      const text = result.transcript.trim();
-      if (text) {
-        onText(text);
-      } else {
-        Alert.alert('语音输入', '未识别到语音内容');
+    (async () => {
+      try {
+        await Promise.race([
+          (async () => {
+            await HermesAudio.stopRecording();
+            const base64 = await RNFS.readFile(path, 'base64');
+            const {httpUrl, token} = useConnectionStore.getState();
+            const result = await transcribeAudio(
+              httpUrl,
+              token,
+              `data:audio/m4a;base64,${base64}`,
+              profile,
+            );
+            const text = result.transcript.trim();
+            if (text) {
+              onText(text);
+            } else {
+              Alert.alert('语音输入', '未识别到语音内容');
+            }
+          })(),
+          timeoutReject(BUSY_TIMEOUT_MS),
+        ]);
+      } catch (e) {
+        Alert.alert('语音识别失败', e instanceof Error ? e.message : String(e));
+      } finally {
+        if (path) {
+          RNFS.unlink(path).catch(() => {});
+        }
+        setPhase('idle');
       }
-    } catch (e) {
-      Alert.alert('语音识别失败', e instanceof Error ? e.message : String(e));
-    } finally {
-      if (path) {
-        RNFS.unlink(path).catch(() => {});
-      }
-      setPhase('idle');
-    }
+    })();
   };
 
   const onPress = () => {
@@ -124,32 +149,38 @@ export function VoiceButton({profile, onText}: Props) {
     // busy（识别中）：忽略点击
   };
 
-  const label =
-    phase === 'recording'
-      ? `🔴 ${secs}s 点击停止`
-      : phase === 'busy'
-        ? '识别中…'
-        : '语音输入';
-
   return (
     <TouchableOpacity
       style={styles.tile}
       onPress={onPress}
       disabled={phase === 'busy'}
-      activeOpacity={0.7}>
-      <Text style={styles.icon}>{phase === 'idle' ? '🎤' : ' '}</Text>
-      <Text
-        style={[styles.label, phase !== 'idle' && styles.labelActive]}
-        numberOfLines={1}>
-        {label}
-      </Text>
+      activeOpacity={0.7}
+      accessibilityLabel="语音输入">
+      {phase === 'idle' ? (
+        <IconImage name="microphone" size={26} />
+      ) : phase === 'recording' ? (
+        <>
+          <IconImage name="player-stop" size={26} color={Colors.danger} />
+          <Text style={styles.subLabel}>{secs}s</Text>
+        </>
+      ) : (
+        <>
+          <ActivityIndicator size="small" color={Colors.textSecondary} />
+          <Text style={[styles.subLabel, styles.subLabelMuted]}>识别中…</Text>
+        </>
+      )}
     </TouchableOpacity>
   );
 }
 
+/** 面板三格统一 56 高：录音秒数/识别中的小字多出来的高度不挤动面板。 */
 const styles = StyleSheet.create({
-  tile: {alignItems: 'center', width: 88, paddingVertical: 6},
-  icon: {fontSize: 26, marginBottom: 4},
-  label: {fontSize: 12, color: Colors.text},
-  labelActive: {color: Colors.danger, fontWeight: '600'},
+  tile: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 88,
+    height: 56,
+  },
+  subLabel: {fontSize: 12, color: Colors.danger, fontWeight: '600', marginTop: 2},
+  subLabelMuted: {color: Colors.textSecondary, fontWeight: '400'},
 });

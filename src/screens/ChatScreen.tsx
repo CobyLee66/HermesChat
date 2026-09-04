@@ -30,6 +30,7 @@ import {ChatScrollbar} from '../components/ChatScrollbar';
 import {ClarifyCard} from '../components/ClarifyCard';
 import {FileRefCard} from '../components/FileRefCard';
 import {HeaderTitleView} from '../components/HeaderTitle';
+import {IconImage} from '../components/icons';
 import {ModelPicker} from '../components/ModelPicker';
 import {Colors} from '../components/theme';
 import {StreamCursor, ThinkingBlock} from '../components/ThinkingBlock';
@@ -435,8 +436,13 @@ export function ChatScreen() {
           onPress={() => setAttachPanelOpen(v => !v)}
           disabled={connState !== 'ready'}
           activeOpacity={0.7}
-          hitSlop={6}>
-          <Text style={styles.plusText}>{attachPanelOpen ? '−' : '＋'}</Text>
+          hitSlop={6}
+          accessibilityLabel={attachPanelOpen ? '收起附件面板' : '打开附件面板'}>
+          <IconImage
+            name={attachPanelOpen ? 'minus' : 'plus'}
+            size={20}
+            color={Colors.iconStrong}
+          />
         </TouchableOpacity>
         <TextInput
           ref={inputRef}
@@ -478,17 +484,17 @@ export function ChatScreen() {
             style={styles.attachTile}
             onPress={onPickImages}
             disabled={attaching}
-            activeOpacity={0.7}>
-            <Text style={styles.attachIcon}>🖼</Text>
-            <Text style={styles.attachLabel}>相册图片</Text>
+            activeOpacity={0.7}
+            accessibilityLabel="发送图片">
+            <IconImage name="photo" size={26} />
           </TouchableOpacity>
           <TouchableOpacity
             style={styles.attachTile}
             onPress={onPickFile}
             disabled={attaching}
-            activeOpacity={0.7}>
-            <Text style={styles.attachIcon}>📎</Text>
-            <Text style={styles.attachLabel}>文件</Text>
+            activeOpacity={0.7}
+            accessibilityLabel="发送文件">
+            <IconImage name="paperclip" size={26} />
           </TouchableOpacity>
           <VoiceButton profile={profile} onText={onVoiceText} />
         </View>
@@ -786,13 +792,14 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 19,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: Colors.border,
+    // 填充 + 可见描边：之前只有发丝描边、无填充，在白卡片上几乎看不见圆圈
+    backgroundColor: Colors.fill,
+    borderWidth: 1,
+    borderColor: Colors.fillBorder,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 8,
   },
-  plusText: {fontSize: 20, color: Colors.textSecondary, lineHeight: 24},
   pendingStrip: {
     backgroundColor: Colors.card,
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -826,9 +833,8 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: Colors.border,
   },
-  attachTile: {alignItems: 'center', width: 88, paddingVertical: 6},
-  attachIcon: {fontSize: 26, marginBottom: 4},
-  attachLabel: {fontSize: 12, color: Colors.text},
+  /** 面板三格统一 56 高（与 VoiceButton 磁贴一致），纯图标无文字 */
+  attachTile: {alignItems: 'center', justifyContent: 'center', width: 88, height: 56},
   attachingBar: {
     backgroundColor: Colors.card,
     paddingVertical: 4,

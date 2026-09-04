@@ -5,6 +5,11 @@
 export const Colors = {
   bg: '#F2F3F7',
   card: '#FFFFFF',
+  /** 输入区可点击圆底（+ 按钮等）：比 bg 深半档，在白卡片上足以看清轮廓 */
+  fill: '#EDF0F5',
+  fillBorder: '#D9DDE6',
+  /** 圆底上的主图形色（如 +/− 图标）：比 textSecondary 深一档保证可点感 */
+  iconStrong: '#4E5564',
   accent: '#12B7F5',
   accentDark: '#0E9BD8',
   text: '#1A1A1A',
