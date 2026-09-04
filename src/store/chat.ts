@@ -5,7 +5,7 @@
 
 import {create} from 'zustand';
 
-import {TimelineAggregator} from '../rpc/aggregator';
+import {TimelineAggregator, type InflightSnapshot} from '../rpc/aggregator';
 import {getRpc} from '../rpc/runtime';
 import type {
   ApprovalChoice,
@@ -41,6 +41,8 @@ export interface SessionChatState {
   items: TimelineItem[];
   /** 最近一次 status.update（状态条） */
   status: {kind: string; text: string} | null;
+  /** 最近一次 thinking.delta 占位（busy 指示器文本，空串已清除时为 null） */
+  thinkingHint: string | null;
   info: SessionInfoPayload | null;
   /** turn 进行中（message.start ~ message.complete/error） */
   busy: boolean;
@@ -67,6 +69,7 @@ export interface SessionChatState {
 const EMPTY: SessionChatState = {
   items: [],
   status: null,
+  thinkingHint: null,
   info: null,
   busy: false,
   profile: '',
@@ -103,7 +106,7 @@ function applyPending(
 interface ChatStore {
   bySession: Record<string, SessionChatState>;
 
-  /** 进入会话：建聚合器 + 历史投影。重复进入不重建。 */
+  /** 进入会话：建聚合器 + 历史投影；重进时以服务端消息为准重建。 */
   attach(
     sid: string,
     opts?: {
@@ -117,6 +120,10 @@ interface ChatStore {
       pendingApprovals?: ApprovalRequestPayload[];
       /** resume 返回的挂起澄清提问 */
       pendingClarifies?: ClarifyRequestPayload[];
+      /** resume 结果的 running（turn 进行中） */
+      running?: boolean;
+      /** resume 结果的 turn 进行中快照（部分流出的助手文本等） */
+      inflight?: InflightSnapshot | null;
     },
   ): void;
   detach(sid: string): void;
@@ -128,6 +135,7 @@ interface ChatStore {
     opts: {
       messages: ProjectedMessage[];
       running?: boolean;
+      inflight?: InflightSnapshot | null;
       pendingApprovals?: ApprovalRequestPayload[];
       pendingClarifies?: ClarifyRequestPayload[];
     },
@@ -184,6 +192,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           ...prev,
           items: agg.getItems(),
           status: agg.lastStatus,
+          thinkingHint: agg.lastThinkingHint,
           busy: agg.isStreaming(),
           ...patch,
         },
@@ -196,8 +205,14 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     attach(sid, opts) {
       const agg = aggFor(sid);
-      if (opts?.messages && agg.getItems().length === 0) {
+      if (opts?.messages) {
+        // 进入/重进会话：服务端历史是权威快照，始终重建时间线。
+        // 此前只在聚合器为空时 hydrate——resume 快路径返回同一 live sid，
+        // 重进就永远停在首次进入时的旧快照（其它端/断线期间的新消息全丢）。
+        // 若重进时本地恰有流式尾部（同一 turn），恢复时保留它的结构块。
+        const previousStreaming = agg.takeStreamingTail();
         agg.hydrate(opts.messages);
+        agg.restoreLiveTail(opts.running === true, opts.inflight, previousStreaming);
       }
       applyPending(agg, opts?.pendingApprovals, opts?.pendingClarifies);
       snapshot(sid, {
@@ -211,13 +226,18 @@ export const useChatStore = create<ChatStore>((set, get) => {
         forking: false,
         migratedTo: undefined,
         resumeFailed: false,
+        ...(opts?.running !== undefined ? {busy: opts.running} : null),
       });
     },
 
     reattachAfterResume(oldSid, liveSid, opts) {
       const prev = get().bySession[oldSid];
+      const oldAgg = aggregators.get(oldSid) ?? null;
+      // 断线前若有流式尾部，恢复时尽量保留（同 turn 前缀扩展判断）
+      const previousStreaming = oldAgg ? oldAgg.takeStreamingTail() : null;
       const agg = new TimelineAggregator();
       agg.hydrate(opts.messages ?? []);
+      agg.restoreLiveTail(opts.running === true, opts.inflight, previousStreaming);
       applyPending(agg, opts.pendingApprovals, opts.pendingClarifies);
       if (liveSid !== oldSid) {
         aggregators.delete(oldSid);
@@ -235,6 +255,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             ...(prev ?? EMPTY),
             items: agg.getItems(),
             status: null,
+            thinkingHint: null,
             busy: opts.running ?? false,
             resumeFailed: false,
           },
@@ -362,6 +383,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
         let info: SessionInfoPayload | undefined;
         let pendingApprovals: ApprovalRequestPayload[] | undefined;
         let pendingClarifies: ClarifyRequestPayload[] | undefined;
+        let running: boolean | undefined;
+        let inflight: InflightSnapshot | null | undefined;
         const existingFork = await getFork(foreign.originId, profile);
         if (existingFork) {
           // 之前已派生过（如派生后 App 重启再来）：直接 resume fork，走正常人格
@@ -376,6 +399,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
           info = r.info;
           pendingApprovals = r.pending_approval;
           pendingClarifies = r.pending_clarify;
+          running = r.running;
+          inflight = r.inflight;
         } else {
           // session.history RPC 只认 live sid（持久化 id 实测 4001）→
           // 经 SSH exec 只读 sqlite 取全量历史做种子
@@ -415,6 +440,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
           storedSessionId: storedId,
           pendingApprovals,
           pendingClarifies,
+          running,
+          inflight,
         });
         set(s => ({
           bySession: {

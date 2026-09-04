@@ -42,27 +42,40 @@ describe('TimelineAggregator 消息流', () => {
     expect(agg.isStreaming()).toBe(false);
   });
 
-  it('思考块：thinking.delta 聚合成折叠块', () => {
+  it('thinking.delta 是 busy 占位提示：非空覆盖、空串清除、不进正文', () => {
     const agg = new TimelineAggregator();
     agg.applyEvent('message.start', {});
-    agg.applyEvent('thinking.delta', {text: '想一'});
-    agg.applyEvent('thinking.delta', {text: '想二'});
+    agg.applyEvent('thinking.delta', {text: '(´･_･`) processing...'});
+    expect(agg.lastThinkingHint).toBe('(´･_･`) processing...');
+    // 下一次 API 调用的占位覆盖上一条（服务端 spinner 改写语义）
+    agg.applyEvent('thinking.delta', {text: '(¬‿¬) ruminating...'});
+    expect(agg.lastThinkingHint).toBe('(¬‿¬) ruminating...');
     agg.applyEvent('message.delta', {text: '答'});
     agg.applyEvent('message.complete', {text: '答'});
     const msg = lastAssistant(agg);
-    expect(msg.blocks[0]).toEqual({type: 'thinking', text: '想一想二'});
-    expect(msg.blocks[1]).toEqual({type: 'text', text: '答'});
+    // 不产生 thinking 块（真思考走 reasoning.delta / complete.reasoning）
+    expect(msg.blocks).toEqual([{type: 'text', text: '答'}]);
+    // complete 清除占位
+    expect(agg.lastThinkingHint).toBeNull();
   });
 
-  it('reasoning.delta 与 thinking.delta 分开成块', () => {
+  it('thinking.delta 空串清除占位（API 调用结束）', () => {
+    const agg = new TimelineAggregator();
+    agg.applyEvent('message.start', {});
+    agg.applyEvent('thinking.delta', {text: '(⊙_⊙) reflecting...'});
+    agg.applyEvent('thinking.delta', {text: ''});
+    expect(agg.lastThinkingHint).toBeNull();
+  });
+
+  it('reasoning.delta 聚合成 reasoning 块，与 thinking 占位互不影响', () => {
     const agg = new TimelineAggregator();
     agg.applyEvent('message.start', {});
     agg.applyEvent('reasoning.delta', {text: 'R1'});
-    agg.applyEvent('thinking.delta', {text: 'T1'});
+    agg.applyEvent('thinking.delta', {text: '(◔_◔) musing...'});
     agg.applyEvent('message.complete', {text: ''});
     const msg = lastAssistant(agg);
-    expect(msg.blocks[0].type).toBe('reasoning');
-    expect(msg.blocks[1].type).toBe('thinking');
+    expect(msg.blocks).toEqual([{type: 'reasoning', text: 'R1'}]);
+    expect(agg.lastThinkingHint).toBeNull();
   });
 
   it('message.interim(already_streamed) 后 delta 开新 text 块', () => {
@@ -409,5 +422,156 @@ describe('TimelineAggregator 图片/文件引用解析', () => {
     expect(msg.text).toBe('分析');
     expect(msg.images).toEqual([{path: '/p/1.jpg'}]);
     expect(msg.files).toEqual([{ref: 'attachments/a.pdf', name: 'a.pdf'}]);
+  });
+});
+
+describe('TimelineAggregator 重进会话恢复（restoreLiveTail）', () => {
+  it('running turn：inflight 快照恢复用户气泡 + 流式助手尾部', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([
+      {role: 'user', text: '旧问题'},
+      {role: 'assistant', text: '旧回答'},
+      // 本轮 prompt 已在历史尾部时不重复追加
+      {role: 'user', text: '继续改'},
+    ]);
+    agg.restoreLiveTail(true, {user: '继续改', assistant: '正在写的部分', streaming: true});
+    const items = agg.getItems();
+    // 尾部：用户气泡(历史里的) + 流式助手
+    const tail = items[items.length - 1] as AssistantMsg;
+    expect(tail.kind).toBe('assistant');
+    expect(tail.streaming).toBe(true);
+    expect(tail.blocks).toEqual([{type: 'text', text: '正在写的部分'}]);
+    expect(agg.isStreaming()).toBe(true);
+    // 后续 delta 接在恢复的尾部后面
+    agg.applyEvent('message.delta', {text: '，继续'});
+    const after = agg.getItems()[agg.getItems().length - 1] as AssistantMsg;
+    expect(after.blocks).toEqual([{type: 'text', text: '正在写的部分，继续'}]);
+  });
+
+  it('inflight.user 不在历史尾部时补一条用户气泡', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([{role: 'assistant', text: '旧回答'}]);
+    agg.restoreLiveTail(true, {user: '新指令', assistant: '', streaming: true});
+    const items = agg.getItems();
+    expect((items[items.length - 2] as UserMsg).text).toBe('新指令');
+    expect(agg.isStreaming()).toBe(true);
+  });
+
+  it('同一 turn 的本地流式尾部被保留（工具卡不丢），文本取更全方', () => {
+    const agg = new TimelineAggregator();
+    agg.applyEvent('message.start', {});
+    agg.applyEvent('message.delta', {text: '部分'});
+    agg.applyEvent('tool.start', {
+      tool_id: 't1',
+      name: 'write_file',
+      context: 'src/a.ts',
+    });
+    agg.applyEvent('tool.complete', {tool_id: 't1', name: 'write_file'});
+    const previous = agg.takeStreamingTail();
+    // 重挂：hydrate 服务端历史 + 服务端文本是本地文本的严格扩展
+    agg.hydrate([{role: 'user', text: '改一下'}]);
+    agg.restoreLiveTail(
+      true,
+      {user: '改一下', assistant: '部分更长的服务端文本', streaming: true},
+      previous,
+    );
+    const tail = agg.getItems()[agg.getItems().length - 1] as AssistantMsg;
+    expect(tail.streaming).toBe(true);
+    // 工具块保留 + 文本被服务端更全文本替换（单块合并）
+    expect(tail.blocks).toEqual([
+      {type: 'text', text: '部分更长的服务端文本'},
+      {
+        type: 'tool',
+        tool: expect.objectContaining({toolId: 't1', status: 'done'}),
+      },
+    ]);
+  });
+
+  it('服务端文本与本地尾部对不上（不同 turn）时用服务端快照重建', () => {
+    const agg = new TimelineAggregator();
+    agg.applyEvent('message.start', {});
+    agg.applyEvent('message.delta', {text: '完全不同的旧 turn'});
+    const previous = agg.takeStreamingTail();
+    agg.hydrate([]);
+    agg.restoreLiveTail(true, {user: '新问题', assistant: '新文本'}, previous);
+    const tail = agg.getItems()[agg.getItems().length - 1] as AssistantMsg;
+    expect(tail.blocks).toEqual([{type: 'text', text: '新文本'}]);
+  });
+
+  it('inflight 全空且不 running 时不产生流式尾部', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([{role: 'user', text: 'q'}]);
+    agg.restoreLiveTail(false, null);
+    expect(agg.isStreaming()).toBe(false);
+  });
+
+  it('running 但 inflight 为空（prompt 排队中）也建空流式尾部，busy 不闪断', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([{role: 'user', text: 'q'}]);
+    agg.restoreLiveTail(true, null);
+    expect(agg.isStreaming()).toBe(true);
+  });
+});
+
+describe('工具 diff 与 complete 回填', () => {
+  it('tool.complete 无 inline_diff 时从 result.diff 兜底（patch 工具）', () => {
+    const agg = new TimelineAggregator();
+    agg.applyEvent('message.start', {});
+    agg.applyEvent('tool.start', {tool_id: 'p1', name: 'patch', context: 'a.py'});
+    agg.applyEvent('tool.complete', {
+      tool_id: 'p1',
+      name: 'patch',
+      result: {ok: true, diff: '@@ -1 +1 @@\n-old\n+new'},
+      summary: '改了 1 行',
+    });
+    const msg = lastAssistant(agg);
+    const toolBlock = msg.blocks.find(b => b.type === 'tool') as {
+      type: 'tool';
+      tool: ToolCallBlock;
+    };
+    expect(toolBlock.tool.inlineDiff).toBe('@@ -1 +1 @@\n-old\n+new');
+    expect(toolBlock.tool.summary).toBe('改了 1 行');
+  });
+
+  it('inline_diff 优先于 result.diff', () => {
+    const agg = new TimelineAggregator();
+    agg.applyEvent('message.start', {});
+    agg.applyEvent('tool.complete', {
+      tool_id: 'w1',
+      name: 'write_file',
+      inline_diff: '┊ review diff\n@@ +1 @@\n+内容',
+      result: {diff: 'RAW'},
+    });
+    const msg = lastAssistant(agg);
+    const toolBlock = msg.blocks.find(b => b.type === 'tool') as {
+      type: 'tool';
+      tool: ToolCallBlock;
+    };
+    expect(toolBlock.tool.inlineDiff).toBe('┊ review diff\n@@ +1 @@\n+内容');
+  });
+
+  it('complete 文本是流式文本的严格前缀扩展时回填（重进竞态丢 delta）', () => {
+    const agg = new TimelineAggregator();
+    agg.applyEvent('message.start', {});
+    agg.applyEvent('message.delta', {text: '一二三'});
+    // 竞态丢了「四五六」，complete 带全量文本
+    agg.applyEvent('message.complete', {text: '一二三四五六'});
+    const msg = lastAssistant(agg);
+    expect(msg.blocks).toEqual([{type: 'text', text: '一二三四五六'}]);
+  });
+
+  it('complete 文本与流式文本不是前缀关系时不动已流出的内容', () => {
+    const agg = new TimelineAggregator();
+    agg.applyEvent('message.start', {});
+    agg.applyEvent('message.delta', {text: 'A'});
+    agg.applyEvent('message.interim', {text: 'A', already_streamed: true});
+    agg.applyEvent('message.delta', {text: 'B'});
+    agg.applyEvent('message.complete', {text: '不同内容'});
+    const msg = lastAssistant(agg);
+    const texts = msg.blocks.filter(b => b.type === 'text');
+    expect(texts).toEqual([
+      {type: 'text', text: 'A'},
+      {type: 'text', text: 'B'},
+    ]);
   });
 });

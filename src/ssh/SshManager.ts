@@ -128,6 +128,7 @@ export class SshManager implements Connector {
         chat.reattachAfterResume(sid, liveSid, {
           messages: result?.messages ?? [],
           running: result?.running,
+          inflight: result?.inflight,
           pendingApprovals: result?.pending_approval,
           pendingClarifies: result?.pending_clarify,
         });

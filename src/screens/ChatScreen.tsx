@@ -119,6 +119,9 @@ export function ChatScreen() {
   const busy = chat?.busy ?? false;
   const info = chat?.info ?? null;
   const status = chat?.status ?? null;
+  // thinking.delta 占位（(´･_･`) processing… 这类）：服务端每次 API 调用
+  // 覆盖一条、结束时清空——比 status.update 更"活"，busy 时优先显示
+  const thinkingHint = chat?.thinkingHint ?? null;
   const foreign = chat?.foreign ?? null;
   const forking = chat?.forking ?? false;
   const migratedTo = chat?.migratedTo;
@@ -404,10 +407,10 @@ export function ChatScreen() {
       </View>
       {/* 底部操作区整体包一层：白底 + 底部安全区/输入法高度垫高 */}
       <View style={[styles.bottomBar, {paddingBottom: bottomPad}]}>
-        {status && busy ? (
+        {busy && (thinkingHint || status) ? (
           <View style={styles.statusBar}>
             <Text style={styles.statusText} numberOfLines={1}>
-              {status.text}
+              {thinkingHint || status?.text}
             </Text>
           </View>
         ) : null}

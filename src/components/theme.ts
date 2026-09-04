@@ -21,6 +21,12 @@ export const Colors = {
   dangerBg: '#FFECE8',
   thinkingBg: '#F7F8FA',
   success: '#00B42A',
+  /** diff 行配色（write_file/patch 变更展示，对齐 web 端红绿口径） */
+  diffAddBg: '#E9F7EE',
+  diffAddText: '#0E8038',
+  diffRemoveBg: '#FFEDEB',
+  diffRemoveText: '#CC332B',
+  diffMetaText: '#8A8F99',
 };
 
 /** 昵称首字符色块的稳定取色。 */

@@ -3,6 +3,7 @@
  * 每个会话一个实例。所有 apply* 之后 items 数组换新引用（配合 zustand/FlatList）。
  */
 
+import {diffFromResult} from './diffText';
 import {parseMessageText} from './references';
 import type {
   ApprovalCardItem,
@@ -28,6 +29,14 @@ import type {
   ToolStartPayload,
   UserMsg,
 } from './types';
+
+/** session.resume 返回的 turn 进行中快照（服务端 inflight 字段）。 */
+export interface InflightSnapshot {
+  user?: string;
+  assistant?: string;
+  streaming?: boolean;
+  error?: string;
+}
 
 let seq = 0;
 function nextId(prefix: string): string {
@@ -55,6 +64,12 @@ export class TimelineAggregator {
   private current: AssistantMsg | null = null;
   /** 最近一次 status.update（UI 状态条用，不进时间线） */
   lastStatus: {kind: string; text: string} | null = null;
+  /**
+   * 最近一次 thinking.delta 的占位文本（如 `(´･_･\`) processing…`）。
+   * 服务端把它当 busy 指示器改写：每次 API 调用发一条新占位、结束时发
+   * 空串清除（桌面端同款语义——不进正文，只做状态行，最新覆盖）。
+   */
+  lastThinkingHint: string | null = null;
 
   getItems(): TimelineItem[] {
     return this.items;
@@ -70,6 +85,9 @@ export class TimelineAggregator {
   hydrate(messages: ProjectedMessage[]) {
     this.items = [];
     this.current = null;
+    this.sealedText = false;
+    this.lastStatus = null;
+    this.lastThinkingHint = null;
     for (const m of messages) {
       if (!m || typeof m !== 'object') {
         continue;
@@ -171,7 +189,7 @@ export class TimelineAggregator {
         this.onMessageComplete(p as unknown as MessageCompletePayload);
         return true;
       case 'thinking.delta':
-        this.onTextDelta('thinking', p as unknown as TextDeltaPayload);
+        this.onThinkingDelta(p as unknown as TextDeltaPayload);
         return true;
       case 'reasoning.delta':
         this.onTextDelta('reasoning', p as unknown as TextDeltaPayload);
@@ -395,6 +413,16 @@ export class TimelineAggregator {
     const hasText = msg.blocks.some(b => b.type === 'text' && b.text.trim());
     if (!hasText && typeof p.text === 'string' && p.text.trim()) {
       msg.blocks.push({type: 'text', text: p.text});
+    } else if (typeof p.text === 'string' && p.text && !this.sealedText) {
+      // 单 text 块时用 complete 的权威文本回填：重进/断线重挂的竞态窗口里
+      // 可能丢过几个 delta（complete 文本是流式文本的严格前缀扩展时替换）
+      const textBlocks = msg.blocks.filter(b => b.type === 'text');
+      if (textBlocks.length === 1) {
+        const block = textBlocks[0] as {type: 'text'; text: string};
+        if (p.text.startsWith(block.text) && p.text.length > block.text.length) {
+          block.text = p.text;
+        }
+      }
     }
     if (p.status === 'error') {
       msg.blocks.push({
@@ -414,6 +442,7 @@ export class TimelineAggregator {
     msg.blocks = this.extractMediaBlocks(msg.blocks);
     msg.streaming = false;
     this.sealedText = false;
+    this.lastThinkingHint = null;
     this.touchCurrent();
     this.current = null;
   }
@@ -458,6 +487,19 @@ export class TimelineAggregator {
       msg.blocks.push({type: kind, text: p.text});
     }
     this.touchCurrent();
+  }
+
+  /**
+   * thinking.delta = 服务端 busy 指示器改写（占位 kaomoji/等待说明），
+   * 非流式思考内容：非空文本最新覆盖，空串清除。不进时间线正文。
+   */
+  private onThinkingDelta(p: TextDeltaPayload) {
+    const text = typeof p.text === 'string' ? p.text : '';
+    if (text.trim().length === 0) {
+      this.lastThinkingHint = null;
+    } else {
+      this.lastThinkingHint = text;
+    }
   }
 
   // ─── 内部：工具 ───────────────────────────────────────────
@@ -523,6 +565,12 @@ export class TimelineAggregator {
       }
       if (p.inline_diff) {
         tool.inlineDiff = p.inline_diff;
+      } else {
+        // patch 等工具的原始 unified diff 在 result JSON 的 diff 字段里
+        const rawDiff = diffFromResult(p.result);
+        if (rawDiff) {
+          tool.inlineDiff = rawDiff;
+        }
       }
       this.bump();
       return;
@@ -537,7 +585,7 @@ export class TimelineAggregator {
       result: resultText || undefined,
       summary: p.summary,
       durationS: typeof p.duration_s === 'number' ? p.duration_s : undefined,
-      inlineDiff: p.inline_diff,
+      inlineDiff: p.inline_diff || diffFromResult(p.result) || undefined,
     };
     msg.blocks.push({type: 'tool', tool});
     this.touchCurrent();
@@ -565,6 +613,7 @@ export class TimelineAggregator {
 
   private onError(p: ErrorPayload) {
     const text = p.message || '未知错误';
+    this.lastThinkingHint = null;
     // 流式进行中：错误块挂到当前消息；否则独立红条
     if (this.current && this.current.streaming) {
       this.current.blocks.push({type: 'error', text});
@@ -600,7 +649,102 @@ export class TimelineAggregator {
     return msg;
   }
 
+  // ─── 重进/重挂会话：恢复 turn 进行中的流式尾部 ─────────────
+
+  /**
+   * hydrate 之后调用：按 resume 结果的 running/inflight 重建「正在进行的
+   * turn」尾部，后续 delta/工具事件继续接到这条消息上。
+   *
+   * - running=true 但 inflight 为空（如 prompt 排队中）也建空流式尾部，
+   *   否则下一次事件快照重算 busy 会闪断；
+   * - previousStreaming：重挂前本地聚合器的流式消息（同一 turn 且服务端
+   *   文本是它的前缀扩展时直接复用——它的工具卡/思考块比服务端纯文本
+   *   快照丰富，对齐桌面端 preserveStructuralParts 的取舍）；
+   * - inflight.user：历史投影通常已含本轮 prompt，尾部重复时不再补；
+   * - inflight.assistant：已流出的部分文本，作为流式消息的初始 text 块。
+   */
+  restoreLiveTail(
+    running: boolean,
+    inflight: InflightSnapshot | null | undefined,
+    previousStreaming?: AssistantMsg | null,
+  ) {
+    const hasInflight =
+      !!inflight &&
+      (!!inflight.user?.trim() || !!inflight.assistant || !!inflight.streaming);
+    if (!running && !hasInflight) {
+      return;
+    }
+    // 本轮 prompt 不在历史尾部时补一条用户气泡
+    if (inflight?.user?.trim()) {
+      const parsed = parseMessageText(inflight.user);
+      const last = this.items[this.items.length - 1];
+      const alreadyAtTail =
+        last &&
+        last.kind === 'user' &&
+        last.text === parsed.text;
+      if (!alreadyAtTail) {
+        this.appendUserMessage(inflight.user);
+      }
+    }
+    const serverText = typeof inflight?.assistant === 'string' ? inflight.assistant : '';
+    let msg: AssistantMsg;
+    const prevText = previousStreaming ? this.concatTextOf(previousStreaming) : '';
+    if (
+      previousStreaming &&
+      serverText &&
+      prevText &&
+      serverText.startsWith(prevText)
+    ) {
+      // 同一 turn：保留本地流式消息（工具卡/思考块都在），文本取更全的一方。
+      // serverText 覆盖全部已流出文本：替换首个 text 块、丢弃其余（其内容
+      // 已含在 serverText 前缀里，保留会重复），非文本块原位不动。
+      msg = {...previousStreaming, blocks: previousStreaming.blocks.map(b => ({...b}))};
+      if (serverText.length > prevText.length) {
+        const blocks: AssistantBlock[] = [];
+        let textInserted = false;
+        for (const b of msg.blocks) {
+          if (b.type === 'text') {
+            if (!textInserted) {
+              blocks.push({type: 'text', text: serverText});
+              textInserted = true;
+            }
+          } else {
+            blocks.push(b);
+          }
+        }
+        if (!textInserted) {
+          blocks.push({type: 'text', text: serverText});
+        }
+        msg.blocks = blocks;
+      }
+    } else {
+      msg = {
+        kind: 'assistant',
+        id: nextId('a'),
+        blocks: serverText ? [{type: 'text', text: serverText}] : [],
+        streaming: true,
+      };
+    }
+    msg.streaming = true;
+    this.current = msg;
+    this.sealedText = false;
+    this.push(msg);
+  }
+
+  /** 取当前流式消息（重挂迁移用；无则 null）。 */
+  takeStreamingTail(): AssistantMsg | null {
+    return this.current && this.current.streaming ? this.current : null;
+  }
+
   // ─── 工具方法 ─────────────────────────────────────────────
+
+  /** 拼接消息里全部 text 块（前缀扩展比较用）。 */
+  private concatTextOf(msg: AssistantMsg): string {
+    return msg.blocks
+      .filter(b => b.type === 'text')
+      .map(b => (b as {type: 'text'; text: string}).text)
+      .join('');
+  }
 
   private ensureCurrent(): AssistantMsg {
     if (!this.current || !this.current.streaming) {

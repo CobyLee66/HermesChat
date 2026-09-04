@@ -14,6 +14,8 @@
 
 ### 最近完成
 
+- [x] 会话界面三连修：重进实时续流 / kaomoji 占位动态 / 工具 diff 格式化（2026-09-05）— ① 重进会话停留旧状态：根因 `attach()` 只在聚合器为空时 hydrate，而 `session.resume` 快路径对 live 会话返回**同一 sid**（methods_session.py:455 复用不新建）→ 改为始终以服务端 messages 重建 + 消费 resume 的 `running`/`inflight` 重建流式尾部（`restoreLiveTail`：prompt 去重、同 turn 前缀扩展时保留本地工具卡）；`message.complete` 单 text 块时按前缀扩展回填，补重进竞态丢的 delta。② `(´･_･`) processing…` 卡死：服务端把它经 `thinking.delta` 当 busy 指示器改写（每次 API 调用一条、空串清除，conversation_loop.py:3250），旧代码追加成 thinking 块且忽略空串 → 改状态行（最新覆盖+空串清除，桌面端同款语义），ChatScreen busy 时优先显示。③ 工具 raw 输出：`tool.complete.inline_diff` 内嵌 ANSI 色码+`┊ review diff` 头（display.py），patch 的原始 diff 在 `result.diff` → 新 `src/rpc/diffText.ts`（stripAnsi/unified diff 解析/统计），ToolCallCard 行级红绿渲染 + `+N −M` 徽标 + args 路径优先。⚠ 踩坑：react-test-renderer 在本项目 RN preset 下 Text 子树不可断言（App.test.tsx 注释的「渲染级验证交给真机构建」是正解，别硬写渲染测试）；resume 会 re-bind transport，未经批准不要对 live 9119 做真实 resume 验证。
+- [x] 会话列表三档过滤（聊天/自动化/全部）（2026-09-05）— 对齐 hermes web dashboard 的过滤口径：新 `src/utils/sessionSources.ts` 按 dashboard `AUTOMATION_SESSION_SOURCES`（cron/tool/api_server/acp/hermes_flow/vulcan_delegate/webhook）把会话分类，SessionListScreen 顶部加分段控件，默认「聊天」隐藏 cron 刷屏；自动化行加来源徽标（Cron 等）。⚠ 踩坑：分类只能做客户端过滤——WS `session.list` 没有 source 过滤参数（REST 才有）；App 自建会话不传 source 时服务端默认打 `tui`（`_resolve_session_platform`），落在聊天类不会被误滤。web 三档实测截图 docs/screenshots/web-13~15
 - [x] 项目改名 HermesMobile → HermesChat（2026-09-05，D021）— GitHub 仓库（HermesChat）/本地目录/Android 包名 `com.hermeschat`（applicationId + 源码目录）/iOS 工程目录/App 显示名/文档与脚本全量替换，零残留；构建机 构建副本重建到 `C:\HermesChat`，远端 release 构建验证通过（APK 正常产出并装机）。⚠ 踩坑：applicationId 变更 = 手机上是全新应用（旧数据不迁移；实测手机无旧包残留）；旧 `C:\HermesMobile` 被进程占用暂未删除，确认无用后手动删；iOS 工程仅文本级改名，本机无 Xcode 未构建验证
 - [x] 项目初版 v0.1：RN Android 客户端连 Hermes serve（2026-09-01，D001~D005）— QQ 风格多 profile / 多会话聊天，WS JSON-RPC 经自研 SSH 隧道（Kotlin HermesSsh 模块 + JSch）；流式文本/思考/工具调用/报错渲染、权限审批卡片、模型切换；Node harness + jest 测试；构建机 构建脚本
 - [x] 构建机 构建链路打通（2026-09-01，D002）— GitHub 同步工作流：推 GitHub → 构建机 拉取 → gradle 构建 → 取回 dist/ → 检测到手机自动 adb 安装。⚠ 踩坑：Windows OpenSSH 的 scp 路径必须用正斜杠；构建机用 `npm ci` + 拉取前自愈脏树
@@ -37,5 +39,6 @@
 
 - [ ] 桌面端（Windows/macOS）实现（方案见 `docs/desktop.md`，未实现）
 - [ ] iOS 版（`docs/plan.md`：iOS 后续；SSH 隧道需 iOS 侧原生实现，见 `docs/ssh-module.md`）
-- [ ] 2026-09-05 UI 打磨包真机验证（含本次语音超时修复 + 输入区图标：录音/识别中三态、超时报错、图标观感）
+- [ ] 2026-09-05 UI 打磨包真机验证（含本次语音超时修复 + 输入区图标：录音/识别中三态、超时报错、图标观感；以及会话列表三档过滤的触控观感）
+- [ ] 会话界面三连修真机验证（2026-09-05）：重进进行中会话看实时续流、kaomoji 状态条随 API 调用刷新、write_file/patch 卡片红绿 diff 与 +N −M 徽标；跨端场景（dashboard/QQ 侧续聊后 App 重进）重点验
 - [ ] （可选）给 hermes 上游提 issue：`/api/audio/transcribe` 支持 language 参数（D020，上游支持后 App 侧再传语言）

@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect} from 'react';
+import React, {useCallback, useEffect, useMemo, useState} from 'react';
 import {
   Alert,
   FlatList,
@@ -20,6 +20,12 @@ import {useChatStore} from '../store/chat';
 import {getFork} from '../store/forkMap';
 import {useProfilesStore} from '../store/profiles';
 import {useSessionsStore} from '../store/sessions';
+import {
+  automationSourceLabel,
+  isAutomationSource,
+  sourceBelongsToCategory,
+  type SessionFilterCategory,
+} from '../utils/sessionSources';
 import type {SessionListRow} from '../rpc/types';
 import type {RootStackParamList} from '../navigation/types';
 
@@ -29,6 +35,13 @@ type Rt = RouteProp<RootStackParamList, 'SessionList'>;
 // zustand 选择器必须返回稳定引用：`?? []` 每次新建数组会让
 // useSyncExternalStore 认为 store 一直在变 → 无限重渲染崩溃
 const EMPTY_SESSIONS: SessionListRow[] = [];
+
+// 过滤口径对齐 hermes web dashboard：默认只看普通聊天（见 sessionSources.ts）
+const FILTER_OPTIONS: {key: SessionFilterCategory; label: string}[] = [
+  {key: 'chats', label: '聊天'},
+  {key: 'automation', label: '自动化'},
+  {key: 'all', label: '全部'},
+];
 
 function formatTime(ts: number): string {
   if (!ts) {
@@ -55,6 +68,12 @@ export function SessionListScreen() {
   const sessions = useSessionsStore(s => s.byProfile[profile] ?? EMPTY_SESSIONS);
   const {refresh, remove, create, resume} = useSessionsStore();
   const attach = useChatStore(s => s.attach);
+  const [filter, setFilter] = useState<SessionFilterCategory>('chats');
+
+  const filteredSessions = useMemo(
+    () => sessions.filter(s => sourceBelongsToCategory(s.source, filter)),
+    [sessions, filter],
+  );
 
   const nicknameText =
     (profileInfo?.ui_meta as {nickname?: string} | undefined)?.nickname ||
@@ -90,6 +109,8 @@ export function SessionListScreen() {
               storedSessionId: result.stored_session_id ?? fork.forkId,
               pendingApprovals: result.pending_approval,
               pendingClarifies: result.pending_clarify,
+              running: result.running,
+              inflight: result.inflight,
             });
             navigation.navigate('Chat', {
               sessionId: result.session_id,
@@ -132,6 +153,9 @@ export function SessionListScreen() {
           storedSessionId: result.stored_session_id ?? row.id,
           pendingApprovals: result.pending_approval,
           pendingClarifies: result.pending_clarify,
+          // turn 进行中（如 cron/QQ 侧发起的回合）：恢复流式尾部实时续流
+          running: result.running,
+          inflight: result.inflight,
         });
         navigation.navigate('Chat', {
           sessionId: liveSid,
@@ -187,14 +211,33 @@ export function SessionListScreen() {
       <TouchableOpacity style={styles.newBtn} onPress={onNewSession} activeOpacity={0.8}>
         <Text style={styles.newBtnText}>＋ 新建会话</Text>
       </TouchableOpacity>
+      <View style={styles.filterBar}>
+        {FILTER_OPTIONS.map(f => (
+          <TouchableOpacity
+            key={f.key}
+            style={[styles.filterSeg, filter === f.key && styles.filterSegActive]}
+            onPress={() => setFilter(f.key)}
+            activeOpacity={0.8}>
+            <Text
+              style={[
+                styles.filterText,
+                filter === f.key && styles.filterTextActive,
+              ]}>
+              {f.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
       <FlatList
-        data={sessions}
+        data={filteredSessions}
         keyExtractor={s => s.id}
         refreshing={false}
         onRefresh={() => refresh(profile, true)}
         ItemSeparatorComponent={() => <View style={styles.sep} />}
         ListEmptyComponent={
-          <Text style={styles.empty}>还没有会话，点上方新建一个吧</Text>
+          <Text style={styles.empty}>
+            {sessions.length === 0 ? '还没有会话，点上方新建一个吧' : '该分类下暂无会话'}
+          </Text>
         }
         renderItem={({item}) => (
           <TouchableOpacity
@@ -214,6 +257,11 @@ export function SessionListScreen() {
                 </Text>
                 {item.namespaced ? (
                   <Text style={styles.nsBadge}>QQ</Text>
+                ) : null}
+                {isAutomationSource(item.source) ? (
+                  <Text style={styles.sourceBadge}>
+                    {automationSourceLabel(item.source)}
+                  </Text>
                 ) : null}
                 <Text style={styles.time}>{formatTime(item.started_at)}</Text>
               </View>
@@ -238,6 +286,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   newBtnText: {color: '#FFF', fontSize: 15, fontWeight: '600'},
+  filterBar: {
+    flexDirection: 'row',
+    marginHorizontal: 12,
+    marginBottom: 8,
+    backgroundColor: Colors.fill,
+    borderRadius: 9,
+    padding: 2,
+  },
+  filterSeg: {
+    flex: 1,
+    paddingVertical: 7,
+    alignItems: 'center',
+    borderRadius: 7,
+  },
+  filterSegActive: {backgroundColor: Colors.card},
+  filterText: {fontSize: 13, color: Colors.textSecondary},
+  filterTextActive: {color: Colors.text, fontWeight: '600'},
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -252,6 +317,17 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.border,
+    borderRadius: 4,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    marginLeft: 6,
+    overflow: 'hidden',
+  },
+  sourceBadge: {
+    fontSize: 10,
+    color: Colors.accentDark,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.accent,
     borderRadius: 4,
     paddingHorizontal: 4,
     paddingVertical: 1,
