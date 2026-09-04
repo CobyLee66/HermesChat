@@ -219,6 +219,8 @@ export interface ModelProviderRow {
   slug: string;
   name: string;
   is_current?: boolean;
+  /** 用户在 config.yaml 里自配的 provider（custom:<name>），服务端固定排在最后，前端需自行提前 */
+  is_user_defined?: boolean;
   models: string[];
   total_models?: number;
   authenticated?: boolean;

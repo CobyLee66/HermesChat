@@ -39,9 +39,14 @@ export function ModelPicker({visible, onClose, load, onPick}: Props) {
       .finally(() => setLoading(false));
   }, [visible, load]);
 
-  const providers = (data?.providers ?? []).filter(
+  const rows = (data?.providers ?? []).filter(
     p => (p.models?.length ?? 0) > 0 || p.is_current,
   );
+  // 服务端 canonical 顺序把用户自定义 provider 固定排最后；这里稳定分区提到前面
+  const providers = [
+    ...rows.filter(p => p.is_user_defined),
+    ...rows.filter(p => !p.is_user_defined),
+  ];
 
   return (
     <Modal

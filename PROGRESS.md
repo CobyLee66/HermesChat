@@ -1,0 +1,40 @@
+# PROGRESS.md — 项目进度（当前状态）
+
+> 记录跨会话的开发进度，确保新会话能快速接续。维护规则见 AGENTS.md「进度与决策文档」段。
+> 项目暂无版本体系，条目以日期为锚点；已完成条目 > 25 条或本文件 > 20KB 时，压缩为一行摘要移入 `PROGRESS_ARCHIVE.md`。
+
+---
+
+## 当前状态（截至 2026-09-05）
+
+### 进行中
+
+- 桌面端（Windows/macOS）与 Web 版统一方案：`docs/desktop.md` 设计已写、**未实现**（同一份 `src/` UI + 每平台一个 SSH 传输实现 + 一个壳）
+- 会话列表顶部信息 / Profile 名称显示 / 网页端气泡尺寸 / Profile 头像加载缓存打磨包（2026-09-05，1a9341a），真机效果待验证
+
+### 最近完成
+
+- [x] 项目初版 v0.1：RN Android 客户端连 Hermes serve（2026-09-01，D001~D005）— QQ 风格多 profile / 多会话聊天，WS JSON-RPC 经自研 SSH 隧道（Kotlin HermesSsh 模块 + JSch）；流式文本/思考/工具调用/报错渲染、权限审批卡片、模型切换；Node harness + jest 测试；构建机 构建脚本
+- [x] 构建机 构建链路打通（2026-09-01，D002）— GitHub 同步工作流：推 GitHub → 构建机 拉取 → gradle 构建 → 取回 dist/ → 检测到手机自动 adb 安装。⚠ 踩坑：Windows OpenSSH 的 scp 路径必须用正斜杠；构建机用 `npm ci` + 拉取前自愈脏树
+- [x] SSH 认证与连接排障包（2026-09-01~02，D007/D008）— 认证失败报错附已加载密钥指纹/算法（先对照实验确认密钥本身可用，再怀疑手机侧文件）；JSch 实例移出 try 作用域保留诊断；JSch 内部日志桥到 logcat（tag `HermesSsh-Jsch`）。⚠ 踩坑：JSch 的 ed25519 `jce.SignatureEd25519` 需 Java15+，Android 不可用，必须打包 bcprov；非交互 SSH 无用户 PATH，hermes 启动路径须运行时探测绝对路径（`command -v` → 登录 shell → `~/.local/bin`）
+- [x] 明文流量根因修复 + 凭据持久化（2026-09-02，D006）— LAN 直连/隧道走明文 HTTP/WS，manifest 硬编码 `usesCleartextTraffic=true`；私钥/口令/密钥文件持久化到 AsyncStorage（密码仍仅存内存）。⚠ 踩坑：`manifestPlaceholders` 的 usesCleartextTraffic 会被 RN gradle 插件 afterEvaluate 覆盖为 false，导致 release 明文全被拦（直连 network request failed、隧道 WS failed 的根因），必须硬编码进 manifest
+- [x] zustand 会话列表闪退修复（2026-09-02，D009）— ⚠ 踩坑：选择器里 `?? []` 每次返回新数组，useSyncExternalStore 认为 store 持续变化，进入会话列表即 Maximum update depth exceeded 闪退；改用模块级 EMPTY 常量，约定入 AGENTS.md
+- [x] 多 SSH 连接 profile 主页，删除直连模式（2026-09-02，D010）— 连接卡片列表 + 编辑表单 + 自动连接开关（全局唯一 autoProfileId），全字段持久化（`hermes.connections.v2`），App 启动自动连默认配置；删除 DirectWsTransport 与 direct 字段链路
+- [x] Profile 昵称/头像编辑 + 聊天附件（2026-09-02）— 昵称走 `profiles.configure` ui_meta、头像走 `profiles.set_asset`（512px JPEG 压缩）；附件面板：图片（`image.attach_bytes` + 待发横条 + `image.detach`）、文件（`file.attach` + `@file:` 引用）、语音（录音 → `/api/audio/transcribe` → 填入输入框）；`@image:`/`@file:` 消息与 content parts 解析为图片气泡/文件卡片；图片经隧道 `/api/files/download?token=` 加载。协议新发现已回写 `docs/protocol.md`
+- [x] 自研 HermesAudio 录音模块（2026-09-02，D011）— 需求仅 start/stop，自研 MediaRecorder（m4a/AAC）。⚠ 踩坑：`react-native-audio-recorder-player` 3.x 与 RN 0.87 编译不兼容，4.x 的 Nitro 预生成代码与 nitro-modules 版本不匹配，两条路都走不通才自研
+- [x] QQ 风格气泡 + web 调试环境（2026-09-02，D012）— 气泡 maxWidth 92% + 角部三角箭头；`npm run web` = vite + react-native-web 浏览器调试（vite proxy 解决 Host/Origin，原生模块打桩，web-only 直连入口），Playwright 截图存 `docs/screenshots/`
+- [x] multiplex 会话 profile 归属分组（2026-09-02，D013）— 纯客户端零服务端改动：SSH exec 只读 sqlite3 扫 session_key 命名空间建 id→profile 映射；会话列表按归属分组（own + 宿主 foreign 合并）；foreign（QQ 来源）会话只读展示（`session.history` 需 live sid，改经同一 SSH 通道只读直读 messages）；首次发送时 `session.create`（parent_session_id + messages）派生到当前 profile 继续，forkMap 记忆。此项确立了「禁止修改 hermes 服务端」铁律入 AGENTS.md
+- [x] 聊天界面 markdown 渲染包（2026-09-02，D014）— 助手气泡改 markdown 渲染（react-native-markdown-display，表格包横向 ScrollView）；工具/思考显隐开关；会话列表自绘可拖动滚动条 + 「回到底部」浮动按钮（阈值后来调为半屏）。⚠ 踩坑：该库主入口是未编译 JSX，vite 解析不了 → web 端分叉 `MarkdownText.web.tsx` 走 markdown-it → HTML
+- [x] 安全区/键盘避让/长按复制系列（2026-09-02~03，D016）— App 根部按 safe-area insets 加底部内边距；输入框多行撑高。⚠ 踩坑：`KeyboardAvoidingView` 在 Android edge-to-edge + adjustNothing 下不可靠 → `useKeyboardHeight` 手动测量；且遮挡区要按 `windowH - screenY` 算（用 height 会少报一个导航条/安全区高度，输入框底部仍被遮小半行）；AndroidManifest 注释不能写在 activity 标签内，否则 processReleaseMainManifest 解析失败
+- [x] 助手气泡文本选择方案演进（2026-09-03，D015）— 最终方案：长按 0.5s 直接在 ChatScreen 普通窗口树内渲染全屏选择层，承载控件为 `editable` + `showSoftInputOnFocus=false` + `caretHidden` 的多行 TextInput，系统选择菜单/选区拖拽/边缘自动滚动全可用且不弹软键盘。⚠ 踩坑链：①可编辑 TextInput 放 RN Modal（Dialog 窗口）里时 Android 系统选择菜单弹出瞬间被关闭 → 必须移出 Modal 放普通窗口树；②`readOnly` 在 Android 让输入框完全不可选（长按无反应）→ 必须 editable + 禁软键盘；③选区拖拽越过上下边缘带动文本自动滚动，只有自带滚动的多行 TextInput 做得到（外层 ScrollView + 单块 Text 做不到）
+- [x] Android markdown 列表窄竖条修复（2026-09-04，D014）— ⚠ 踩坑：react-native-markdown-display 的 bullet_list 布局（行 flex 容器 + flex:1 内容 + 百分比宽度链）在气泡内容自撑宽度的安卓环境下测量退化；渲染前把列表标记改写为普通文本前缀（`-` → `•`、`1.` → `1．`，带硬换行）让列表走已验证宽度正常的段落路径；代码围栏内部与引用前缀不改写
+- [x] 会话列表/Profile UI 打磨包（2026-09-05）— 会话列表顶部信息优化、Profile 列表显示名称、网页端聊天气泡尺寸修正、Profile 头像加载缓存
+- [x] 模型切换列表 custom provider 优先（2026-09-05，D017）— ModelPicker 前端按 `is_user_defined` 稳定分区把自定义 provider 提到最前。⚠ 踩坑：hermes 没有任何排序配置项——WS `model.options` 固定 `canonical_order=True`，`_reorder_canonical` 按源码 `CANONICAL_PROVIDERS` 声明序排内置 provider、`custom:*` 无条件垫底；TUI/dashboard 同源同序，config.yaml 里 `custom_providers` 书写顺序只影响组间相对序，改变不了「排最后」的大格局
+- [x] 语音识别超时修复 + 输入区图标化打磨包（2026-09-05，D018~D020）— 「一直识别中」根因是 rest.ts 裸 fetch 无超时 + SSH 隧道半开：加 AbortController 30s（对齐 WS RPC）+ 35s 整体 Promise.race 兜底，任何挂起都会报错退出；`+` 按钮加填充+可见描边，附件面板三磁贴去文字改 Tabler 图标（photo/paperclip/mic），录音中改红色停止图标+秒数、识别中改 ActivityIndicator。⚠ 踩坑：①RN fetch 默认永不超时，隧道半开时 Promise 永不 settle、`finally` 不执行就是永久卡死 UI；②hermes transcribe 接口不支持客户端传语言，faster-whisper `base` 对短中文自动检测全误判 `lang=en`（服务端日志实锤），修语言只能动服务端配置，用户决定暂不处理（D020）；③`<Image>` + base64 data URI PNG + tintColor 是零依赖图标方案，原生/web 通吃；图标库要改 gradle 字体配置、本机无法验证，不可取（D018）
+
+### 待办 / 下一步
+
+- [ ] 桌面端（Windows/macOS）实现（方案见 `docs/desktop.md`，未实现）
+- [ ] iOS 版（`docs/plan.md`：iOS 后续；SSH 隧道需 iOS 侧原生实现，见 `docs/ssh-module.md`）
+- [ ] 2026-09-05 UI 打磨包真机验证（含本次语音超时修复 + 输入区图标：录音/识别中三态、超时报错、图标观感）
+- [ ] （可选）给 hermes 上游提 issue：`/api/audio/transcribe` 支持 language 参数（D020，上游支持后 App 侧再传语言）
