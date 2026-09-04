@@ -13,6 +13,7 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {Avatar} from '../components/Avatar';
 import {Colors} from '../components/theme';
+import {HeaderTitleView} from '../components/HeaderTitle';
 import {getExecRemote} from '../ssh/execRemote';
 import {fetchRemoteHistory} from '../ssh/remoteHistory';
 import {useChatStore} from '../store/chat';
@@ -61,7 +62,12 @@ export function SessionListScreen() {
     profile;
 
   useEffect(() => {
-    navigation.setOptions({title: nicknameText});
+    // title 置空 + 自定义 headerTitle：清零安卓原生 toolbar 的 72dp 标题缩进
+    navigation.setOptions({
+      title: '',
+      headerTitleAlign: 'center',
+      headerTitle: () => <HeaderTitleView title={nicknameText} />,
+    });
     refresh(profile);
   }, [navigation, nicknameText, refresh, profile]);
 

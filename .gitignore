@@ -77,3 +77,10 @@ dist/
 
 # Playwright 工具临时目录
 .playwright-mcp/
+
+# ZCode 本地工作目录(计划、会话临时文件)
+.zcode/
+
+# 工具链本地缓存
+.eslintcache
+*.tsbuildinfo

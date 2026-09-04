@@ -38,6 +38,7 @@ export function Bubble({text, isUser, onSelectText}: Props) {
   return (
     <View style={[styles.row, styles.rowLeft]}>
       <TouchableOpacity
+        style={styles.touchable}
         activeOpacity={0.9}
         delayLongPress={500}
         onLongPress={() => onSelectText?.(text)}>
@@ -61,9 +62,14 @@ const styles = StyleSheet.create({
   },
   rowRight: {justifyContent: 'flex-end'},
   rowLeft: {justifyContent: 'flex-start'},
+  // web 端 flex 子项按未换行的整段文字取 max-content 宽且 RN 默认 flexShrink 0,
+  // 内容超宽会把气泡撑出屏幕;允许收缩后回到容器宽(原生 Yoga 本就按可用宽度
+  // 测量文本,无溢出压力时收缩不触发,行为不变)
+  touchable: {flexShrink: 1},
   bubble: {
     // 横向占满可用宽度（外层 12px 边距保留），不因对话者在一侧留白
     maxWidth: '100%',
+    flexShrink: 1,
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 9,

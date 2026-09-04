@@ -32,7 +32,7 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 const screenOptions: NativeStackNavigationOptions = {
   headerStyle: {backgroundColor: Colors.card},
   headerTintColor: Colors.text,
-  headerTitleStyle: {fontSize: 17, fontWeight: '600'},
+  headerTitleStyle: {fontSize: 15, fontWeight: '600'},
   contentStyle: {backgroundColor: Colors.bg},
 };
 

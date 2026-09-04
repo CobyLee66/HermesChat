@@ -5,6 +5,7 @@ import {
   FlatList,
   Image,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -28,6 +29,7 @@ import {ChatImage} from '../components/ChatImage';
 import {ChatScrollbar} from '../components/ChatScrollbar';
 import {ClarifyCard} from '../components/ClarifyCard';
 import {FileRefCard} from '../components/FileRefCard';
+import {HeaderTitleView} from '../components/HeaderTitle';
 import {ModelPicker} from '../components/ModelPicker';
 import {Colors} from '../components/theme';
 import {StreamCursor, ThinkingBlock} from '../components/ThinkingBlock';
@@ -69,6 +71,26 @@ export function ChatScreen() {
   const [attaching, setAttaching] = useState(false);
   // 输入法高度（手动测量，替代 KeyboardAvoidingView）
   const {bottomPad} = useKeyboardHeight();
+  /** web 的 textarea 默认 2 行高且无原生自动长高：文本变化时先收回单行再量
+   *  scrollHeight 设高（不收回会被 clientHeight 托底，删行后高度缩不回）；
+   *  原生端输入框自带长高，不能传 numberOfLines（安卓 setLines 会锁死行数） */
+  const inputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
+  const isWeb = Platform.OS === 'web';
+  useEffect(() => {
+    if (!isWeb) {
+      return;
+    }
+    // RN-web 的 ref 即宿主 textarea；项目 tsconfig 无 DOM lib，用结构类型
+    const el = inputRef.current as unknown as {
+      style: {height: string};
+      scrollHeight: number;
+    } | null;
+    if (!el) {
+      return;
+    }
+    el.style.height = '40px'; // 单行 = 22 行高 + 18 上下 padding
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, 40), 8 * 22 + 18)}px`;
+  }, [isWeb, input]);
   /** 是否显示工具调用/思考/推理等非对话内容（顶栏菜单切换） */
   const [showDetail, setShowDetail] = useState(true);
   /** 列表滚动状态：驱动自绘滚动条与「回到底部」按钮 */
@@ -106,14 +128,20 @@ export function ChatScreen() {
 
   useEffect(() => {
     navigation.setOptions({
-      title: title || '会话',
+      // title 置空：原生字符串标题为空时 react-native-screens 会把安卓
+      // toolbar 的 72dp 标题缩进清零，自定义 headerTitle 才能占满中间
+      title: '',
+      headerTitleAlign: 'center',
+      headerTitle: () => (
+        <ChatHeaderTitle sessionId={sessionId} title={title || '会话'} />
+      ),
       headerRight: () => (
         <TouchableOpacity onPress={() => setMenuVisible(true)} hitSlop={12}>
           <Text style={styles.menuIcon}>⋯</Text>
         </TouchableOpacity>
       ),
     });
-  }, [navigation, title]);
+  }, [navigation, sessionId, title]);
 
   // foreign 会话首次发送完成派生：切到派生出的 own 会话（事件流都走新 sid）
   useEffect(() => {
@@ -411,6 +439,7 @@ export function ChatScreen() {
           <Text style={styles.plusText}>{attachPanelOpen ? '−' : '＋'}</Text>
         </TouchableOpacity>
         <TextInput
+          ref={inputRef}
           style={styles.input}
           value={input}
           onChangeText={setInput}
@@ -579,6 +608,35 @@ export function ChatScreen() {
     </View>
   );
 }
+
+/** token 数简写：999 → 999，1234 → 1.2k，45230 → 45.2k，200000 → 200k */
+function formatTokens(n: number): string {
+  if (n < 1000) {
+    return String(n);
+  }
+  const k = n / 1000;
+  const v = k >= 100 ? Math.round(k) : Math.round(k * 10) / 10;
+  return `${v}k`;
+}
+
+/** 顶栏标题：会话标题 + 模型/上下文小字副标题（订阅 chat store，随 usage 自动刷新） */
+const ChatHeaderTitle = React.memo(function ChatHeaderTitle({
+  sessionId,
+  title,
+}: {
+  sessionId: string;
+  title: string;
+}) {
+  const info = useChatStore(s => s.bySession[sessionId]?.info);
+  const used = info?.usage?.context_used;
+  const max = info?.usage?.context_max;
+  const subtitle = info?.model
+    ? typeof used === 'number' && typeof max === 'number' && max > 0
+      ? `${info.model} · ${formatTokens(used)}/${formatTokens(max)}`
+      : info.model
+    : null;
+  return <HeaderTitleView title={title} subtitle={subtitle} />;
+});
 
 function InfoRow({label, value}: {label: string; value: string}) {
   return (

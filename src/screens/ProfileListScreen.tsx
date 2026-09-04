@@ -102,11 +102,9 @@ export function ProfileListScreen() {
               <View style={styles.rowBody}>
                 <View style={styles.rowTop}>
                   <Text style={styles.name}>{nickname(item)}</Text>
-                  {item.model ? (
-                    <Text style={styles.modelTag} numberOfLines={1}>
-                      {item.model}
-                    </Text>
-                  ) : null}
+                  <Text style={styles.profileTag} numberOfLines={1}>
+                    {item.name}
+                  </Text>
                 </View>
                 <Text style={styles.preview} numberOfLines={1}>
                   {item.last_session?.preview ||
@@ -160,7 +158,7 @@ const styles = StyleSheet.create({
   rowBody: {flex: 1, marginLeft: 12},
   rowTop: {flexDirection: 'row', alignItems: 'center'},
   name: {fontSize: 16, fontWeight: '500', color: Colors.text, flexShrink: 1},
-  modelTag: {
+  profileTag: {
     fontSize: 10,
     color: Colors.accentDark,
     backgroundColor: '#E8F7FF',

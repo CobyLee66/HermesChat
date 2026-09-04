@@ -3,7 +3,10 @@
  * 不打真实服务（profiles.configure / set_asset 都是写操作）。
  */
 
+import RNFS from 'react-native-fs';
+
 import {useProfilesStore} from '../src/store/profiles';
+import {saveAvatarFile} from '../src/utils/avatarCache';
 import type {ProfileInfo} from '../src/rpc/types';
 
 const mockCall = jest.fn<Promise<unknown>, [string, unknown?]>();
@@ -120,15 +123,67 @@ describe('profiles store 编辑', () => {
       asset: 'avatar',
       data: 'data:image/jpeg;base64,NEW',
     });
-    // set_asset → list → get_asset 顺序；旧缓存被新 data URL 替换
+    // set_asset → list → get_asset 顺序；旧缓存文件/map 项被删，新图落盘后以 file:// 上屏
     expect(calls).toEqual([
       'profiles.set_asset',
       'profiles.list',
       'profiles.get_asset',
     ]);
+    expect(useProfilesStore.getState().avatars.main).toMatch(
+      /^file:\/\/\/tmp\/caches\/avatars\//,
+    );
+  });
+
+  it('setAvatar：落盘失败时回退存 data URL', async () => {
+    (RNFS.writeFile as jest.Mock).mockRejectedValueOnce(new Error('disk full'));
+    mockCall.mockImplementation(async (method: string) => {
+      if (method === 'profiles.set_asset') {
+        return {ok: true, asset: 'avatar', size: 1234};
+      }
+      if (method === 'profiles.list') {
+        return {profiles: [makeProfile('main', {has_avatar: true})]};
+      }
+      if (method === 'profiles.get_asset') {
+        return {
+          found: true,
+          mime: 'image/jpeg',
+          size: 1234,
+          data: 'data:image/jpeg;base64,FRESH',
+        };
+      }
+      throw new Error(`unexpected rpc: ${method}`);
+    });
+
+    await useProfilesStore
+      .getState()
+      .setAvatar('main', 'data:image/jpeg;base64,NEW');
+
     expect(useProfilesStore.getState().avatars.main).toBe(
       'data:image/jpeg;base64,FRESH',
     );
+  });
+
+  it('refresh：本地缓存文件先立即上屏，revalidate size 一致时保留 file URI', async () => {
+    const uri = await saveAvatarFile('main', 'data:image/jpeg;base64,LOCAL');
+    mockCall.mockImplementation(async (method: string) => {
+      if (method === 'profiles.list') {
+        return {profiles: [makeProfile('main', {has_avatar: true})]};
+      }
+      if (method === 'profiles.get_asset') {
+        // size 与本地落盘文件一致（mock stat size=42），不应覆盖
+        return {
+          found: true,
+          mime: 'image/jpeg',
+          size: 42,
+          data: 'data:image/jpeg;base64,LOCAL',
+        };
+      }
+      throw new Error(`unexpected rpc: ${method}`);
+    });
+
+    await useProfilesStore.getState().refresh();
+
+    expect(useProfilesStore.getState().avatars.main).toBe(uri);
   });
 
   it('clearAvatar：set_asset clear:true，缓存删除且不再拉取', async () => {
