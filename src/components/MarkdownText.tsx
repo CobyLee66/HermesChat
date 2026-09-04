@@ -3,6 +3,7 @@ import {Platform, ScrollView, StyleSheet, View} from 'react-native';
 import Markdown from 'react-native-markdown-display';
 
 import {Colors} from './theme';
+import {rewriteListMarkers} from '../utils/markdownLists';
 
 interface Props {
   text: string;
@@ -10,6 +11,9 @@ interface Props {
 
 /**
  * 助手消息的 markdown 渲染（react-native-markdown-display）。
+ * - 列表标记在渲染前改写为普通文本前缀（见 utils/markdownLists.ts）：
+ *   库的 bullet_list 布局在安卓端会把气泡压缩成窄竖条，改写成普通段落
+ *   后按已验证宽度正常的路径渲染；
  * - 表格用自定义 rule 包一层横向 ScrollView：列宽随内容（flexShrink:0），
  *   窄表至少撑满气泡内容宽（minWidth），宽表可左右滑动；
  * - 链接沿用库默认行为（系统浏览器打开）；
@@ -19,6 +23,8 @@ interface Props {
 export function MarkdownText({text}: Props) {
   // 量取气泡内容宽度，作为表格的最小宽度基准
   const [width, setWidth] = useState(0);
+  // 列表标记改写（纯文本变换，随消息稳定）
+  const content = useMemo(() => rewriteListMarkers(text), [text]);
   const rules = useMemo(
     () => ({
       // eslint-disable-next-line react/no-unstable-nested-components -- 库的渲染规则是 render prop，非常驻组件
@@ -45,7 +51,7 @@ export function MarkdownText({text}: Props) {
         }
       }}>
       <Markdown style={mdStyles} rules={rules}>
-        {text}
+        {content}
       </Markdown>
     </View>
   );
