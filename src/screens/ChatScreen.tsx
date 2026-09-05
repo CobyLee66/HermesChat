@@ -722,11 +722,11 @@ const ChatHeaderTitle = React.memo(function ChatHeaderTitle({
   if (typeof used === 'number' && typeof max === 'number' && max > 0) {
     parts.push(`${formatTokens(used)}/${formatTokens(max)}`);
   }
-  // 服务端口径：""=未设置（供应商默认，不展示）、"none"=已明确关闭、
-  // 其余为等级原文（low/medium/high/xhigh/max/ultra…）
+  // 服务端口径：""=未设置（供应商默认，不展示）、其余等级原文直接展示
+  // （none=已关闭、low/medium/high/xhigh/max/ultra…）
   const effort = info?.reasoning_effort;
   if (effort) {
-    parts.push(effort === 'none' ? '思考关' : `思考 ${effort}`);
+    parts.push(effort);
   }
   const subtitle = parts.length > 0 ? parts.join(' · ') : null;
   return <HeaderTitleView title={title} subtitle={subtitle} />;
