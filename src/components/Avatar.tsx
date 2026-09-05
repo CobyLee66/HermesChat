@@ -10,19 +10,25 @@ interface Props {
   size?: number;
 }
 
-/** QQ 风格圆角头像：色块垫底，图片解码完成后 120ms 渐现，避免重挂载解码期的空白闪烁。 */
+/**
+ * QQ 风格圆角头像：色块垫底。本地 file:// 缓存挂载即不透明呈现——原生管线按 URI
+ * 命中内存位图缓存，加载零开销，渐现反而把瞬时呈现伪装成「加载中」（切会话过滤档
+ * / 重进列表时行会重挂载，每次重播动画就是肉眼可见的「头像刷新」）；仅 data URL
+ * 回退（RNFS 落盘失败 / web 端）保留 120ms 渐现柔化解码空窗。
+ */
 export function Avatar({name, uri, size = 44}: Props) {
   const radius = Math.round(size * 0.22);
-  const [loaded, setLoaded] = useState(false);
-  const fade = useRef(new Animated.Value(0)).current;
+  const isInstant = uri?.startsWith('file://') ?? false;
+  const [loaded, setLoaded] = useState(isInstant);
+  const fade = useRef(new Animated.Value(isInstant ? 1 : 0)).current;
   // 稳定 source 引用，避免父组件重渲染时触发无谓的图片重载
   const source = useMemo(() => (uri ? {uri} : null), [uri]);
 
   useEffect(() => {
-    // uri 变化（重新上传等）时重置渐现
-    setLoaded(false);
-    fade.setValue(0);
-  }, [fade, uri]);
+    // uri 变化（首次拿到头像 / 重新上传等）时按回退类型重置
+    setLoaded(isInstant);
+    fade.setValue(isInstant ? 1 : 0);
+  }, [fade, isInstant, uri]);
 
   useEffect(() => {
     if (loaded) {
