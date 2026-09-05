@@ -704,7 +704,7 @@ function formatTokens(n: number): string {
   return `${v}k`;
 }
 
-/** 顶栏标题：会话标题 + 模型/上下文小字副标题（订阅 chat store，随 usage 自动刷新） */
+/** 顶栏标题：会话标题 + 模型/上下文/思考等级小字副标题（订阅 chat store，随 usage 自动刷新） */
 const ChatHeaderTitle = React.memo(function ChatHeaderTitle({
   sessionId,
   title,
@@ -715,11 +715,20 @@ const ChatHeaderTitle = React.memo(function ChatHeaderTitle({
   const info = useChatStore(s => s.bySession[sessionId]?.info);
   const used = info?.usage?.context_used;
   const max = info?.usage?.context_max;
-  const subtitle = info?.model
-    ? typeof used === 'number' && typeof max === 'number' && max > 0
-      ? `${info.model} · ${formatTokens(used)}/${formatTokens(max)}`
-      : info.model
-    : null;
+  const parts: string[] = [];
+  if (info?.model) {
+    parts.push(info.model);
+  }
+  if (typeof used === 'number' && typeof max === 'number' && max > 0) {
+    parts.push(`${formatTokens(used)}/${formatTokens(max)}`);
+  }
+  // 服务端口径：""=未设置（供应商默认，不展示）、"none"=已明确关闭、
+  // 其余为等级原文（low/medium/high/xhigh/max/ultra…）
+  const effort = info?.reasoning_effort;
+  if (effort) {
+    parts.push(effort === 'none' ? '思考关' : `思考 ${effort}`);
+  }
+  const subtitle = parts.length > 0 ? parts.join(' · ') : null;
   return <HeaderTitleView title={title} subtitle={subtitle} />;
 });
 
