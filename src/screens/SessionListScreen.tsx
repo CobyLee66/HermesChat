@@ -80,15 +80,39 @@ export function SessionListScreen() {
     profileInfo?.description ||
     profile;
 
+  const onNewSession = useCallback(async () => {
+    try {
+      const result = await create(profile);
+      attach(result.session_id, {
+        messages: result.messages ?? [],
+        info: result.info,
+        profile,
+        storedSessionId: result.stored_session_id,
+      });
+      navigation.navigate('Chat', {
+        sessionId: result.session_id,
+        profile,
+        title: '新会话',
+      });
+    } catch (e) {
+      Alert.alert('新建会话失败', e instanceof Error ? e.message : String(e));
+    }
+  }, [attach, create, navigation, profile]);
+
   useEffect(() => {
     // title 置空 + 自定义 headerTitle：清零安卓原生 toolbar 的 72dp 标题缩进
     navigation.setOptions({
       title: '',
       headerTitleAlign: 'center',
       headerTitle: () => <HeaderTitleView title={nicknameText} />,
+      headerRight: () => (
+        <TouchableOpacity activeOpacity={0.7} onPress={onNewSession}>
+          <Text style={styles.newSessionText}>新会话</Text>
+        </TouchableOpacity>
+      ),
     });
     refresh(profile);
-  }, [navigation, nicknameText, refresh, profile]);
+  }, [navigation, nicknameText, onNewSession, refresh, profile]);
 
   const openSession = useCallback(
     async (row: SessionListRow) => {
@@ -169,25 +193,6 @@ export function SessionListScreen() {
     [attach, navigation, profile, profileList, resume],
   );
 
-  const onNewSession = useCallback(async () => {
-    try {
-      const result = await create(profile);
-      attach(result.session_id, {
-        messages: result.messages ?? [],
-        info: result.info,
-        profile,
-        storedSessionId: result.stored_session_id,
-      });
-      navigation.navigate('Chat', {
-        sessionId: result.session_id,
-        profile,
-        title: '新会话',
-      });
-    } catch (e) {
-      Alert.alert('新建会话失败', e instanceof Error ? e.message : String(e));
-    }
-  }, [attach, create, navigation, profile]);
-
   const onDelete = useCallback(
     (sessionId: string, title: string) => {
       Alert.alert('删除会话', `确定删除「${title || '未命名会话'}」吗？`, [
@@ -208,9 +213,6 @@ export function SessionListScreen() {
 
   return (
     <View style={[styles.container, {paddingBottom: insets.bottom}]}>
-      <TouchableOpacity style={styles.newBtn} onPress={onNewSession} activeOpacity={0.8}>
-        <Text style={styles.newBtnText}>＋ 新建会话</Text>
-      </TouchableOpacity>
       <View style={styles.filterBar}>
         {FILTER_OPTIONS.map(f => (
           <TouchableOpacity
@@ -236,7 +238,7 @@ export function SessionListScreen() {
         ItemSeparatorComponent={() => <View style={styles.sep} />}
         ListEmptyComponent={
           <Text style={styles.empty}>
-            {sessions.length === 0 ? '还没有会话，点上方新建一个吧' : '该分类下暂无会话'}
+            {sessions.length === 0 ? '还没有会话，点右上角「新会话」开始' : '该分类下暂无会话'}
           </Text>
         }
         renderItem={({item}) => (
@@ -278,16 +280,10 @@ export function SessionListScreen() {
 
 const styles = StyleSheet.create({
   container: {flex: 1, backgroundColor: Colors.card},
-  newBtn: {
-    margin: 12,
-    backgroundColor: Colors.accent,
-    borderRadius: 10,
-    paddingVertical: 11,
-    alignItems: 'center',
-  },
-  newBtnText: {color: '#FFF', fontSize: 15, fontWeight: '600'},
+  newSessionText: {fontSize: 15, color: Colors.accent},
   filterBar: {
     flexDirection: 'row',
+    marginTop: 12,
     marginHorizontal: 12,
     marginBottom: 8,
     backgroundColor: Colors.fill,
