@@ -32,6 +32,7 @@ import {FileRefCard} from '../components/FileRefCard';
 import {HeaderTitleView} from '../components/HeaderTitle';
 import {IconImage} from '../components/icons';
 import {ModelPicker} from '../components/ModelPicker';
+import {SlashSuggest} from '../components/SlashSuggest';
 import {Colors} from '../components/theme';
 import {StreamCursor, ThinkingBlock} from '../components/ThinkingBlock';
 import {ToolCallCard} from '../components/ToolCallCard';
@@ -39,6 +40,7 @@ import {VoiceButton} from '../components/VoiceButton';
 import type {AssistantMsg, TimelineItem} from '../rpc/types';
 import {useChatStore} from '../store/chat';
 import {useKeyboardHeight} from '../utils/useKeyboardHeight';
+import {useSlashCompletion} from '../utils/useSlashCompletion';
 import {useConnectionStore} from '../store/connection';
 import type {RootStackParamList} from '../navigation/types';
 
@@ -70,6 +72,13 @@ export function ChatScreen() {
   const [infoVisible, setInfoVisible] = useState(false);
   const [attachPanelOpen, setAttachPanelOpen] = useState(false);
   const [attaching, setAttaching] = useState(false);
+  // 行首斜杠命令补全（数据全部来自服务端 complete.slash；/model 不进补全，
+  // 提交时直接开 App 内模型面板——TUI 对 /model 的两步选择器同款特判）
+  const slash = useSlashCompletion(input, connState === 'ready');
+  const openModelPicker = useCallback(() => {
+    setInput('');
+    setModelPickerVisible(true);
+  }, []);
   // 输入法高度（手动测量，替代 KeyboardAvoidingView）
   const {bottomPad} = useKeyboardHeight();
   /** web 的 textarea 默认 2 行高且无原生自动长高：文本变化时先收回单行再量
@@ -114,6 +123,51 @@ export function ChatScreen() {
 
   const openTextSelect = useCallback((text: string) => setSelectText(text), []);
 
+  // 补全浮层打开时硬件返回键先关补全（无 Modal 时默认会退出页面）
+  const {open: slashOpen, close: closeSlash} = slash;
+  useEffect(() => {
+    if (!slashOpen) {
+      return;
+    }
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      closeSlash();
+      return true;
+    });
+    return () => sub.remove();
+  }, [slashOpen, closeSlash]);
+
+  /** 输入框键盘导航（硬件键盘/web 调试；移动端主要靠点选）。
+   *  与 web dashboard SlashPopover 同款：↑↓ 循环选中、Tab 应用、Esc 关闭；
+   *  Enter 不拦（保持多行输入换行语义，发送靠按钮）。 */
+  const onInputKeyPress = useCallback(
+    (e: {nativeEvent: {key: string}}) => {
+      if (!slash.open) {
+        return;
+      }
+      switch (e.nativeEvent.key) {
+        case 'ArrowDown':
+          slash.move(1);
+          break;
+        case 'ArrowUp':
+          slash.move(-1);
+          break;
+        case 'Tab': {
+          const next = slash.applySelected();
+          if (next !== null) {
+            setInput(next);
+          }
+          break;
+        }
+        case 'Escape':
+          slash.close();
+          break;
+        default:
+          break;
+      }
+    },
+    [slash],
+  );
+
   const items = useMemo(() => chat?.items ?? [], [chat?.items]);
   const invertedItems = useMemo(() => [...items].reverse(), [items]);
   const busy = chat?.busy ?? false;
@@ -155,10 +209,16 @@ export function ChatScreen() {
   }, [migratedTo, navigation, profile, title]);
 
   const onSend = useCallback(() => {
-    const text = input;
+    // 裸 /model 是交互式选择而非文本参数：直接开 App 内模型面板；
+    // 带参数的 /model xxx 及其它命令由 store 分流到执行流水线。
+    if (input.trim() === '/model') {
+      openModelPicker();
+      setInput('');
+      return;
+    }
+    sendPrompt(sessionId, input);
     setInput('');
-    sendPrompt(sessionId, text);
-  }, [input, sendPrompt, sessionId]);
+  }, [input, sendPrompt, sessionId, openModelPicker]);
 
   /** 附件面板：相册图片（多选 → 压缩 → image.attach_bytes → 待发横条）。 */
   const onPickImages = useCallback(async () => {
@@ -404,6 +464,21 @@ export function ChatScreen() {
             <Text style={styles.jumpText}>↓ 回到底部</Text>
           </TouchableOpacity>
         ) : null}
+        {/* 斜杠补全浮层：贴 listWrap 底部（即输入框正上方）。同「回到底部」
+            按钮一样挂在列表容器内——absolute 子元素渲染在父容器边界内，
+            Android 触摸命中才有保障（挂 inputBar 里越界渲染会点不到） */}
+        {slash.open ? (
+          <SlashSuggest
+            items={slash.items}
+            selected={slash.selected}
+            onPick={i => {
+              const next = slash.applyAt(i);
+              if (next !== null) {
+                setInput(next);
+              }
+            }}
+          />
+        ) : null}
       </View>
       {/* 底部操作区整体包一层：白底 + 底部安全区/输入法高度垫高 */}
       <View style={[styles.bottomBar, {paddingBottom: bottomPad}]}>
@@ -452,6 +527,7 @@ export function ChatScreen() {
           style={styles.input}
           value={input}
           onChangeText={setInput}
+          onKeyPress={onInputKeyPress}
           placeholder="发消息…"
           placeholderTextColor={Colors.textSecondary}
           multiline

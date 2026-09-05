@@ -7,6 +7,7 @@ import {create} from 'zustand';
 
 import {TimelineAggregator, type InflightSnapshot} from '../rpc/aggregator';
 import {getRpc} from '../rpc/runtime';
+import {executeSlash, looksLikeSlashCommand} from '../rpc/slash';
 import type {
   ApprovalChoice,
   ApprovalRequestPayload,
@@ -144,6 +145,12 @@ interface ChatStore {
   markResumeFailed(sid: string): void;
   sendPrompt(sid: string, text: string): Promise<void>;
   /**
+   * 斜杠命令执行（dashboard 同款客户端流水线）：slash.exec 主通道，
+   * 失败回退 command.dispatch（skill/send 型转 prompt.submit）。
+   * 命令回显/输出走系统灰条，不产生用户气泡。
+   */
+  sendSlashCommand(sid: string, command: string): Promise<void>;
+  /**
    * foreign 会话的首次发送：forkMap 命中 → resume 派生会话；否则
    * 只读 sqlite 取全量历史 → session.create(parent_session_id) 派生 →
    * attach 切到派生会话 → prompt.submit。旧 key 标记 migratedTo。
@@ -198,6 +205,31 @@ export const useChatStore = create<ChatStore>((set, get) => {
         },
       },
     }));
+  }
+
+  /** 普通 prompt 提交的公共尾部：用户气泡回显 + prompt.submit + 失败红条。 */
+  async function submitPlain(
+    sid: string,
+    text: string,
+    images: {path: string}[] = [],
+    clearAttachments = false,
+  ) {
+    const agg = aggFor(sid);
+    agg.appendUserMessage(text, images);
+    // 发送即清空待发横条；若 submit 失败图片仍排在服务端队列里，
+    // 会随下一条 prompt 进上下文（时间线里有错误条提示）。
+    snapshot(
+      sid,
+      clearAttachments ? {busy: true, pendingAttachments: []} : {busy: true},
+    );
+    try {
+      await getRpc().call('prompt.submit', {session_id: sid, text});
+    } catch (e) {
+      agg.applyEvent('error', {
+        message: `发送失败: ${e instanceof Error ? e.message : String(e)}`,
+      });
+      snapshot(sid, {busy: false});
+    }
   }
 
   return {
@@ -346,22 +378,38 @@ export const useChatStore = create<ChatStore>((set, get) => {
         await get().forkForeignAndSend(sid, trimmed);
         return;
       }
-      const agg = aggFor(sid);
-      agg.appendUserMessage(
+      // 斜杠命令分流：prompt.submit 不拦截 "/" 文本（会当普通消息直达模型），
+      // 走 dashboard 同款客户端执行流水线；命令不是消息，不回显气泡、不动待发横条。
+      if (looksLikeSlashCommand(trimmed)) {
+        await get().sendSlashCommand(sid, trimmed);
+        return;
+      }
+      await submitPlain(
+        sid,
         trimmed,
         pending.map(a => ({path: a.path})),
+        true,
       );
-      // 发送即清空待发横条；若 submit 失败图片仍排在服务端队列里，
-      // 会随下一条 prompt 进上下文（时间线里有错误条提示）。
-      snapshot(sid, {busy: true, pendingAttachments: []});
-      try {
-        await getRpc().call('prompt.submit', {session_id: sid, text: trimmed});
-      } catch (e) {
-        agg.applyEvent('error', {
-          message: `发送失败: ${e instanceof Error ? e.message : String(e)}`,
-        });
-        snapshot(sid, {busy: false});
-      }
+    },
+
+    async sendSlashCommand(sid, command) {
+      const agg = aggFor(sid);
+      agg.appendSystemMessage(command);
+      snapshot(sid, {});
+      await executeSlash({
+        command,
+        sessionId: sid,
+        call: (method, params) => getRpc().call(method, params),
+        callbacks: {
+          sys: t => {
+            agg.appendSystemMessage(t);
+            snapshot(sid, {});
+          },
+          // skill/send 型指令的最终落点仍是普通 prompt；此处不再做斜杠
+          // 判断——dispatch 下发的 message 恰以 / 开头时会无限递归。
+          send: msg => submitPlain(sid, msg),
+        },
+      });
     },
 
     async forkForeignAndSend(sid, trimmed) {
@@ -455,17 +503,11 @@ export const useChatStore = create<ChatStore>((set, get) => {
         }));
         // 会话列表出现新 fork（sessions.changed 也会触发，双保险）
         useSessionsStore.getState().markStale();
-        // 在派生会话里发出这条
-        const agg = aggFor(liveSid);
-        agg.appendUserMessage(trimmed);
-        snapshot(liveSid, {busy: true});
-        try {
-          await rpc.call('prompt.submit', {session_id: liveSid, text: trimmed});
-        } catch (e) {
-          agg.applyEvent('error', {
-            message: `发送失败: ${e instanceof Error ? e.message : String(e)}`,
-          });
-          snapshot(liveSid, {busy: false});
+        // 在派生会话里发出这条（斜杠命令同样分流到执行流水线）
+        if (looksLikeSlashCommand(trimmed)) {
+          await get().sendSlashCommand(liveSid, trimmed);
+        } else {
+          await submitPlain(liveSid, trimmed);
         }
       } catch (e) {
         aggFor(sid).applyEvent('error', {

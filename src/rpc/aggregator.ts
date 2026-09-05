@@ -636,6 +636,11 @@ export class TimelineAggregator {
    * images 为已通过 image.attach_bytes 排队到 session 的图片（随本条 prompt
    * 进上下文，本地直接回显缩略图，不等 resume 的历史投影）。
    */
+  /** 追加系统灰条（斜杠命令回显/输出等本地生成的非对话内容）。 */
+  appendSystemMessage(text: string, eventKind = 'slash') {
+    this.push({kind: 'system', id: nextId('s'), eventKind, text});
+  }
+
   appendUserMessage(text: string, images: ImageRef[] = []): UserMsg {
     const parsed = parseMessageText(text);
     const msg: UserMsg = {

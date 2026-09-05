@@ -14,6 +14,7 @@
 
 ### 最近完成
 
+- [x] 斜杠命令补全 + 执行流水线（对齐 hermes dashboard，2026-09-06，D022）— 输入行首 `/` 弹命令补全浮层（display+meta 两列，服务端 `complete.slash` 负责模糊匹配/排序/参数阶段提示，60ms 防抖）；发送 `/` 开头文本走 `slash.exec`→`command.dispatch` 回退流水线（`src/rpc/slash.ts` 移植官方 web slashExec.ts 契约），skill/send 型转 prompt.submit，命令回显/输出走系统灰条；裸 `/model` 回车直接开 App 内 ModelPicker（TUI 同款特判）。新文件 `src/rpc/slash.ts`/`src/utils/useSlashCompletion.ts`/`src/components/SlashSuggest.tsx` + `__tests__/slash.test.ts`（17 用例全绿）。⚠ 踩坑：①prompt.submit **不拦截**斜杠文本（methods_prompt.py 无 slash 逻辑），不拦分发就直达模型；②registry 补全项 text 不带 `/` 而 TUI extras 带（/density），拼接须去重斜杠（TUI domain/slash.ts 同款）；③absolute 浮层不能挂 inputBar 里 bottom:'100%' 越界渲染——Android 触摸命中被父容器边界拦住，要挂 listWrap 内（同「回到底部」按钮的已验证模式）；④`complete.slash` 是只读 RPC 可对 live 9119 实测（已验证 `/`→64 项、`/cron ad`→replace_from=6），`slash.exec` 写操作未实测只用 jest mock
 - [x] 会话列表「新建会话」按钮移到 header 右上角（2026-09-06）— 原列表顶部通栏「＋ 新建会话」大按钮改为 header 右上角「新会话」文字按钮（accent 色文字，同 ProfileListScreen「退出」的 headerRight 模式），列表顶部腾出空间直接显示三档过滤条；空列表文案同步改为指向右上角。⚠ 踩坑：onNewSession 移到 setOptions 的 useEffect 之前——依赖数组在 render 期求值，const 声明在其后会有 TDZ ReferenceError
 - [x] 头像「重复刷新加载」修复：本地缓存跳过渐现（2026-09-05）— 切会话过滤档/重进列表时所有头像肉眼可见地重播「浮现」过程：根因是 Avatar 渐现动画不区分缓存命中（opacity 0 起始等 onLoad 再 120ms 渐现），而切过滤档 FlatList 行卸载重挂载每次都重播；实际 file:// 确定性路径必命中原生内存位图缓存、加载零开销。改 Avatar.tsx：uri 为 `file://` 时挂载即不透明呈现，data URL 回退（RNFS 失败/web）保留渐现。⚠ 踩坑：缓存命中≠视觉无感——瞬时完成的加载会被载入动画伪装成「加载中」，本地确定性缓存路径应跳过动画；仓库 `npm run lint` 全量报 180 errors 系既有基线（依赖/生成文件），验收看单文件 eslint + tsc + test；build-android-remote.sh 在 构建机（Windows sshd）上 `bash -l` 子进程持有 stdout，构建+adb 安装成功后 ssh 会话不退出、脚本卡死在取回 APK 前——kill 挂住的 ssh 后手动 scp 取回即可，构建/安装本身不受影响（已实测复现）
 - [x] 会话界面三连修：重进实时续流 / kaomoji 占位动态 / 工具 diff 格式化（2026-09-05）— ① 重进会话停留旧状态：根因 `attach()` 只在聚合器为空时 hydrate，而 `session.resume` 快路径对 live 会话返回**同一 sid**（methods_session.py:455 复用不新建）→ 改为始终以服务端 messages 重建 + 消费 resume 的 `running`/`inflight` 重建流式尾部（`restoreLiveTail`：prompt 去重、同 turn 前缀扩展时保留本地工具卡）；`message.complete` 单 text 块时按前缀扩展回填，补重进竞态丢的 delta。② `(´･_･`) processing…` 卡死：服务端把它经 `thinking.delta` 当 busy 指示器改写（每次 API 调用一条、空串清除，conversation_loop.py:3250），旧代码追加成 thinking 块且忽略空串 → 改状态行（最新覆盖+空串清除，桌面端同款语义），ChatScreen busy 时优先显示。③ 工具 raw 输出：`tool.complete.inline_diff` 内嵌 ANSI 色码+`┊ review diff` 头（display.py），patch 的原始 diff 在 `result.diff` → 新 `src/rpc/diffText.ts`（stripAnsi/unified diff 解析/统计），ToolCallCard 行级红绿渲染 + `+N −M` 徽标 + args 路径优先。⚠ 踩坑：react-test-renderer 在本项目 RN preset 下 Text 子树不可断言（App.test.tsx 注释的「渲染级验证交给真机构建」是正解，别硬写渲染测试）；resume 会 re-bind transport，未经批准不要对 live 9119 做真实 resume 验证。
@@ -39,6 +40,7 @@
 
 ### 待办 / 下一步
 
+- [ ] 斜杠命令补全真机/web 验证（2026-09-06）：输入 `/` 弹浮层、点选应用（含参数阶段如 `/cron ad`）、发送 `/help` 等命令看系统灰条输出、裸 `/model` 开模型面板、硬件返回键先关浮层；重点验 Android 触摸命中（浮层挂 listWrap 的假设）
 - [ ] 桌面端（Windows/macOS）实现（方案见 `docs/desktop.md`，未实现）
 - [ ] iOS 版（`docs/plan.md`：iOS 后续；SSH 隧道需 iOS 侧原生实现，见 `docs/ssh-module.md`）
 - [ ] 2026-09-05 UI 打磨包真机验证（含本次语音超时修复 + 输入区图标：录音/识别中三态、超时报错、图标观感；以及会话列表三档过滤的触控观感）；头像瞬时呈现验证：切过滤档反复横跳 / 冷启动首进 Profile 列表 / 会话列表，头像应直接出现无渐现刷新
