@@ -31,8 +31,8 @@
 
 ### 8.4 打包
 
-- `electron-builder.yml`：appId `com.hermeschat.desktop`；打包内容 = `desktop/dist` + `dist-web` + 生产 node_modules（asarUnpack ssh2）；产物 `dist-desktop/`。未签名（Windows 首次运行 SmartScreen 选「仍要运行」）。
-- `npm run dist:mac`（本机验证通过，arm64 dmg）；**Windows 包**：`scripts/build-desktop-remote.sh`（推 GitHub → 构建机 `npm ci && npm run dist:win` → 取回 exe），构建机 不手改。Android 构建脚本已加 `ELECTRON_SKIP_BINARY_DOWNLOAD=1`（出 APK 不用下 Electron 二进制）。
+- `electron-builder.yml`：appId `com.hermeschat.desktop`；打包内容 = `desktop/dist` + `desktop/resources` + `dist-web` + 生产 node_modules（asarUnpack ssh2）；产物 `dist-desktop/`。**应用图标与移动端同款**：`desktop/resources/icon.png`（512×512 原图），builder 自动转 ico/icns（验证：mac 包内 icon.icns 与 Windows exe 均已生效）；BrowserWindow 另设 icon 供开发模式窗口/任务栏用。未签名（Windows 首次运行 SmartScreen 选「仍要运行」）。
+- `npm run dist:mac`（本机验证通过，arm64 dmg）；**Windows 包**：`scripts/build-desktop-remote.sh`（推 GitHub → 构建机 拉取 → `scripts/build-windows.sh` → 取回 exe），构建机 不手改。Android 构建脚本已加 `ELECTRON_SKIP_BINARY_DOWNLOAD=1`（出 APK 不用下 Electron 二进制）。
 - 端口/窗口状态/known_hosts 均存 `userData`（`~/Library/Application Support/HermesChat` / `%APPDATA%/HermesChat`）。
 
 ### 8.5 已知边界（后续迭代）
