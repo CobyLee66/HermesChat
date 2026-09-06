@@ -1,15 +1,19 @@
 # electron-builder 配置（Windows NSIS 优先；Mac 本机出 dmg 自测）。
 # 应用代码 = desktop/dist（主进程/preload）+ dist-web（渲染层）+ 生产 node_modules（ssh2）。
+# 图标 = desktop/resources/icon.png（与移动端同款原图，builder 自动转 ico/icns）。
 # 不做代码签名：首次运行 Windows 会提示 SmartScreen（「仍要运行」即可）。
 appId: com.hermeschat.desktop
 productName: HermesChat
 directories:
   output: dist-desktop
+  buildResources: desktop/resources
 files:
   - desktop/dist/**/*
+  - desktop/resources/**/*
   - dist-web/**/*
   - package.json
   - "!**/*.map"
+icon: desktop/resources/icon.png
 asar: true
 # ssh2 含可选原生加速模块（cpu-features），解包出 asar 避免 .node 加载问题
 asarUnpack:
