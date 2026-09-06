@@ -5,20 +5,22 @@ import {avatarColor} from './theme';
 
 interface Props {
   name: string;
-  /** 可直接喂 Image 的 URI（本地 file:// 缓存或 data URL 回退）；空则昵称首字符色块 */
+  /** 可直接喂 Image 的 URI（确定性缓存路径 file:// / blob: 优先，data URL 回退）；空则昵称首字符色块 */
   uri?: string | null;
   size?: number;
 }
 
 /**
- * QQ 风格圆角头像：色块垫底。本地 file:// 缓存挂载即不透明呈现——原生管线按 URI
- * 命中内存位图缓存，加载零开销，渐现反而把瞬时呈现伪装成「加载中」（切会话过滤档
- * / 重进列表时行会重挂载，每次重播动画就是肉眼可见的「头像刷新」）；仅 data URL
- * 回退（RNFS 落盘失败 / web 端）保留 120ms 渐现柔化解码空窗。
+ * QQ 风格圆角头像：色块垫底。确定性缓存路径挂载即不透明呈现——原生 file:// 落盘
+ * （管线按 URI 命中内存位图）与 web/桌面 blob: object URL（浏览器按 URL 命中内存
+ * 缓存）加载零开销，渐现反而把瞬时呈现伪装成「加载中」（切会话过滤档 / 切 profile
+ * / 重进列表时行会重挂载或换 uri，每次重播动画就是肉眼可见的「头像刷新」）；仅
+ * data URL 回退（落盘/转换失败）保留 120ms 渐现柔化解码空窗。
  */
 export function Avatar({name, uri, size = 44}: Props) {
   const radius = Math.round(size * 0.22);
-  const isInstant = uri?.startsWith('file://') ?? false;
+  const isInstant =
+    uri?.startsWith('file://') === true || uri?.startsWith('blob:') === true;
   const [loaded, setLoaded] = useState(isInstant);
   const fade = useRef(new Animated.Value(isInstant ? 1 : 0)).current;
   // 稳定 source 引用，避免父组件重渲染时触发无谓的图片重载

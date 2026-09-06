@@ -26,6 +26,7 @@
 | 粘贴/拖拽 | ChatPane window 级 paste/drop 监听：图片 → 待发附件；文件 → `@file:` 引用 |
 | 语音 | `VoiceButton.web.tsx` 桌面分支：getUserMedia + MediaRecorder（mp4/aac 优先，webm/opus 兜底）→ 转写链路复用；普通浏览器仍是禁用占位 |
 | 头像 | ProfileEditScreen 桌面分支：desktopPickImages + canvas cover 512 |
+| 头像缓存 | `avatarCache` web 分支：data URL → Blob → `blob:` object URL（按 profile 名进程内记忆化，改头像先撤销再重建）；`Avatar` 对 `blob:` 与原生 `file://` 同语义挂载即显——切 profile / 切过滤档的行重挂载不再重播渐现（2026-09-07，D027；冷启动首拉仍渐现属真实加载） |
 | 失焦通知 | `useCompleteNotifications`（busy 翻转 + document.hidden）→ IPC `desktop:notify` → 主进程 Notification，点击聚焦窗口 |
 | 交互 | Enter 发送/Shift+Enter 换行（IME 保护）、Esc 关弹层、Ctrl+N 新会话、消息列通栏（2026-09-07 取消 760px 限宽）、会话行右键菜单（复制标题/删除，2026-09-07；⚠ React `onContextMenu` 委托在 RNW 下实测不派发，走行宿主节点原生 `addEventListener`）、ModelPicker web 居中对话框 |
 | 菜单 | Windows/Linux 不设菜单栏（`Menu.setApplicationMenu(null)`，默认菜单只有通用项无价值；文本复制粘贴由 Chromium 原生处理）；macOS 保留最小中文菜单（应用/编辑/视图/窗口——mac 编辑菜单承担 Cmd+C/V 快捷键）。**后续加菜单必须用中文标签** |

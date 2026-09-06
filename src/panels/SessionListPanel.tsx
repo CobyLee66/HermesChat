@@ -48,6 +48,11 @@ const FILTER_OPTIONS: {key: SessionFilterCategory; label: string}[] = [
   {key: 'all', label: '全部'},
 ];
 
+/** 分隔线组件提为模块级稳定引用：内联箭头函数每次 render 换组件类型，行间线反复重挂 */
+function RowSeparator() {
+  return <View style={styles.sep} />;
+}
+
 function formatTime(ts: number): string {
   if (!ts) {
     return '';
@@ -141,7 +146,7 @@ export function SessionListPanel({
         keyExtractor={s => s.id}
         refreshing={false}
         onRefresh={() => refresh(profile, true)}
-        ItemSeparatorComponent={() => <View style={styles.sep} />}
+        ItemSeparatorComponent={RowSeparator}
         ListEmptyComponent={
           <Text style={styles.empty}>
             {sessions.length === 0
