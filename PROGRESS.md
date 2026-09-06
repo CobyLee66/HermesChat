@@ -5,15 +5,16 @@
 
 ---
 
-## 当前状态（截至 2026-09-05）
+## 当前状态（截至 2026-09-06）
 
 ### 进行中
 
-- 桌面端（Windows/macOS）与 Web 版统一方案：`docs/desktop.md` 设计已写、**未实现**（同一份 `src/` UI + 每平台一个 SSH 传输实现 + 一个壳）
+- **桌面端 v0.1（Windows/macOS）已实现待验收**（2026-09-06，D023~D025，`docs/desktop.md` §8）：Electron 壳 + ssh2 隧道 + 回环代理 + 三栏响应式布局 + 共享面板抽取 + 桌面能力（附件/语音/粘贴拖拽/失焦通知/自绘确认框）+ electron-builder 打包配置。mac dmg 本机出包验证通过；**待用户验收**：Electron/Windows 包真实 SSH 连接全流程、语音 webm 转写、Windows 安装包（`scripts/build-desktop-remote.sh`）
 - 会话列表顶部信息 / Profile 名称显示 / 网页端气泡尺寸 / Profile 头像加载缓存打磨包（2026-09-05，1a9341a），真机效果待验证
 
 ### 最近完成
 
+- [x] 桌面端（Windows/macOS）v0.1（2026-09-06，D023~D025）— Electron + ssh2 主进程隧道（HermesSsh 契约全语义对齐）+ 回环代理同源加载（端口持久化防 localStorage 丢失）+ 宽度驱动三栏/两栏/单列自适应壳（`src/desktop/`）+ 共享面板抽取（`src/panels/`，手机屏幕改薄壳行为保持）+ 桌面能力（附件对话框+canvas 压缩、粘贴/拖拽、MediaRecorder 语音、失焦通知、自绘 ConfirmDialog、Enter 发送/Esc/Ctrl+N、消息列 760px 限宽、ModelPicker 居中）+ electron-builder（mac dmg 已验证，Windows 走 `scripts/build-desktop-remote.sh`）。三档宽度真实数据截图 docs/screenshots/desktop-*。⚠ 踩坑：①vite alias `./HermesSsh` 直接指向 `src/ssh/desktopHermesSsh.ts`（原 web-stubs 删除）即可让 SshTunnelTransport/SshManager 零改动复用——桌面桥 isAvailable=true 还顺带激活 execRemote；②RNW 的 Alert.alert 是 no-op（删除会话确认在 web 从来不生效），已由 utils/alert.ts 路由到自绘 ConfirmDialogHost；③无 DOM lib 的 tsconfig 下 Blob/FileReader/window 全部走结构类型断言；④IAB 内置浏览器对 RNW 页面点击/截图不可靠，Playwright+chrome-headless-shell 截图脚本 scripts/web-shot-desktop.js 才是正路；⑤Electron 二进制下载在首次 `npx electron` 时触发，Android 构建脚本需 ELECTRON_SKIP_BINARY_DOWNLOAD=1
 - [x] 顶栏副标题补思考等级显示（2026-09-06）— ChatHeaderTitle 副标题改为分段拼接：模型 · 上下文用量 · 思考等级原文（`info.reasoning_effort`，与 model 同源同刷新；用户定稿：去掉「思考」前缀直接显示 high/none/…）。⚠ 踩坑：服务端口径 `""`=未设置（供应商默认，**不展示**，展示会让 desktop 的 sticky 选择被空值回写问题复现）、`"none"`=明确关闭（直接显示 none）
 - [x] 斜杠命令补全 + 执行流水线（对齐 hermes dashboard，2026-09-06，D022）— 输入行首 `/` 弹命令补全浮层（display+meta 两列，服务端 `complete.slash` 负责模糊匹配/排序/参数阶段提示，60ms 防抖）；发送 `/` 开头文本走 `slash.exec`→`command.dispatch` 回退流水线（`src/rpc/slash.ts` 移植官方 web slashExec.ts 契约），skill/send 型转 prompt.submit，命令回显/输出走系统灰条；裸 `/model` 回车直接开 App 内 ModelPicker（TUI 同款特判）。新文件 `src/rpc/slash.ts`/`src/utils/useSlashCompletion.ts`/`src/components/SlashSuggest.tsx` + `__tests__/slash.test.ts`（17 用例全绿）。⚠ 踩坑：①prompt.submit **不拦截**斜杠文本（methods_prompt.py 无 slash 逻辑），不拦分发就直达模型；②registry 补全项 text 不带 `/` 而 TUI extras 带（/density），拼接须去重斜杠（TUI domain/slash.ts 同款）；③absolute 浮层不能挂 inputBar 里 bottom:'100%' 越界渲染——Android 触摸命中被父容器边界拦住，要挂 listWrap 内（同「回到底部」按钮的已验证模式）；④`complete.slash` 是只读 RPC 可对 live 9119 实测（已验证 `/`→64 项、`/cron ad`→replace_from=6），`slash.exec` 写操作未实测只用 jest mock
 - [x] 会话列表「新建会话」按钮移到 header 右上角（2026-09-06）— 原列表顶部通栏「＋ 新建会话」大按钮改为 header 右上角「新会话」文字按钮（accent 色文字，同 ProfileListScreen「退出」的 headerRight 模式），列表顶部腾出空间直接显示三档过滤条；空列表文案同步改为指向右上角。⚠ 踩坑：onNewSession 移到 setOptions 的 useEffect 之前——依赖数组在 render 期求值，const 声明在其后会有 TDZ ReferenceError
@@ -41,8 +42,9 @@
 
 ### 待办 / 下一步
 
+- [ ] 桌面端真机验收（2026-09-06）：① Mac `npm run desktop:dev` 填 SSH 配置真连（隧道/聊天/模型切换/附件/语音全流程）；② `scripts/build-desktop-remote.sh` 出 Windows 安装包并装机；③ 语音 webm/opus 转写兼容性实测；④ 断线重连/HostKey 变更路径
+- [ ] 桌面端交互后续包：hover 态、右键菜单（会话删除/复制）、图片灯箱、用户消息选中/复制统一；深色模式（theme token 化后）
 - [ ] 斜杠命令补全真机/web 验证（2026-09-06）：输入 `/` 弹浮层、点选应用（含参数阶段如 `/cron ad`）、发送 `/help` 等命令看系统灰条输出、裸 `/model` 开模型面板、硬件返回键先关浮层；重点验 Android 触摸命中（浮层挂 listWrap 的假设）
-- [ ] 桌面端（Windows/macOS）实现（方案见 `docs/desktop.md`，未实现）
 - [ ] iOS 版（`docs/plan.md`：iOS 后续；SSH 隧道需 iOS 侧原生实现，见 `docs/ssh-module.md`）
 - [ ] 2026-09-05 UI 打磨包真机验证（含本次语音超时修复 + 输入区图标：录音/识别中三态、超时报错、图标观感；以及会话列表三档过滤的触控观感）；头像瞬时呈现验证：切过滤档反复横跳 / 冷启动首进 Profile 列表 / 会话列表，头像应直接出现无渐现刷新
 - [ ] 会话界面三连修真机验证（2026-09-05）：重进进行中会话看实时续流、kaomoji 状态条随 API 调用刷新、write_file/patch 卡片红绿 diff 与 +N −M 徽标；跨端场景（dashboard/QQ 侧续聊后 App 重进）重点验

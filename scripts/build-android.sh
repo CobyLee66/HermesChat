@@ -39,7 +39,8 @@ if [ "$DO_NPM" = 1 ]; then
      && [ ! package.json -nt node_modules/.package-lock.json ]; then
     echo "    依赖未变化，跳过 npm ci"
   else
-    npm ci --no-audit --no-fund --loglevel=error
+    # Android 构建不需要 Electron 运行时二进制（桌面打包才用），跳过省 ~200MB 下载
+    ELECTRON_SKIP_BINARY_DOWNLOAD=1 npm ci --no-audit --no-fund --loglevel=error
   fi
 else
   echo "==> [1/3] 跳过 npm（--no-npm）"

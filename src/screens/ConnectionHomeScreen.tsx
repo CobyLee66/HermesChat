@@ -17,6 +17,7 @@ import {
   useConnectionStore,
   type ConnectionProfile,
 } from '../store/connection';
+import {hasDesktopBridge} from '../ssh/desktopBridge';
 import {connectWebDirect} from '../ssh/webDirect';
 import {Colors} from '../components/theme';
 import type {RootStackParamList} from '../navigation/types';
@@ -145,7 +146,7 @@ export function ConnectionHomeScreen() {
           <Text style={styles.reconnecting}>连接已断开，正在重连…</Text>
         ) : null}
 
-        {Platform.OS === 'web' ? (
+        {Platform.OS === 'web' && !hasDesktopBridge() ? (
           <TouchableOpacity
             style={styles.directButton}
             activeOpacity={0.8}

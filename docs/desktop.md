@@ -1,6 +1,48 @@
 # 桌面端（Windows/macOS）与 Web 版统一设计方案
 
-> 状态：设计方案（尚未实现）。相关：docs/plan.md（总体）、docs/protocol.md（协议）、docs/ssh-module.md（Android 隧道）。
+> 状态：**M0~M5 已实现（2026-09-06，桌面 v0.1）**，见 §8 实现记录；§1~7 为原设计，方向未变，差异处已在 §8 标注。相关：docs/plan.md（总体）、docs/protocol.md（协议）、docs/ssh-module.md（Android 隧道）。
+
+## 8. 实现记录（2026-09-06）
+
+### 8.1 架构落地
+
+- **壳**：`desktop/main.ts`（Electron 主进程）+ `desktop/preload.ts`（contextBridge → `window.hermesDesktop`），tsconfig 独立（`desktop/tsconfig.json`，nodeNext），`npm run desktop:build` 编译到 `desktop/dist/`。
+- **SSH 隧道**：主进程 ssh2 实现 HermesSsh 契约（docs/ssh-module.md §2/§6 全语义对齐：错误码 E_*、keepalive 15s×3、exec 8MiB 上限、stopCommand/closeLocalForward/disconnect 幂等、被杀 task exit=-1 恰好一次、HostKey accept-new 持久化 `userData/known-hosts.json`）。渲染层 `src/ssh/desktopHermesSsh.ts` 是桥的 typed wrapper，**vite alias 把 `./HermesSsh` 指到它**（替代原 web-stubs/HermesSsh.ts），因此 `SshTunnelTransport`/`SshManager` 的 bootstrap 与重连逻辑单源复用，零改动（`isAvailable=true` 时 execRemote 自动启用，multiplex/foreign 只读链路可用）。
+- **回环代理（关键差异）**：渲染层从 `http://127.0.0.1:<port>` 加载（主进程 HTTP+WS 服务），同源无 CORS；`/api/**`（含 /api/ws upgrade）反代到隧道本地端口，Host/Origin 重写策略 = vite.config.ts 已验证方案。端口跨次启动稳定（`userData/proxy-port.json` 记忆，51899 起顺延）——**端口变 = localStorage origin 变 = 配置丢失**，故必须记忆复用。`src/ssh/desktopBridge.ts` 的 `DesktopSshTransport` 只做一件事：隧道 connect 后把 wsUrl/httpUrl 改写为同源相对地址。
+- **引擎选择**：`App.tsx` → `Platform.OS==='web'` 时 `hasDesktopBridge() ? initDesktopEngine() : initWebDirectEngine()`。桌面隐藏「浏览器直连」入口（回环代理只转发隧道端口）。
+
+### 8.2 响应式布局（宽度驱动，与是否 Electron 无关）
+
+- 断点 `src/ui/breakpoints.ts`：narrow <900（单列）/ medium 900–1279（两栏）/ wide ≥1280（三栏）。手机恒为 narrow 且走原导航栈，零影响；浏览器拉宽即可预览桌面布局（`npm run web` 调试闭环）。
+- 壳 `src/desktop/DesktopApp.tsx`：web 构建连接 ready 后替换 `Stack.Navigator`；断线卸载回导航栈连接页。三栏 = `ProfileRail`（64px 竖条）+ `SessionColumn`（300px）+ `ChatPane`；medium 会话列头带 profile 下拉；narrow 单列 Profile 列表 → 会话列 → 聊天。选中态在 `desktopUiStore`。
+- **共享面板**（`src/panels/`，手机屏幕与桌面列同源）：`SessionListPanel`（过滤+列表）、`TimelineView`（时间线+滚动条+斜杠浮层挂点，`maxContentWidth` 桌面限宽 760）、`ChatInputBar`（输入区，`pickers` 注入附件来源、`enterToSend`）、`ChatOverlays`（菜单/模型/信息弹层）、`useChatComposer`（输入+斜杠+发送分流）、`sessionFlows`（打开/新建会话流程）。ChatScreen/SessionListScreen 已改为薄壳，行为保持。
+- `utils/alert.ts`：桌面走自绘 `ConfirmDialogHost`（`src/ui/dialogStore.ts` 排队），修掉 RNW 下 Alert 无 UI 的老问题；普通浏览器 window.confirm 兜底；原生不变。
+
+### 8.3 桌面能力
+
+| 能力 | 实现 |
+|---|---|
+| 附件选文件 | IPC `desktop:pickFiles`（主进程 dialog）→ `desktop:readFileDataUrl`（主进程 fs）→ data URL；压缩在渲染层 canvas（`utils/media.ts` web 分支，替代 image-resizer） |
+| 粘贴/拖拽 | ChatPane window 级 paste/drop 监听：图片 → 待发附件；文件 → `@file:` 引用 |
+| 语音 | `VoiceButton.web.tsx` 桌面分支：getUserMedia + MediaRecorder（mp4/aac 优先，webm/opus 兜底）→ 转写链路复用；普通浏览器仍是禁用占位 |
+| 头像 | ProfileEditScreen 桌面分支：desktopPickImages + canvas cover 512 |
+| 失焦通知 | `useCompleteNotifications`（busy 翻转 + document.hidden）→ IPC `desktop:notify` → 主进程 Notification，点击聚焦窗口 |
+| 交互 | Enter 发送/Shift+Enter 换行（IME 保护）、Esc 关弹层、Ctrl+N 新会话、消息列 760px 居中限宽、ModelPicker web 居中对话框 |
+
+### 8.4 打包
+
+- `electron-builder.yml`：appId `com.hermeschat.desktop`；打包内容 = `desktop/dist` + `dist-web` + 生产 node_modules（asarUnpack ssh2）；产物 `dist-desktop/`。未签名（Windows 首次运行 SmartScreen 选「仍要运行」）。
+- `npm run dist:mac`（本机验证通过，arm64 dmg）；**Windows 包**：`scripts/build-desktop-remote.sh`（推 GitHub → 构建机 `npm ci && npm run dist:win` → 取回 exe），构建机 不手改。Android 构建脚本已加 `ELECTRON_SKIP_BINARY_DOWNLOAD=1`（出 APK 不用下 Electron 二进制）。
+- 端口/窗口状态/known_hosts 均存 `userData`（`~/Library/Application Support/HermesChat` / `%APPDATA%/HermesChat`）。
+
+### 8.5 已知边界（后续迭代）
+
+- 悬停（hover）态、右键菜单、图片点击灯箱未做；助手消息 web 侧已随 markdown-it HTML 原生可选中，用户消息选中/复制待统一。
+- 语音 webm/opus 是否被服务端 faster-whisper 正常转写待真机验证（mp4/aac 已优先选用）。
+- 未做：深色模式、托盘、自动更新、safeStorage 加密私钥（私钥仍 localStorage 明文，与手机版策略一致）。
+- 真实 SSH 隧道 GUI 全流程（填配置→连接→聊天）待用户在 Electron/Windows 包验收；自动化验证只覆盖壳启动与代理（不碰 live 服务写操作）。
+
+## （以下为原设计文档）
 
 ## 1. 核心判断
 

@@ -1,14 +1,22 @@
 {
   "name": "HermesChat",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
+  "description": "Hermes Agent 桌面/移动客户端（Windows 桌面壳基于 Electron）",
+  "author": "HermesChat",
+  "main": "desktop/dist/main.js",
   "scripts": {
     "android": "react-native run-android",
     "ios": "react-native run-ios",
     "lint": "eslint .",
     "start": "react-native start",
     "test": "jest",
-    "web": "vite"
+    "web": "vite",
+    "web:build": "vite build",
+    "desktop:build": "tsc -p desktop",
+    "desktop:dev": "npm run web:build && npm run desktop:build && electron .",
+    "dist:win": "npm run web:build && npm run desktop:build && electron-builder --win",
+    "dist:mac": "npm run web:build && npm run desktop:build && electron-builder --mac"
   },
   "dependencies": {
     "@bam.tech/react-native-image-resizer": "^3.0.11",
@@ -24,6 +32,7 @@
     "react-native-markdown-display": "^7.0.2",
     "react-native-safe-area-context": "^5.5.2",
     "react-native-screens": "^4.27.0",
+    "ssh2": "^1.17.0",
     "zustand": "^5.0.15"
   },
   "devDependencies": {
@@ -40,10 +49,15 @@
     "@react-native/typescript-config": "0.87.1",
     "@types/jest": "^29.5.13",
     "@types/markdown-it": "^14.2.0",
+    "@types/node": "^26.4.1",
     "@types/react": "^19.2.0",
     "@types/react-test-renderer": "^19.1.0",
+    "@types/ssh2": "^1.15.6",
+    "electron": "^44.2.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^8.19.0",
     "jest": "^29.6.3",
+    "playwright-core": "^1.63.0",
     "prettier": "2.8.8",
     "react-dom": "^19.2.3",
     "react-native-web": "^0.21.2",

@@ -14,12 +14,14 @@ import {SafeAreaProvider} from 'react-native-safe-area-context';
 import {enableScreens} from 'react-native-screens';
 
 import {Colors} from './src/components/theme';
+import {DesktopApp} from './src/desktop/DesktopApp';
 import {ChatScreen} from './src/screens/ChatScreen';
 import {ConnectionEditScreen} from './src/screens/ConnectionEditScreen';
 import {ConnectionHomeScreen} from './src/screens/ConnectionHomeScreen';
 import {ProfileEditScreen} from './src/screens/ProfileEditScreen';
 import {ProfileListScreen} from './src/screens/ProfileListScreen';
 import {SessionListScreen} from './src/screens/SessionListScreen';
+import {hasDesktopBridge, initDesktopEngine} from './src/ssh/desktopBridge';
 import {initConnectionEngine} from './src/ssh/SshManager';
 import {initWebDirectEngine} from './src/ssh/webDirect';
 import {useConnectionStore} from './src/store/connection';
@@ -38,11 +40,19 @@ const screenOptions: NativeStackNavigationOptions = {
 
 function App() {
   const state = useConnectionStore(s => s.state);
+  // web 构建连接就绪后用响应式桌面壳（三栏/两栏/单列按窗口宽度自适应）；
+  // 原生构建始终走导航栈；连接期（未就绪/断开）所有平台都是导航栈连接页。
+  const desktopShell =
+    Platform.OS === 'web' && (state === 'ready' || state === 'reconnecting');
 
   useEffect(() => {
-    // web 构建（vite + react-native-web）无 SSH 能力，改用浏览器直连引擎
+    // web 构建按环境装配：Electron 桌面桥（ssh2 隧道）或浏览器直连引擎
     if (Platform.OS === 'web') {
-      initWebDirectEngine();
+      if (hasDesktopBridge()) {
+        initDesktopEngine();
+      } else {
+        initWebDirectEngine();
+      }
     } else {
       initConnectionEngine();
     }
@@ -51,40 +61,44 @@ function App() {
   return (
     <SafeAreaProvider>
       <StatusBar barStyle="dark-content" />
-      <NavigationContainer>
-        <Stack.Navigator
-          screenOptions={screenOptions}
-          initialRouteName={
-            state === 'ready' || state === 'reconnecting'
-              ? 'ProfileList'
-              : 'ConnectionHome'
-          }>
-          <Stack.Screen
-            name="ConnectionHome"
-            component={ConnectionHomeScreen}
-            options={{title: '连接', headerShown: false}}
-          />
-          <Stack.Screen
-            name="ConnectionEdit"
-            component={ConnectionEditScreen}
-            options={({route}) => ({
-              title: route.params?.profileId ? '编辑配置' : '添加配置',
-            })}
-          />
-          <Stack.Screen
-            name="ProfileList"
-            component={ProfileListScreen}
-            options={{title: 'Hermes', headerBackVisible: false}}
-          />
-          <Stack.Screen
-            name="ProfileEdit"
-            component={ProfileEditScreen}
-            options={{title: '编辑资料'}}
-          />
-          <Stack.Screen name="SessionList" component={SessionListScreen} />
-          <Stack.Screen name="Chat" component={ChatScreen} />
-        </Stack.Navigator>
-      </NavigationContainer>
+      {desktopShell ? (
+        <DesktopApp />
+      ) : (
+        <NavigationContainer>
+          <Stack.Navigator
+            screenOptions={screenOptions}
+            initialRouteName={
+              state === 'ready' || state === 'reconnecting'
+                ? 'ProfileList'
+                : 'ConnectionHome'
+            }>
+            <Stack.Screen
+              name="ConnectionHome"
+              component={ConnectionHomeScreen}
+              options={{title: '连接', headerShown: false}}
+            />
+            <Stack.Screen
+              name="ConnectionEdit"
+              component={ConnectionEditScreen}
+              options={({route}) => ({
+                title: route.params?.profileId ? '编辑配置' : '添加配置',
+              })}
+            />
+            <Stack.Screen
+              name="ProfileList"
+              component={ProfileListScreen}
+              options={{title: 'Hermes', headerBackVisible: false}}
+            />
+            <Stack.Screen
+              name="ProfileEdit"
+              component={ProfileEditScreen}
+              options={{title: '编辑资料'}}
+            />
+            <Stack.Screen name="SessionList" component={SessionListScreen} />
+            <Stack.Screen name="Chat" component={ChatScreen} />
+          </Stack.Navigator>
+        </NavigationContainer>
+      )}
     </SafeAreaProvider>
   );
 }

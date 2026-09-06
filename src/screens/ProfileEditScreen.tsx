@@ -6,7 +6,6 @@
 import React, {useState} from 'react';
 import {
   ActivityIndicator,
-  Alert,
   ScrollView,
   StyleSheet,
   Text,
@@ -29,6 +28,9 @@ import {useKeyboardHeight} from '../utils/useKeyboardHeight';
 import {useConnectionStore} from '../store/connection';
 import {useProfilesStore} from '../store/profiles';
 import {deleteTempFile, prepareAvatarDataUrl} from '../utils/media';
+import {hasDesktopBridge} from '../ssh/desktopHermesSsh';
+import {desktopPickImages} from '../desktop/desktopMedia';
+import {alertError, alertInfo, confirmDialog} from '../utils/alert';
 import type {RootStackParamList} from '../navigation/types';
 
 type Rt = RouteProp<RootStackParamList, 'ProfileEdit'>;
@@ -56,24 +58,34 @@ export function ProfileEditScreen() {
 
   const onPickAvatar = async () => {
     try {
-      const [res] = await pick({type: [types.images]});
-      if (!res) {
-        return;
-      }
-      const [copy] = await keepLocalCopy({
-        files: [{uri: res.uri, fileName: res.name ?? 'avatar'}],
-        destination: 'cachesDirectory',
-      });
-      if (copy.status !== 'success') {
-        throw new Error(copy.copyError);
-      }
       setBusy('avatar');
       let dataUrl: string;
-      try {
-        dataUrl = await prepareAvatarDataUrl(copy.localUri);
-      } finally {
-        // picker 副本（keepLocalCopy）用完即删，避免缓存目录堆积
-        await deleteTempFile(copy.localUri);
+      if (hasDesktopBridge()) {
+        // 桌面：系统对话框选图 → 主进程读 data URL → canvas 裁剪压缩
+        const bridgePicked = await desktopPickImages();
+        const first = bridgePicked[0];
+        if (!first) {
+          return;
+        }
+        dataUrl = await prepareAvatarDataUrl(first.uri);
+      } else {
+        const [res] = await pick({type: [types.images]});
+        if (!res) {
+          return;
+        }
+        const [copy] = await keepLocalCopy({
+          files: [{uri: res.uri, fileName: res.name ?? 'avatar'}],
+          destination: 'cachesDirectory',
+        });
+        if (copy.status !== 'success') {
+          throw new Error(copy.copyError);
+        }
+        try {
+          dataUrl = await prepareAvatarDataUrl(copy.localUri);
+        } finally {
+          // picker 副本（keepLocalCopy）用完即删，避免缓存目录堆积
+          await deleteTempFile(copy.localUri);
+        }
       }
       // 选图期间 App 退后台可能断线重连中：等连接就绪再发 RPC，
       // 否则偶发 "rpc not connected"
@@ -81,46 +93,44 @@ export function ProfileEditScreen() {
       await setAvatar(profileName, dataUrl);
       setPreviewUri(dataUrl);
     } catch (e) {
-      if (isErrorWithCode(e) && e.code === errorCodes.OPERATION_CANCELED) {
+      if (!hasDesktopBridge() && isErrorWithCode(e) && e.code === errorCodes.OPERATION_CANCELED) {
         return;
       }
-      Alert.alert('更换头像失败', e instanceof Error ? e.message : String(e));
+      alertError('更换头像失败', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
     }
   };
 
   const onClearAvatar = () => {
-    Alert.alert('恢复默认头像', '将删除自定义头像，使用昵称首字符色块。', [
-      {text: '取消', style: 'cancel'},
-      {
-        text: '恢复默认',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            setBusy('clear');
-            await clearAvatar(profileName);
-            setPreviewUri(null);
-          } catch (e) {
-            Alert.alert(
-              '操作失败',
-              e instanceof Error ? e.message : String(e),
-            );
-          } finally {
-            setBusy(null);
-          }
-        },
-      },
-    ]);
+    void confirmDialog(
+      '恢复默认头像',
+      '将删除自定义头像，使用昵称首字符色块。',
+    ).then(ok => {
+      if (!ok) {
+        return;
+      }
+      (async () => {
+        try {
+          setBusy('clear');
+          await clearAvatar(profileName);
+          setPreviewUri(null);
+        } catch (e) {
+          alertError('操作失败', e instanceof Error ? e.message : String(e));
+        } finally {
+          setBusy(null);
+        }
+      })();
+    });
   };
 
   const onSaveNickname = async () => {
     try {
       setBusy('nickname');
       await updateNickname(profileName, nickname);
-      Alert.alert('已保存', '昵称已更新');
+      alertInfo('已保存', '昵称已更新');
     } catch (e) {
-      Alert.alert('保存失败', e instanceof Error ? e.message : String(e));
+      alertError('保存失败', e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
     }

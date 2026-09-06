@@ -84,3 +84,8 @@ dist/
 # 工具链本地缓存
 .eslintcache
 *.tsbuildinfo
+
+# 桌面端构建产物
+/dist-web/
+desktop/dist/
+dist-desktop/
