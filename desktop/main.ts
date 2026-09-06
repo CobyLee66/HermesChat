@@ -14,7 +14,16 @@
  * 端口记忆在 userData/proxy-port.json，被占用时向后顺延并回写。
  */
 
-import {app, BrowserWindow, dialog, ipcMain, Notification, session} from 'electron';
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  Notification,
+  session,
+  type MenuItemConstructorOptions,
+} from 'electron';
 import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
@@ -876,6 +885,20 @@ function registerDesktopIpc(): void {
     });
   });
 
+  // 读本地文本文件（SSH 私钥 PEM 等场景，utf8）
+  ipcMain.handle('desktop:readFileText', (_e, filePath: string) => {
+    const resolved = path.resolve(filePath);
+    return new Promise<string>((resolve, reject) => {
+      fs.readFile(resolved, 'utf8', (err, data) => {
+        if (err) {
+          reject(new Error(`读取文件失败：${err.message}`));
+          return;
+        }
+        resolve(data);
+      });
+    });
+  });
+
   // 系统通知（窗口失焦时回复完成提醒）；点击通知聚焦窗口
   ipcMain.handle(
     'desktop:notify',
@@ -902,6 +925,63 @@ function registerDesktopIpc(): void {
       return true;
     },
   );
+}
+
+// ─── 应用菜单 ───────────────────────────────────────────────────
+
+/**
+ * Windows/Linux：不设任何菜单栏（默认菜单只有退出/缩放等通用项，无存在价值；
+ * 文本框的复制粘贴由 Chromium 原生处理，不依赖菜单）。后续若加菜单必须用中文标签。
+ * macOS：菜单在系统顶栏且承担编辑快捷键（Cmd+C/V 等），保留最小集，中文标签。
+ */
+function setupMenu(): void {
+  if (process.platform !== 'darwin') {
+    Menu.setApplicationMenu(null);
+    return;
+  }
+  const template: MenuItemConstructorOptions[] = [
+    {
+      label: 'HermesChat',
+      submenu: [
+        {role: 'about', label: '关于 HermesChat'},
+        {type: 'separator'},
+        {role: 'hide', label: '隐藏 HermesChat'},
+        {role: 'hideOthers', label: '隐藏其他'},
+        {role: 'unhide', label: '全部显示'},
+        {type: 'separator'},
+        {role: 'quit', label: '退出 HermesChat'},
+      ],
+    },
+    {
+      label: '编辑',
+      submenu: [
+        {role: 'undo', label: '撤销'},
+        {role: 'redo', label: '重做'},
+        {type: 'separator'},
+        {role: 'cut', label: '剪切'},
+        {role: 'copy', label: '拷贝'},
+        {role: 'paste', label: '粘贴'},
+        {role: 'selectAll', label: '全选'},
+      ],
+    },
+    {
+      label: '视图',
+      submenu: [
+        {role: 'reload', label: '重新加载'},
+        {role: 'forceReload', label: '强制重新加载'},
+        {role: 'toggleDevTools', label: '开发者工具'},
+      ],
+    },
+    {
+      label: '窗口',
+      submenu: [
+        {role: 'minimize', label: '最小化'},
+        {role: 'zoom', label: '缩放'},
+        {role: 'close', label: '关闭窗口'},
+      ],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
 // ─── 应用生命周期 ───────────────────────────────────────────────
@@ -954,6 +1034,7 @@ if (!gotLock) {
   });
 
   app.whenReady().then(async () => {
+    setupMenu();
     registerIpc();
     registerDesktopIpc();
     // Windows 通知需要 AppUserModelID（打包后由 electron-builder 元数据兜底）

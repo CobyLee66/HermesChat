@@ -43,6 +43,8 @@ export interface DesktopBridge {
   }): Promise<{path: string; name: string}[]>;
   /** 读本地文件为 data URL（主进程 fs） */
   readFileDataUrl(filePath: string): Promise<string>;
+  /** 读本地文本文件（SSH 私钥 PEM 等场景，utf8） */
+  readFileText(filePath: string): Promise<string>;
   /** 系统通知（点击通知聚焦窗口） */
   notify(payload: {title: string; body: string}): Promise<boolean>;
 }

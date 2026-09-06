@@ -63,6 +63,8 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
     ipcRenderer.invoke('desktop:pickFiles', opts),
   readFileDataUrl: (filePath: string) =>
     ipcRenderer.invoke('desktop:readFileDataUrl', filePath),
+  readFileText: (filePath: string) =>
+    ipcRenderer.invoke('desktop:readFileText', filePath),
   notify: (payload: {title: string; body: string}) =>
     ipcRenderer.invoke('desktop:notify', payload),
 });

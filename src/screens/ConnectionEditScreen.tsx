@@ -1,6 +1,5 @@
 import React, {useEffect, useState} from 'react';
 import {
-  Alert,
   ScrollView,
   StyleSheet,
   Switch,
@@ -30,6 +29,9 @@ import {
   type ConnectionProfile,
 } from '../store/connection';
 import {Colors} from '../components/theme';
+import {hasDesktopBridge} from '../ssh/desktopHermesSsh';
+import {desktopPickTextFile} from '../desktop/desktopMedia';
+import {alertError} from '../utils/alert';
 import {useKeyboardHeight} from '../utils/useKeyboardHeight';
 import type {RootStackParamList} from '../navigation/types';
 
@@ -72,6 +74,15 @@ export function ConnectionEditScreen() {
 
   const pickKeyFile = async () => {
     try {
+      if (hasDesktopBridge()) {
+        // 桌面：系统对话框选文件 → 主进程读 utf8（PEM 文本）
+        const picked = await desktopPickTextFile();
+        if (!picked) {
+          return;
+        }
+        patch({privateKey: picked.content, keyFileName: picked.name});
+        return;
+      }
       const [res] = await pick({type: [types.allFiles]});
       if (!res) return;
       const [copy] = await keepLocalCopy({
@@ -84,10 +95,17 @@ export function ConnectionEditScreen() {
       const content = await RNFS.readFile(copy.localUri, 'utf8');
       patch({privateKey: content, keyFileName: res.name ?? '已选择'});
     } catch (e) {
-      if (isErrorWithCode(e) && e.code === errorCodes.OPERATION_CANCELED) {
+      if (
+        !hasDesktopBridge() &&
+        isErrorWithCode(e) &&
+        e.code === errorCodes.OPERATION_CANCELED
+      ) {
         return;
       }
-      Alert.alert('读取密钥文件失败', String(e));
+      alertError(
+        '读取密钥文件失败',
+        e instanceof Error ? e.message : String(e),
+      );
     }
   };
 

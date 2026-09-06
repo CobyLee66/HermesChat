@@ -22,12 +22,13 @@
 
 | 能力 | 实现 |
 |---|---|
-| 附件选文件 | IPC `desktop:pickFiles`（主进程 dialog）→ `desktop:readFileDataUrl`（主进程 fs）→ data URL；压缩在渲染层 canvas（`utils/media.ts` web 分支，替代 image-resizer） |
+| 附件选文件 | IPC `desktop:pickFiles`（主进程 dialog）→ `desktop:readFileDataUrl`（主进程 fs）→ data URL；压缩在渲染层 canvas（`utils/media.ts` web 分支，替代 image-resizer）；文本文件（SSH 私钥 PEM）走 `desktopPickTextFile`（readFileText utf8） |
 | 粘贴/拖拽 | ChatPane window 级 paste/drop 监听：图片 → 待发附件；文件 → `@file:` 引用 |
 | 语音 | `VoiceButton.web.tsx` 桌面分支：getUserMedia + MediaRecorder（mp4/aac 优先，webm/opus 兜底）→ 转写链路复用；普通浏览器仍是禁用占位 |
 | 头像 | ProfileEditScreen 桌面分支：desktopPickImages + canvas cover 512 |
 | 失焦通知 | `useCompleteNotifications`（busy 翻转 + document.hidden）→ IPC `desktop:notify` → 主进程 Notification，点击聚焦窗口 |
 | 交互 | Enter 发送/Shift+Enter 换行（IME 保护）、Esc 关弹层、Ctrl+N 新会话、消息列 760px 居中限宽、ModelPicker web 居中对话框 |
+| 菜单 | Windows/Linux 不设菜单栏（`Menu.setApplicationMenu(null)`，默认菜单只有通用项无价值；文本复制粘贴由 Chromium 原生处理）；macOS 保留最小中文菜单（应用/编辑/视图/窗口——mac 编辑菜单承担 Cmd+C/V 快捷键）。**后续加菜单必须用中文标签** |
 
 ### 8.4 打包
 

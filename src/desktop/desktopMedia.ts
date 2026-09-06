@@ -60,6 +60,23 @@ export async function desktopReadFilePath(path: string): Promise<string> {
   return bridge.readFileDataUrl(path);
 }
 
+/** 文本文件选择（SSH 私钥 PEM 等）：对话框 → 读 utf8 内容。取消返回 null。 */
+export async function desktopPickTextFile(): Promise<{
+  content: string;
+  name: string;
+} | null> {
+  const bridge = getDesktopBridge();
+  if (!bridge) {
+    throw new Error('桌面桥不可用');
+  }
+  const [f] = await bridge.pickFiles({images: false, multiple: false});
+  if (!f) {
+    return null;
+  }
+  const content = await bridge.readFileText(f.path);
+  return {content, name: f.name};
+}
+
 /** 系统通知（窗口失焦时回复完成提醒）。 */
 export function desktopNotify(title: string, body: string): void {
   const bridge = getDesktopBridge();
