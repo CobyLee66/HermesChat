@@ -42,7 +42,7 @@
 
 ### 待办 / 下一步
 
-- [ ] 桌面端真机验收（2026-09-06）：① Mac `npm run desktop:dev` 填 SSH 配置真连（隧道/聊天/模型切换/附件/语音全流程）；② `scripts/build-desktop-remote.sh` 出 Windows 安装包并装机；③ 语音 webm/opus 转写兼容性实测；④ 断线重连/HostKey 变更路径
+- [ ] 桌面端真机验收（2026-09-06）：① Mac `npm run desktop:dev` 填 SSH 配置真连（隧道/聊天/模型切换/附件/语音全流程）；② Windows 包已构建并启动验证（构建机 出 `HermesChat Setup 0.1.0.exe`；win-unpacked 启动正常——回环代理 51899 持久化、渲染层已加载；ssh 会话无桌面时 GPU 降级软件渲染属正常；桌面双击 `dist-desktop/win-unpacked/HermesChat.exe` 或 Setup 安装即可用）；③ 语音 webm/opus 转写兼容性实测；④ 断线重连/HostKey 变更路径
 - [ ] 桌面端交互后续包：hover 态、右键菜单（会话删除/复制）、图片灯箱、用户消息选中/复制统一；深色模式（theme token 化后）
 - [ ] 斜杠命令补全真机/web 验证（2026-09-06）：输入 `/` 弹浮层、点选应用（含参数阶段如 `/cron ad`）、发送 `/help` 等命令看系统灰条输出、裸 `/model` 开模型面板、硬件返回键先关浮层；重点验 Android 触摸命中（浮层挂 listWrap 的假设）
 - [ ] iOS 版（`docs/plan.md`：iOS 后续；SSH 隧道需 iOS 侧原生实现，见 `docs/ssh-module.md`）
