@@ -1,31 +1,47 @@
 /**
- * SessionColumn — 桌面会话列：列头（profile 名/切换器 + 新会话）+ 会话列表。
- * wide 三栏时 profile 切换在左侧竖条，列头只显示名字；medium 两栏时列头
- * 提供下拉切换器（含编辑资料/退出连接入口）。
+ * SessionColumn — 桌面会话列：列头（返回按钮 + profile 名 + 新会话）+ 会话列表。
+ * 三种断点布局统一：列头「‹ 返回」回 Profile 选择首屏；wide 三栏时左侧竖条
+ * 仍保留做快速切换。web 下会话行支持右键菜单（复制标题/删除）。
  */
 
 import React, {useCallback, useState} from 'react';
-import {Modal, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {
+  Modal,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  useWindowDimensions,
+} from 'react-native';
 
 import {Colors} from '../components/theme';
-import {SessionListPanel, useProfileNickname} from '../panels/SessionListPanel';
-import {createSessionFlow, type OpenedSession} from '../panels/sessionFlows';
-import {useProfilesStore} from '../store/profiles';
-import {useConnectionStore} from '../store/connection';
-import {alertError, confirmDialog} from '../utils/alert';
+import {
+  SessionListPanel,
+  useProfileNickname,
+  type RowContextMenuPos,
+} from '../panels/SessionListPanel';
+import {
+  createSessionFlow,
+  deleteSessionFlow,
+  type OpenedSession,
+} from '../panels/sessionFlows';
+import type {SessionListRow} from '../rpc/types';
+import {alertError} from '../utils/alert';
 import {openChat, useDesktopUiStore} from './desktopUiStore';
 
-export function SessionColumn({
-  profile,
-  /** 列头是否带 profile 下拉切换器（medium 两栏布局） */
-  showProfileSwitcher,
-}: {
-  profile: string;
-  showProfileSwitcher?: boolean;
-}) {
+/** 右键菜单卡估算尺寸（定位 clamp 防溢出窗口用） */
+const MENU_WIDTH = 200;
+const MENU_HEIGHT = 100;
+
+export function SessionColumn({profile}: {profile: string}) {
   const nicknameText = useProfileNickname(profile);
-  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const selectProfile = useDesktopUiStore(s => s.selectProfile);
   const [creating, setCreating] = useState(false);
+  const [menu, setMenu] = useState<{
+    row: SessionListRow;
+    pos: RowContextMenuPos;
+  } | null>(null);
+  const {width: winW, height: winH} = useWindowDimensions();
 
   const onOpenSession = useCallback(
     (opened: OpenedSession) => {
@@ -49,25 +65,53 @@ export function SessionColumn({
     }
   }, [creating, profile]);
 
+  const onRowContextMenu = useCallback(
+    (row: SessionListRow, pos: RowContextMenuPos) => {
+      setMenu({row, pos});
+    },
+    [],
+  );
+
+  const closeMenu = useCallback(() => setMenu(null), []);
+
+  const onCopyTitle = useCallback(() => {
+    if (menu) {
+      // RNW 无 Clipboard 模块，走浏览器剪贴板（无 DOM lib：结构类型断言）
+      const clipboard = (globalThis as {
+        navigator?: {clipboard?: {writeText?: (t: string) => Promise<void>}};
+      }).navigator?.clipboard;
+      void clipboard
+        ?.writeText?.(menu.row.title || '未命名会话')
+        ?.catch(() => {});
+    }
+    closeMenu();
+  }, [menu, closeMenu]);
+
+  const onDelete = useCallback(() => {
+    if (menu) {
+      void deleteSessionFlow(profile, menu.row.id, menu.row.title);
+    }
+    closeMenu();
+  }, [menu, profile, closeMenu]);
+
+  // 菜单贴光标弹出；靠右/靠下时向内收避免溢出窗口
+  const menuLeft = menu ? Math.min(menu.pos.x, winW - MENU_WIDTH - 8) : 0;
+  const menuTop = menu ? Math.min(menu.pos.y, winH - MENU_HEIGHT - 8) : 0;
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        {showProfileSwitcher ? (
-          <TouchableOpacity
-            style={styles.switcherBtn}
-            activeOpacity={0.7}
-            onPress={() => setSwitcherOpen(true)}>
-            <Text style={styles.switcherText} numberOfLines={1}>
-              {nicknameText} ▾
-            </Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.titleWrap}>
-            <Text style={styles.switcherText} numberOfLines={1}>
-              {nicknameText}
-            </Text>
-          </View>
-        )}
+        <TouchableOpacity
+          activeOpacity={0.7}
+          onPress={() => selectProfile(null)}
+          hitSlop={8}>
+          <Text style={styles.backText}>‹ 返回</Text>
+        </TouchableOpacity>
+        <View style={styles.titleWrap}>
+          <Text style={styles.titleText} numberOfLines={1}>
+            {nicknameText}
+          </Text>
+        </View>
         <TouchableOpacity
           activeOpacity={0.7}
           onPress={onNewSession}
@@ -77,92 +121,31 @@ export function SessionColumn({
           </Text>
         </TouchableOpacity>
       </View>
-      <SessionListPanel profile={profile} onOpenSession={onOpenSession} />
+      <SessionListPanel
+        profile={profile}
+        onOpenSession={onOpenSession}
+        onRowContextMenu={onRowContextMenu}
+      />
 
-      {/* profile 下拉切换器（medium 布局） */}
+      {/* 会话行右键菜单（web/桌面；backdrop 点击或 Esc 关闭） */}
       <Modal
-        visible={switcherOpen}
+        visible={menu != null}
         transparent
         animationType="fade"
-        onRequestClose={() => setSwitcherOpen(false)}>
-        <TouchableOpacity
-          style={styles.backdrop}
-          activeOpacity={1}
-          onPress={() => setSwitcherOpen(false)}>
-          <ProfileSwitcherMenu onDone={() => setSwitcherOpen(false)} />
+        onRequestClose={closeMenu}>
+        <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={closeMenu}>
+          <View style={[styles.menu, {left: menuLeft, top: menuTop}]}>
+            <TouchableOpacity style={styles.menuItem} onPress={onCopyTitle}>
+              <Text style={styles.menuText}>复制会话标题</Text>
+            </TouchableOpacity>
+            <View style={styles.menuSep} />
+            <TouchableOpacity style={styles.menuItem} onPress={onDelete}>
+              <Text style={styles.menuTextDanger}>删除会话</Text>
+            </TouchableOpacity>
+          </View>
         </TouchableOpacity>
       </Modal>
     </View>
-  );
-}
-
-/** profile 切换菜单：列表 + 编辑资料 + 退出连接。 */
-function ProfileSwitcherMenu({onDone}: {onDone: () => void}) {
-  const list = useProfilesStore(s => s.list);
-  const selectedProfile = useDesktopUiStore(s => s.selectedProfile);
-  const selectProfile = useDesktopUiStore(s => s.selectProfile);
-  const setProfileEditOpen = useDesktopUiStore(s => s.setProfileEditOpen);
-
-  return (
-    <View style={styles.menu}>
-      {list.map(p => (
-        <ProfileMenuItem
-          key={p.name}
-          name={p.name}
-          selected={p.name === selectedProfile}
-          onPick={() => {
-            selectProfile(p.name);
-            onDone();
-          }}
-        />
-      ))}
-      <View style={styles.menuSep} />
-      <TouchableOpacity
-        style={styles.menuItem}
-        onPress={() => {
-          if (selectedProfile) {
-            setProfileEditOpen(selectedProfile);
-          }
-          onDone();
-        }}>
-        <Text style={styles.menuText}>编辑当前资料…</Text>
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={styles.menuItem}
-        onPress={() => {
-          onDone();
-          void confirmDialog('退出连接', '确定断开与主机的连接吗？').then(ok => {
-            if (ok) {
-              useConnectionStore.getState().disconnect();
-            }
-          });
-        }}>
-        <Text style={styles.menuTextDanger}>退出连接</Text>
-      </TouchableOpacity>
-    </View>
-  );
-}
-
-/** 单个 profile 菜单行（hook 独立成组件，避免循环内调用）。 */
-function ProfileMenuItem({
-  name,
-  selected,
-  onPick,
-}: {
-  name: string;
-  selected: boolean;
-  onPick: () => void;
-}) {
-  const nickname = useProfileNickname(name);
-  return (
-    <TouchableOpacity style={styles.menuItem} onPress={onPick}>
-      <Text
-        style={[styles.menuText, selected && styles.menuTextActive]}
-        numberOfLines={1}>
-        {selected ? '✓ ' : ''}
-        {nickname}
-      </Text>
-    </TouchableOpacity>
   );
 }
 
@@ -177,30 +160,31 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     gap: 12,
   },
+  backText: {fontSize: 15, color: Colors.accent},
   titleWrap: {flex: 1},
-  switcherBtn: {flex: 1, paddingVertical: 8},
-  switcherText: {fontSize: 16, fontWeight: '600', color: Colors.text},
+  titleText: {fontSize: 16, fontWeight: '600', color: Colors.text},
   newText: {fontSize: 14, color: Colors.accent, fontWeight: '600'},
   newTextDisabled: {opacity: 0.4},
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    justifyContent: 'flex-start',
-    alignItems: 'flex-start',
+    backgroundColor: 'rgba(0,0,0,0.15)',
   },
   menu: {
+    position: 'absolute',
     backgroundColor: Colors.card,
     borderRadius: 12,
-    minWidth: 220,
-    maxWidth: '70%',
-    marginLeft: 12,
-    marginTop: 60,
+    width: MENU_WIDTH,
     paddingVertical: 4,
     overflow: 'hidden',
+    // 阴影让菜单与背景分层（web/原生通吃写法）
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    shadowOffset: {width: 0, height: 4},
+    elevation: 8,
   },
   menuItem: {paddingVertical: 11, paddingHorizontal: 16},
   menuText: {fontSize: 14, color: Colors.text},
-  menuTextActive: {fontWeight: '600'},
   menuTextDanger: {fontSize: 14, color: Colors.danger},
   menuSep: {
     height: StyleSheet.hairlineWidth,

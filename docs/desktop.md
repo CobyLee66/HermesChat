@@ -14,8 +14,8 @@
 ### 8.2 响应式布局（宽度驱动，与是否 Electron 无关）
 
 - 断点 `src/ui/breakpoints.ts`：narrow <900（单列）/ medium 900–1279（两栏）/ wide ≥1280（三栏）。手机恒为 narrow 且走原导航栈，零影响；浏览器拉宽即可预览桌面布局（`npm run web` 调试闭环）。
-- 壳 `src/desktop/DesktopApp.tsx`：web 构建连接 ready 后替换 `Stack.Navigator`；断线卸载回导航栈连接页。三栏 = `ProfileRail`（64px 竖条）+ `SessionColumn`（300px）+ `ChatPane`；medium 会话列头带 profile 下拉；narrow 单列 Profile 列表 → 会话列 → 聊天。选中态在 `desktopUiStore`。
-- **共享面板**（`src/panels/`，手机屏幕与桌面列同源）：`SessionListPanel`（过滤+列表）、`TimelineView`（时间线+滚动条+斜杠浮层挂点，`maxContentWidth` 桌面限宽 760）、`ChatInputBar`（输入区，`pickers` 注入附件来源、`enterToSend`）、`ChatOverlays`（菜单/模型/信息弹层）、`useChatComposer`（输入+斜杠+发送分流）、`sessionFlows`（打开/新建会话流程）。ChatScreen/SessionListScreen 已改为薄壳，行为保持。
+- 壳 `src/desktop/DesktopApp.tsx`：web 构建连接 ready 后替换 `Stack.Navigator`；断线卸载回导航栈连接页。三栏 = `ProfileRail`（64px 竖条）+ `SessionColumn`（300px）+ `ChatPane`；medium 会话列 + 聊天区；narrow 单列 Profile 列表 → 会话列 → 聊天。三种断点的会话列头统一带「‹ 返回」按钮（2026-09-07）回 Profile 选择首屏（替代早期的 medium/narrow profile 下拉切换器）；wide 的竖条保留做快速切换。选中态在 `desktopUiStore`。
+- **共享面板**（`src/panels/`，手机屏幕与桌面列同源）：`SessionListPanel`（过滤+列表+会话行右键挂点）、`TimelineView`（时间线+滚动条+斜杠浮层挂点，消息列不限宽通栏）、`ChatInputBar`（输入区，`pickers` 注入附件来源、`enterToSend`）、`ChatOverlays`（菜单/模型/信息弹层）、`useChatComposer`（输入+斜杠+发送分流）、`sessionFlows`（打开/新建/删除会话流程）。ChatScreen/SessionListScreen 已改为薄壳，行为保持。
 - `utils/alert.ts`：桌面走自绘 `ConfirmDialogHost`（`src/ui/dialogStore.ts` 排队），修掉 RNW 下 Alert 无 UI 的老问题；普通浏览器 window.confirm 兜底；原生不变。
 
 ### 8.3 桌面能力
@@ -27,7 +27,7 @@
 | 语音 | `VoiceButton.web.tsx` 桌面分支：getUserMedia + MediaRecorder（mp4/aac 优先，webm/opus 兜底）→ 转写链路复用；普通浏览器仍是禁用占位 |
 | 头像 | ProfileEditScreen 桌面分支：desktopPickImages + canvas cover 512 |
 | 失焦通知 | `useCompleteNotifications`（busy 翻转 + document.hidden）→ IPC `desktop:notify` → 主进程 Notification，点击聚焦窗口 |
-| 交互 | Enter 发送/Shift+Enter 换行（IME 保护）、Esc 关弹层、Ctrl+N 新会话、消息列 760px 居中限宽、ModelPicker web 居中对话框 |
+| 交互 | Enter 发送/Shift+Enter 换行（IME 保护）、Esc 关弹层、Ctrl+N 新会话、消息列通栏（2026-09-07 取消 760px 限宽）、会话行右键菜单（复制标题/删除，2026-09-07；⚠ React `onContextMenu` 委托在 RNW 下实测不派发，走行宿主节点原生 `addEventListener`）、ModelPicker web 居中对话框 |
 | 菜单 | Windows/Linux 不设菜单栏（`Menu.setApplicationMenu(null)`，默认菜单只有通用项无价值；文本复制粘贴由 Chromium 原生处理）；macOS 保留最小中文菜单（应用/编辑/视图/窗口——mac 编辑菜单承担 Cmd+C/V 快捷键）。**后续加菜单必须用中文标签** |
 
 ### 8.4 打包
@@ -38,7 +38,7 @@
 
 ### 8.5 已知边界（后续迭代）
 
-- 悬停（hover）态、右键菜单、图片点击灯箱未做；助手消息 web 侧已随 markdown-it HTML 原生可选中，用户消息选中/复制待统一。
+- 悬停（hover）态、图片点击灯箱未做；助手消息 web 侧已随 markdown-it HTML 原生可选中，用户消息选中/复制待统一。会话行右键菜单已做（复制标题/删除），profile 行/聊天气泡区右键未做。
 - 语音 webm/opus 是否被服务端 faster-whisper 正常转写待真机验证（mp4/aac 已优先选用）。
 - 未做：深色模式、托盘、自动更新、safeStorage 加密私钥（私钥仍 localStorage 明文，与手机版策略一致）。
 - 真实 SSH 隧道 GUI 全流程（填配置→连接→聊天）待用户在 Electron/Windows 包验收；自动化验证只覆盖壳启动与代理（不碰 live 服务写操作）。

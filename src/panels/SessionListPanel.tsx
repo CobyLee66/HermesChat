@@ -4,14 +4,14 @@
  * onNewSession 回调注入。zustand 选择器返回稳定引用（EMPTY 常量约定）。
  */
 
-import React, {useCallback, useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {FlatList, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 
 import {Avatar} from '../components/Avatar';
 import {Colors} from '../components/theme';
 import {useProfilesStore} from '../store/profiles';
 import {useSessionsStore} from '../store/sessions';
-import {alertError, confirmDialog} from '../utils/alert';
+import {alertError} from '../utils/alert';
 import {
   automationSourceLabel,
   isAutomationSource,
@@ -19,9 +19,28 @@ import {
   type SessionFilterCategory,
 } from '../utils/sessionSources';
 import type {SessionListRow} from '../rpc/types';
-import {openSessionFlow, type OpenedSession} from './sessionFlows';
+import {deleteSessionFlow, openSessionFlow, type OpenedSession} from './sessionFlows';
 
 const EMPTY_SESSIONS: SessionListRow[] = [];
+
+/** 会话行右键坐标（视口坐标，桌面弹菜单定位用） */
+export interface RowContextMenuPos {
+  x: number;
+  y: number;
+}
+
+/** 宿主节点的最小监听能力面（web 下 RNW TouchableOpacity ref 即 DOM 节点） */
+interface RowHostNode {
+  addEventListener?: (type: string, listener: (e: unknown) => void) => void;
+  removeEventListener?: (type: string, listener: (e: unknown) => void) => void;
+}
+
+/** web 右键原生事件里用到的字段（无 DOM lib：结构类型） */
+interface ContextMenuEventLike {
+  clientX?: number;
+  clientY?: number;
+  preventDefault?: () => void;
+}
 
 const FILTER_OPTIONS: {key: SessionFilterCategory; label: string}[] = [
   {key: 'chats', label: '聊天'},
@@ -54,16 +73,19 @@ export function SessionListPanel({
   profile,
   onOpenSession,
   refreshTrigger,
+  onRowContextMenu,
 }: {
   profile: string;
   onOpenSession: (opened: OpenedSession) => void;
   /** 外部请求刷新（桌面切 profile 等）；内容变化即触发，传值比较 */
   refreshTrigger?: number;
+  /** 桌面右键会话行（web 专用；手机不传，长按删除行为不变） */
+  onRowContextMenu?: (row: SessionListRow, pos: RowContextMenuPos) => void;
 }) {
   const nicknameText = useProfileNickname(profile);
   const avatarUri = useProfilesStore(s => s.avatars[profile]);
   const sessions = useSessionsStore(s => s.byProfile[profile] ?? EMPTY_SESSIONS);
-  const {refresh, remove} = useSessionsStore();
+  const refresh = useSessionsStore(s => s.refresh);
   const [filter, setFilter] = useState<SessionFilterCategory>('chats');
 
   // 面板挂载/切换 profile 时刷新（原屏幕 effect 行为保持）
@@ -89,21 +111,10 @@ export function SessionListPanel({
   );
 
   const onDelete = useCallback(
-    async (sessionId: string, title: string) => {
-      const ok = await confirmDialog(
-        '删除会话',
-        `确定删除「${title || '未命名会话'}」吗？`,
-      );
-      if (!ok) {
-        return;
-      }
-      try {
-        await remove(profile, sessionId);
-      } catch (e) {
-        alertError('删除失败', e instanceof Error ? e.message : String(e));
-      }
+    (sessionId: string, title: string) => {
+      void deleteSessionFlow(profile, sessionId, title);
     },
-    [profile, remove],
+    [profile],
   );
 
   return (
@@ -139,35 +150,86 @@ export function SessionListPanel({
           </Text>
         }
         renderItem={({item}) => (
-          <TouchableOpacity
-            style={styles.row}
-            activeOpacity={0.7}
-            onPress={() => openSession(item)}
-            onLongPress={() => onDelete(item.id, item.title)}>
-            <Avatar name={nicknameText} uri={avatarUri} size={42} />
-            <View style={styles.rowBody}>
-              <View style={styles.rowTop}>
-                <Text style={styles.title} numberOfLines={1}>
-                  {item.title || '未命名会话'}
-                </Text>
-                {item.namespaced ? (
-                  <Text style={styles.nsBadge}>QQ</Text>
-                ) : null}
-                {isAutomationSource(item.source) ? (
-                  <Text style={styles.sourceBadge}>
-                    {automationSourceLabel(item.source)}
-                  </Text>
-                ) : null}
-                <Text style={styles.time}>{formatTime(item.started_at)}</Text>
-              </View>
-              <Text style={styles.preview} numberOfLines={1}>
-                {item.preview || `${item.message_count} 条消息`}
-              </Text>
-            </View>
-          </TouchableOpacity>
+          <SessionRow
+            item={item}
+            avatarName={nicknameText}
+            avatarUri={avatarUri}
+            onOpen={openSession}
+            onDelete={onDelete}
+            onRowContextMenu={onRowContextMenu}
+          />
         )}
       />
     </View>
+  );
+}
+
+/** 单行会话（hook 独立成组件，避免循环内调用）。 */
+function SessionRow({
+  item,
+  avatarName,
+  avatarUri,
+  onOpen,
+  onDelete,
+  onRowContextMenu,
+}: {
+  item: SessionListRow;
+  avatarName: string;
+  avatarUri?: string;
+  onOpen: (row: SessionListRow) => void;
+  onDelete: (sessionId: string, title: string) => void;
+  onRowContextMenu?: (row: SessionListRow, pos: RowContextMenuPos) => void;
+}) {
+  // web 右键：直接在宿主节点挂原生监听（React 的 onContextMenu 委托在
+  // 本项目 web 环境实测不派发）；原生端无该能力，effect 内自然跳过
+  const hostRef = useRef<RowHostNode | null>(null);
+  useEffect(() => {
+    if (!onRowContextMenu) {
+      return;
+    }
+    const host = hostRef.current;
+    if (!host?.addEventListener || !host?.removeEventListener) {
+      return;
+    }
+    const handler = (raw: unknown) => {
+      const e = raw as ContextMenuEventLike;
+      e.preventDefault?.();
+      onRowContextMenu(item, {x: e.clientX ?? 0, y: e.clientY ?? 0});
+    };
+    host.addEventListener('contextmenu', handler);
+    return () => {
+      host.removeEventListener?.('contextmenu', handler);
+    };
+  }, [item, onRowContextMenu]);
+
+  return (
+    <TouchableOpacity
+      ref={node => {
+        hostRef.current = node as unknown as RowHostNode | null;
+      }}
+      style={styles.row}
+      activeOpacity={0.7}
+      onPress={() => onOpen(item)}
+      onLongPress={() => onDelete(item.id, item.title)}>
+      <Avatar name={avatarName} uri={avatarUri} size={42} />
+      <View style={styles.rowBody}>
+        <View style={styles.rowTop}>
+          <Text style={styles.title} numberOfLines={1}>
+            {item.title || '未命名会话'}
+          </Text>
+          {item.namespaced ? <Text style={styles.nsBadge}>QQ</Text> : null}
+          {isAutomationSource(item.source) ? (
+            <Text style={styles.sourceBadge}>
+              {automationSourceLabel(item.source)}
+            </Text>
+          ) : null}
+          <Text style={styles.time}>{formatTime(item.started_at)}</Text>
+        </View>
+        <Text style={styles.preview} numberOfLines={1}>
+          {item.preview || `${item.message_count} 条消息`}
+        </Text>
+      </View>
+    </TouchableOpacity>
   );
 }
 

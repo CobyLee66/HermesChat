@@ -28,7 +28,6 @@ export function TimelineView({
   showDetail,
   onSelectText,
   slashOverlay,
-  maxContentWidth,
 }: {
   sessionId: string;
   /** 是否显示工具调用/思考/推理等非对话内容 */
@@ -36,8 +35,6 @@ export function TimelineView({
   /** 助手气泡长按选择文本（手机端）；桌面端不传即关闭该交互 */
   onSelectText?: (text: string) => void;
   slashOverlay?: React.ReactNode;
-  /** 消息列可读行宽上限（桌面宽列居中限宽）；不传=通栏（手机） */
-  maxContentWidth?: number;
 }) {
   const chat = useChatStore(s => s.bySession[sessionId]);
   const respondApproval = useChatStore(s => s.respondApproval);
@@ -140,9 +137,6 @@ export function TimelineView({
           // 内容不足一屏时视觉顶部对齐（inverted 会垂直翻转容器，
           // flex-end 对应容器底部即视觉顶部；超过一屏时无影响）
           styles.listContentTop,
-          // 桌面宽列：可读行宽居中限宽
-          maxContentWidth != null ? styles.centerColumn : null,
-          maxContentWidth != null ? {maxWidth: maxContentWidth} : null,
         ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
@@ -244,7 +238,6 @@ const styles = StyleSheet.create({
   listWrap: {flex: 1},
   listContent: {paddingVertical: 10},
   listContentTop: {flexGrow: 1, justifyContent: 'flex-end'},
-  centerColumn: {width: '100%', alignSelf: 'center'},
   jumpBtn: {
     position: 'absolute',
     right: 14,

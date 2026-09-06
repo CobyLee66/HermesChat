@@ -10,6 +10,7 @@ import {useChatStore} from '../store/chat';
 import {getFork} from '../store/forkMap';
 import {useProfilesStore} from '../store/profiles';
 import {useSessionsStore} from '../store/sessions';
+import {alertError, confirmDialog} from '../utils/alert';
 import type {SessionListRow} from '../rpc/types';
 
 export interface OpenedSession {
@@ -89,4 +90,24 @@ export async function openSessionFlow(
     inflight: result.inflight,
   });
   return {sessionId: liveSid, title};
+}
+
+/** 删除会话（确认框 → remove），手机长按与桌面右键菜单共用。 */
+export async function deleteSessionFlow(
+  profile: string,
+  sessionId: string,
+  title: string,
+): Promise<void> {
+  const ok = await confirmDialog(
+    '删除会话',
+    `确定删除「${title || '未命名会话'}」吗？`,
+  );
+  if (!ok) {
+    return;
+  }
+  try {
+    await useSessionsStore.getState().remove(profile, sessionId);
+  } catch (e) {
+    alertError('删除失败', e instanceof Error ? e.message : String(e));
+  }
 }

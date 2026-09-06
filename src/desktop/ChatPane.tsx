@@ -23,9 +23,6 @@ import {useConnectionStore} from '../store/connection';
 import {alertError} from '../utils/alert';
 import {openChat, useDesktopUiStore, type DesktopChatRef} from './desktopUiStore';
 
-/** 消息列可读行宽上限（px） */
-const CHAT_MAX_WIDTH = 760;
-
 // 无 DOM lib：粘贴/拖拽相关结构类型
 interface WebFileLike {
   name?: string;
@@ -300,7 +297,6 @@ export function ChatPane({
       <TimelineView
         sessionId={chat.sessionId}
         showDetail={showDetail}
-        maxContentWidth={CHAT_MAX_WIDTH}
         slashOverlay={
           slash.open ? (
             <SlashSuggest

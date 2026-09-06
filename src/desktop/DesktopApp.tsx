@@ -3,8 +3,10 @@
  *
  * 布局按窗口宽度自适应（见 ui/breakpoints.ts）：
  * - wide ≥1280：Profile 竖条 + 会话列 + 聊天区
- * - medium 900–1279：会话列（带 profile 下拉）+ 聊天区
+ * - medium 900–1279：会话列 + 聊天区
  * - narrow <900：单列（Profile 列表 → 会话列 → 聊天，同手机流程）
+ *
+ * 会话列头统一带「‹ 返回」按钮，任何断点都可回到 Profile 选择首屏。
  *
  * 业务面板与手机屏幕同源（panels/）；本壳只负责列布局与选中态。
  */
@@ -57,7 +59,6 @@ function DesktopAppShell() {
   const chat = useDesktopUiStore(s => s.chat);
   const narrowPane = useDesktopUiStore(s => s.narrowPane);
   const profileEditOpen = useDesktopUiStore(s => s.profileEditOpen);
-  const selectProfile = useDesktopUiStore(s => s.selectProfile);
   const reset = useDesktopUiStore(s => s.reset);
 
   const refreshProfiles = useProfilesStore(s => s.refresh);
@@ -127,17 +128,7 @@ function DesktopAppShell() {
         {showChat && chat ? (
           <ChatPane chat={chat} narrow />
         ) : (
-          <View style={styles.flex1}>
-            <View style={styles.narrowTopBar}>
-              <TouchableOpacity
-                activeOpacity={0.7}
-                onPress={() => selectProfile(null)}
-                hitSlop={8}>
-                <Text style={styles.backText}>‹ Profile 列表</Text>
-              </TouchableOpacity>
-            </View>
-            <SessionColumn profile={selectedProfile} showProfileSwitcher />
-          </View>
+          <SessionColumn profile={selectedProfile} />
         )}
         {profileEditOpen ? <ProfileEditModal profile={profileEditOpen} /> : null}
       </View>
@@ -149,7 +140,7 @@ function DesktopAppShell() {
       <View style={styles.root}>
         {reconnecting ? <ReconnectingBanner /> : null}
         <View style={styles.sessionCol}>
-          <SessionColumn profile={selectedProfile} showProfileSwitcher />
+          <SessionColumn profile={selectedProfile} />
         </View>
         <View style={styles.chatCol}>{chat ? <ChatPane chat={chat} /> : <EmptyChatPane />}</View>
         {profileEditOpen ? <ProfileEditModal profile={profileEditOpen} /> : null}
@@ -298,22 +289,12 @@ function ProfileEditModal({profile}: {profile: string}) {
 
 const styles = StyleSheet.create({
   root: {flex: 1, backgroundColor: Colors.bg, flexDirection: 'row', flexWrap: 'nowrap'},
-  flex1: {flex: 1},
   sessionCol: {
     width: 300,
     borderRightWidth: StyleSheet.hairlineWidth,
     borderRightColor: Colors.border,
   },
   chatCol: {flex: 1},
-  narrowTopBar: {
-    height: 44,
-    alignItems: 'flex-start',
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-    backgroundColor: Colors.card,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.border,
-  },
   backText: {fontSize: 15, color: Colors.accent},
   banner: {
     position: 'absolute',
