@@ -1081,7 +1081,7 @@ function createWindow(port: number): void {
     height: state.height,
     minWidth: MIN_WIDTH,
     minHeight: MIN_HEIGHT,
-    title: 'HermesChat',
+    title: 'Hermes Chat',
     backgroundColor: '#f2f3f7',
     // 窗口/任务栏图标（开发模式；打包后 exe/bundle 自带同款图标）
     icon: path.join(app.getAppPath(), 'desktop', 'resources', 'icon.png'),

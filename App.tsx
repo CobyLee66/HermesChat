@@ -64,7 +64,10 @@ function App() {
       {desktopShell ? (
         <DesktopApp />
       ) : (
-        <NavigationContainer>
+        // documentTitle 关掉 web 端 react-navigation 逐屏改写 window.title 的默认行为
+        // （ConnectionHome 的 title「连接」会一直留在窗口标题上，桌面壳接管后再没人改），
+        // 窗口标题统一保持 index.html 的「Hermes Chat」
+        <NavigationContainer documentTitle={{enabled: false}}>
           <Stack.Navigator
             screenOptions={screenOptions}
             initialRouteName={
