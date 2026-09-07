@@ -24,6 +24,7 @@ import type {
 } from '../rpc/types';
 import {getExecRemote} from '../ssh/execRemote';
 import {fetchRemoteHistory, toSeedMessages} from '../ssh/remoteHistory';
+import {dlog} from '../utils/desktopLog';
 import {getFork, setFork} from './forkMap';
 import {useProfilesStore} from './profiles';
 import {useSessionsStore} from './sessions';
@@ -102,6 +103,19 @@ function applyPending(
   for (const p of clarifies ?? []) {
     agg.applyEvent('clarify.request', p);
   }
+}
+
+/** 历史投影按 role 计数（诊断：重进后工具卡缺失时先看 tool 行到没到）。 */
+function countRoles(messages: ProjectedMessage[]): string {
+  const c = {user: 0, assistant: 0, tool: 0, other: 0};
+  for (const m of messages) {
+    if (m?.role === 'user' || m?.role === 'assistant' || m?.role === 'tool') {
+      c[m.role] += 1;
+    } else {
+      c.other += 1;
+    }
+  }
+  return `user=${c.user} assistant=${c.assistant} tool=${c.tool} other=${c.other}`;
 }
 
 interface ChatStore {
@@ -238,6 +252,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
     attach(sid, opts) {
       const agg = aggFor(sid);
       if (opts?.messages) {
+        dlog(
+          'INFO',
+          `attach ${sid.slice(0, 8)}：历史 ${opts.messages.length} 条（${countRoles(opts.messages)}）`,
+        );
         // 进入/重进会话：服务端历史是权威快照，始终重建时间线。
         // 此前只在聚合器为空时 hydrate——resume 快路径返回同一 live sid，
         // 重进就永远停在首次进入时的旧快照（其它端/断线期间的新消息全丢）。
@@ -265,6 +283,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
     reattachAfterResume(oldSid, liveSid, opts) {
       const prev = get().bySession[oldSid];
       const oldAgg = aggregators.get(oldSid) ?? null;
+      dlog(
+        'INFO',
+        `reattach ${oldSid.slice(0, 8)}→${liveSid.slice(0, 8)}：历史 ${opts.messages?.length ?? 0} 条（${countRoles(opts.messages ?? [])}）`,
+      );
       // 断线前若有流式尾部，恢复时尽量保留（同 turn 前缀扩展判断）
       const previousStreaming = oldAgg ? oldAgg.takeStreamingTail() : null;
       const agg = new TimelineAggregator();

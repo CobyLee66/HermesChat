@@ -575,3 +575,33 @@ describe('工具 diff 与 complete 回填', () => {
     ]);
   });
 });
+
+describe('hydrate：历史投影的 tool 行渲染为工具卡', () => {
+  it('role=tool 行转为 done 状态工具卡，user/assistant 正常', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([
+      {role: 'user', text: '帮我改下代码'},
+      {
+        role: 'tool',
+        name: 'shell',
+        context: '已修改 main.ts（结果预览）',
+        row_id: 7,
+        args: {cmd: 'ls'},
+      },
+      {role: 'assistant', text: '改好了', reasoning: '先看文件'},
+    ]);
+    const items = agg.getItems();
+    expect(items).toHaveLength(3);
+    const toolMsg = items[1];
+    expect(toolMsg.kind).toBe('assistant');
+    const block = (toolMsg as AssistantMsg).blocks.find(b => b.type === 'tool');
+    expect(block).toBeDefined();
+    const tool = (block as {type: 'tool'; tool: ToolCallBlock}).tool;
+    expect(tool.name).toBe('shell');
+    expect(tool.status).toBe('done');
+    expect(tool.toolId).toBe('hist-7');
+    // reasoning 投影为 thinking 块
+    const last = items[2] as AssistantMsg;
+    expect(last.blocks.some(b => b.type === 'thinking')).toBe(true);
+  });
+});
