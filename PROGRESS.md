@@ -14,6 +14,8 @@
 
 ### 最近完成
 
+- [x] 桌面端诊断日志埋点——「后台几分钟后整窗空白」排查取证（2026-09-07）— 构建机 已复现：窗口最小化/遮挡几分钟恢复后整窗纯空白（物理机、非 RDP）。分析结论：SSH keepalive 在主进程不受前后台影响、纯断连应显示橙色重连横幅而非整窗空白，嫌疑集中在渲染管线（渲染/GPU 进程崩溃无兜底 / React 异常卸载无 ErrorBoundary / Chromium 后台节流停绘），但零日志无法定因。本次**零行为变化**加装：主进程文件日志（`userData/logs/main.log`，1MB 轮转，含 render-process-gone/child-process-gone/unresponsive/窗口状态时间线/SSH 与代理事件）+ IPC `desktop:log` 让渲染层汇入同一文件 + 渲染层探针（`src/utils/webDiagnostics.ts`：30s 心跳/全局 error/visibilitychange，仅 Electron 生效）+ 连接状态机迁移埋点 + `ErrorBoundary`（web 入口包裹，render 异常变可见错误）。四类根因日志指纹互斥，见 `docs/desktop.md` §8.6。⚠ 踩坑：①根 tsconfig 无 dom lib/node types，`process`/`performance`/`window` 全部要经 globalThis 结构断言（沿用仓库惯例）；②Jest（RN preset）下 `globalThis.jest` 探测不可靠，静默判断用 `process.env.NODE_ENV==='test'`（同样经断言），否则 connection store 测试输出被日志刷屏；③Mac 冒烟验证时最小化期间心跳仍准点 30s—— intensive throttling 未触发（<5min），Windows 上是否节流正要靠这个指纹抓
+
 - [x] 桌面端头像「重复刷新加载」修复（移动端 b390293 同类问题的桌面补齐，2026-09-07，D027）— 三列切 profile / 两列切过滤档所有头像重播渐现，根因同移动端：Avatar 渐现动画不区分缓存命中，但桌面是 web 构建、RNFS 打桩使落盘必失败、头像恒为 data URL，`file://` 即显分支永远走不到。改 `avatarCache` 加 web 分支：data URL → blob: object URL 按 profile 名进程内记忆化（URI 稳定 = 浏览器图片缓存命中键，重挂载/换 uri 零动画），`Avatar.isInstant` 扩展 `blob:` 前缀；顺带把 SessionListPanel 内联 `ItemSeparatorComponent` 提为模块级稳定组件（每次 render 换组件类型导致分隔线反复重挂）。⚠ 踩坑：①RN 自带全局 Blob 类型（签名与浏览器有出入），globalThis 结构断言须经 `unknown` 中转否则 TS2352；②jest（RN preset）下 Platform.OS 是原生值，测 web 分支须文件级 `jest.mock('react-native')`，根 `__mocks__/react-native-fs.ts` 对 node_modules 包自动生效、模块顶层 import 可直接加载；③web 无持久缓存（`cachedAvatarInfo` 恒 null），冷启动首拉保留渐现属真实加载、不修
 
 - [x] 桌面端交互改进包：列头返回按钮 / 消息列通栏 / 会话右键菜单（2026-09-07）— ①删掉 medium/narrow 会话列头的 profile 下拉切换器，三种断点统一在列头放「‹ 返回」（`selectProfile(null)` 回全宽 Profile 选择首屏，编辑资料/退出连接经首屏或 wide 竖条可达）；narrow 原「‹ Profile 列表」独立顶栏随之删除。②桌面消息列取消 760px 居中限宽（`TimelineView` 的 maxContentWidth prop 删除），与手机端同走通栏，输入栏/斜杠浮层本就全宽现已对齐。③web 会话行右键菜单：「复制会话标题」（navigator.clipboard）+「删除会话」（删除流程提取为 `sessionFlows.deleteSessionFlow` 与手机长按共用，确认框不变）。⚠ 踩坑：React `onContextMenu` 在本项目 RNW 环境实测不派发——#root 上委托监听已注册、行 props 已带 onContextMenu（CDP 枚举 + fiber props 探针确认），真实/合成右键都进不了处理器，而合成 click 委托正常；别再试 React prop 路线，正解是行组件 ref 拿 RNW TouchableOpacity 转发的宿主 div（即 DOM 节点）直接 `addEventListener('contextmenu')`，原生端 ref 无该能力 effect 内自然跳过。三断点+返回+右键菜单已 Playwright 截图验证（web 直连只读，docs/screenshots 同款脚本思路）
@@ -45,6 +47,7 @@
 
 ### 待办 / 下一步
 
+- [ ] 桌面端「后台空白」取证闭环（2026-09-07）：埋点已就位（见最近完成）→ 构建机 开机后推包（`scripts/build-desktop-remote.sh`）→ 用户复现一次空白 → 取回 `%APPDATA%\HermesChat\logs\main.log` 按指纹定因（docs/desktop.md §8.6 四类指纹表）→ 再出针对性修复（候选手段已评估未实施：backgroundThrottling:false、render-process-gone 自愈 reload、GPU 崩溃兜底、ErrorBoundary 已顺带就位）
 - [ ] 桌面端真机验收（2026-09-06）：① Mac `npm run desktop:dev` 填 SSH 配置真连（隧道/聊天/模型切换/附件/语音全流程）；② Windows 包已构建并启动验证（构建机 出 `HermesChat Setup 0.1.0.exe`；win-unpacked 启动正常——回环代理 51899 持久化、渲染层已加载；ssh 会话无桌面时 GPU 降级软件渲染属正常；桌面双击 `dist-desktop/win-unpacked/HermesChat.exe` 或 Setup 安装即可用）；③ 语音 webm/opus 转写兼容性实测；④ 断线重连/HostKey 变更路径
 - [ ] 桌面端交互后续包：hover 态、profile/聊天区右键菜单扩展、图片灯箱、用户消息选中/复制统一；深色模式（theme token 化后）
 - [ ] 桌面端头像瞬时呈现验收（2026-09-07）：`npm run desktop:dev` 切过滤档反复横跳、三列/两列切 profile，头像应原位即时切换无渐现刷新；冷启动首进保留渐现属正常（真实加载）

@@ -47,6 +47,8 @@ export interface DesktopBridge {
   readFileText(filePath: string): Promise<string>;
   /** 系统通知（点击通知聚焦窗口） */
   notify(payload: {title: string; body: string}): Promise<boolean>;
+  /** 诊断日志：写入主进程 userData/logs/main.log（与主进程日志同一文件） */
+  log(level: string, msg: string): Promise<boolean>;
 }
 
 /** Electron 主进程桥是否存在（普通浏览器/Jest 下为 false）。 */

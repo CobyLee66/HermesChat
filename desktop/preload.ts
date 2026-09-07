@@ -67,4 +67,8 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
     ipcRenderer.invoke('desktop:readFileText', filePath),
   notify: (payload: {title: string; body: string}) =>
     ipcRenderer.invoke('desktop:notify', payload),
+
+  // 诊断日志：写入主进程 userData/logs/main.log
+  log: (level: string, msg: string) =>
+    ipcRenderer.invoke('desktop:log', level, msg),
 });

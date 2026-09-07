@@ -12,6 +12,7 @@ import {create} from 'zustand';
 import type {RpcClient} from '../rpc/client';
 import {hasRpc, setRpc} from '../rpc/runtime';
 import {setExecRemote, type ExecRemoteFn} from '../ssh/execRemote';
+import {dlog} from '../utils/desktopLog';
 import {useChatStore} from './chat';
 import {useSessionsStore} from './sessions';
 
@@ -181,6 +182,7 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => {
       token: result.token ?? '',
       reconnectAttempt: 0,
     });
+    dlog('INFO', '连接就绪（隧道 + WS 建立）');
     // 引导数据（失败不阻塞 ready）
     useSessionsStore.getState().markStale();
     return true;
@@ -206,11 +208,18 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => {
           }
         }
       } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
         set({
           state: 'reconnecting',
           reconnectAttempt: get().reconnectAttempt + 1,
-          error: e instanceof Error ? e.message : String(e),
+          error: msg,
         });
+        dlog(
+          'INFO',
+          `重连失败（第 ${get().reconnectAttempt} 次，${Math.round(
+            backoffDelay(get().reconnectAttempt) / 1000,
+          )}s 后重试）：${msg}`,
+        );
         scheduleReconnect();
       }
     }, delay);
@@ -294,19 +303,20 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => {
       }
       clearReconnectTimer();
       set({state: 'connecting', error: null});
+      dlog('INFO', '开始连接');
       try {
         return await connectInternal();
       } catch (e) {
-        set({
-          state: 'disconnected',
-          error: e instanceof Error ? e.message : String(e),
-        });
+        const msg = e instanceof Error ? e.message : String(e);
+        dlog('ERROR', `连接失败：${msg}`);
+        set({state: 'disconnected', error: msg});
         return false;
       }
     },
 
     async disconnect() {
       clearReconnectTimer();
+      dlog('INFO', '主动断开');
       const connector = get().connector;
       set({state: 'disconnected', error: null, reconnectAttempt: 0});
       setRpc(null);
@@ -325,6 +335,7 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => {
       if (st === 'disconnected' || st === 'reconnecting') {
         return;
       }
+      dlog('WARN', `连接断开：${reason}`);
       setRpc(null);
       setExecRemote(null);
       set({state: 'reconnecting', error: reason, reconnectAttempt: 0});
@@ -335,6 +346,7 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => {
       if (get().state !== 'reconnecting') {
         return;
       }
+      dlog('INFO', '回前台/请求触发：立即重连');
       set({reconnectAttempt: 0});
       scheduleReconnect();
     },

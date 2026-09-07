@@ -79,6 +79,55 @@ function saveWindowState(win: BrowserWindow): void {
   }
 }
 
+// ─── 诊断日志（userData/logs/main.log；渲染层经 desktop:log 汇入同一文件） ──
+//
+// 目的：定位「窗口后台几分钟后整窗空白」。四类根因的日志指纹互斥：
+// 渲染/GPU 进程死亡（render-process-gone / child-process-gone）、React render
+// 异常（渲染层 ErrorBoundary 上报）、JS 活着但不重绘（心跳持续 + 无崩溃事件）、
+// 连接断开（SSH close / WS close code / 代理 5xx 的时间线）。
+
+let logFilePath = '';
+
+function initDiagnosticLog(): void {
+  const dir = path.join(app.getPath('userData'), 'logs');
+  try {
+    fs.mkdirSync(dir, {recursive: true});
+  } catch {
+    // ignore
+  }
+  logFilePath = path.join(dir, 'main.log');
+}
+
+/** 本地时间戳（与用户感知时钟一致，便于对齐「空白发生时刻」）。 */
+function logTimestamp(): string {
+  const d = new Date();
+  const pad = (n: number, w = 2) => String(n).padStart(w, '0');
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+    `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.` +
+    `${pad(d.getMilliseconds(), 3)}`
+  );
+}
+
+function appendLog(level: 'INFO' | 'WARN' | 'ERROR', msg: string): void {
+  if (!logFilePath) {
+    return; // whenReady 前无埋点调用
+  }
+  try {
+    if (
+      fs.existsSync(logFilePath) &&
+      fs.statSync(logFilePath).size > 1024 * 1024
+    ) {
+      fs.renameSync(logFilePath, `${logFilePath}.old`);
+    }
+  } catch {
+    // 轮转失败不阻塞写入
+  }
+  fs.appendFile(logFilePath, `${logTimestamp()} [${level}] ${msg}\n`, () => {
+    // 写失败静默：诊断日志不能影响主流程
+  });
+}
+
 // ─── SSH 隧道（ssh2 实现，契约见 docs/ssh-module.md §2/§6） ──────
 
 interface SshTask {
@@ -194,6 +243,7 @@ function sshError(code: string, detail: string): Error {
 function notifyDropIfUnintended(): void {
   if (!ssh.intentional && ssh.ready && !ssh.dropNotified) {
     ssh.dropNotified = true;
+    appendLog('WARN', 'SSH 意外断连（keepalive 超时或传输层错误），已上报渲染层');
     sendSshEvent({
       kind: 'disconnect',
       reason: 'connection lost (keepalive timeout or transport error)',
@@ -615,6 +665,7 @@ function serveStatic(req: http.IncomingMessage, res: http.ServerResponse): void 
 function proxyApi(req: http.IncomingMessage, res: http.ServerResponse): void {
   const port = tunnelPort;
   if (port == null) {
+    appendLog('WARN', `API 503（隧道未建立）：${req.method} ${req.url}`);
     res.writeHead(503, {'content-type': 'application/json; charset=utf-8'});
     res.end(JSON.stringify({error: 'SSH 隧道未建立'}));
     return;
@@ -631,11 +682,15 @@ function proxyApi(req: http.IncomingMessage, res: http.ServerResponse): void {
       headers: headers as Record<string, string>,
     },
     r => {
+      if ((r.statusCode ?? 0) >= 400) {
+        appendLog('WARN', `API ${r.statusCode}：${req.method} ${req.url}`);
+      }
       res.writeHead(r.statusCode ?? 502, r.headers);
       r.pipe(res);
     },
   );
   upstream.on('error', () => {
+    appendLog('WARN', `API 上游连接失败（隧道端口 ${port}）：${req.method} ${req.url}`);
     if (!res.headersSent) {
       res.writeHead(502, {'content-type': 'application/json; charset=utf-8'});
     }
@@ -652,9 +707,11 @@ function proxyUpgrade(
 ): void {
   const port = tunnelPort;
   if (port == null) {
+    appendLog('WARN', `WS upgrade 被拒（隧道未建立）：${req.url}`);
     socket.destroy();
     return;
   }
+  appendLog('INFO', `WS upgrade：${req.url} → 127.0.0.1:${port}`);
   const upstream = net.connect(port, '127.0.0.1', () => {
     const lines: string[] = [`${req.method} ${req.url} HTTP/1.1`];
     for (const [key, val] of Object.entries(req.headers)) {
@@ -684,7 +741,10 @@ function proxyUpgrade(
     upstream.destroy();
   };
   socket.on('error', destroy);
-  upstream.on('error', destroy);
+  upstream.on('error', err => {
+    appendLog('WARN', `WS 上游连接失败（隧道端口 ${port}）：${err.message}`);
+    destroy();
+  });
   socket.on('close', destroy);
   upstream.on('close', destroy);
 }
@@ -769,10 +829,20 @@ async function startProxyServer(): Promise<number> {
 
 function registerIpc(): void {
   ipcMain.handle('ssh:connect', (_e, cfg: ConnectRequest) => {
+    appendLog(
+      'INFO',
+      `SSH 连接请求：${cfg.username}@${cfg.host}:${cfg.port}（鉴权：${
+        cfg.privateKey ? 'privateKey' : cfg.password ? 'password' : '默认'
+      }）`,
+    );
     const result = sshConnect({
       ...cfg,
       port: typeof cfg.port === 'number' ? cfg.port : 22,
     });
+    void result.then(
+      r => appendLog('INFO', `SSH 连接成功：指纹 ${r.serverFingerprint}`),
+      (err: Error) => appendLog('ERROR', `SSH 连接失败：${err.message}`),
+    );
     // 隧道端口由 openLocalForward 单独登记；disconnect 时清空
     return result;
   });
@@ -788,6 +858,10 @@ function registerIpc(): void {
   ipcMain.handle('ssh:openLocalForward', (_e, remotePort: number) =>
     sshOpenLocalForward(remotePort).then(r => {
       tunnelPort = r.localPort;
+      appendLog(
+        'INFO',
+        `隧道转发建立：127.0.0.1:${r.localPort} → 127.0.0.1:${remotePort}`,
+      );
       return r;
     }),
   );
@@ -795,9 +869,11 @@ function registerIpc(): void {
     if (tunnelPort === localPort) {
       tunnelPort = null;
     }
+    appendLog('INFO', `隧道转发关闭：localPort=${localPort}`);
     return sshCloseLocalForward(localPort);
   });
   ipcMain.handle('ssh:disconnect', () => {
+    appendLog('INFO', 'SSH 主动断开');
     tunnelPort = null;
     return sshDisconnect();
   });
@@ -837,6 +913,15 @@ const MIME_BY_EXT: Record<string, string> = {
 };
 
 function registerDesktopIpc(): void {
+  // 渲染层诊断日志：汇入主进程同一文件，主/渲染层时间线统一
+  ipcMain.handle('desktop:log', (_e, level: string, msg: string) => {
+    appendLog(
+      level === 'ERROR' || level === 'WARN' ? level : 'INFO',
+      String(msg).slice(0, 4000),
+    );
+    return true;
+  });
+
   // 文件/图片选择（渲染层无原生对话框能力）
   ipcMain.handle(
     'desktop:pickFiles',
@@ -1012,6 +1097,33 @@ function createWindow(port: number): void {
       mainWindow = null;
     }
   });
+  // 诊断埋点：窗口状态时间线（对齐用户感知的「最小化/恢复/遮挡」时刻）
+  win.on('minimize', () => appendLog('INFO', '窗口最小化'));
+  win.on('restore', () => appendLog('INFO', '窗口还原'));
+  win.on('show', () => appendLog('INFO', '窗口显示'));
+  win.on('hide', () => appendLog('INFO', '窗口隐藏'));
+  win.on('focus', () => appendLog('INFO', '窗口获得焦点'));
+  win.on('blur', () => appendLog('INFO', '窗口失去焦点'));
+  win.webContents.on('render-process-gone', (_e, details) => {
+    appendLog(
+      'ERROR',
+      `渲染进程终止：reason=${details.reason} exitCode=${details.exitCode}`,
+    );
+  });
+  win.webContents.on('unresponsive', () => {
+    appendLog('ERROR', '渲染进程无响应（unresponsive）');
+  });
+  win.webContents.on('responsive', () => {
+    appendLog('INFO', '渲染进程恢复响应（responsive）');
+  });
+  win.webContents.on('did-fail-load', (_e, code, desc, url, isMain) => {
+    if (isMain) {
+      appendLog('ERROR', `页面加载失败：code=${code} ${desc} ${url}`);
+    }
+  });
+  win.webContents.on('did-finish-load', () => {
+    appendLog('INFO', '页面加载完成');
+  });
   // 安全兜底：禁止 renderer 打开新窗口
   win.webContents.setWindowOpenHandler(() => ({action: 'deny'}));
   win.loadURL(`http://127.0.0.1:${port}/`).catch(() => {
@@ -1034,6 +1146,12 @@ if (!gotLock) {
   });
 
   app.whenReady().then(async () => {
+    initDiagnosticLog();
+    appendLog(
+      'INFO',
+      `应用启动：app ${app.getVersion()} electron ${process.versions.electron} ` +
+        `node ${process.versions.node} platform=${process.platform}`,
+    );
     setupMenu();
     registerIpc();
     registerDesktopIpc();
@@ -1046,7 +1164,17 @@ if (!gotLock) {
       cb(permission === 'media');
     });
     const port = await startProxyServer();
+    appendLog('INFO', `回环代理监听：127.0.0.1:${port}（日志文件：${logFilePath}）`);
     createWindow(port);
+  });
+
+  // 诊断埋点：GPU/Utility 等子进程死亡（GPU 崩溃可致窗口内容停止重绘）
+  app.on('child-process-gone', (_e, details) => {
+    appendLog(
+      'ERROR',
+      `子进程终止：type=${details.type} reason=${details.reason} ` +
+        `exitCode=${details.exitCode}${details.name ? ` name=${details.name}` : ''}`,
+    );
   });
 
   // 单窗口工具：关窗即退出（Windows/Linux/macOS 行为一致，可预期）

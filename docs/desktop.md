@@ -44,6 +44,21 @@
 - 未做：深色模式、托盘、自动更新、safeStorage 加密私钥（私钥仍 localStorage 明文，与手机版策略一致）。
 - 真实 SSH 隧道 GUI 全流程（填配置→连接→聊天）待用户在 Electron/Windows 包验收；自动化验证只覆盖壳启动与代理（不碰 live 服务写操作）。
 
+### 8.6 诊断日志（2026-09-07，白屏排查取证）
+
+为定位「Windows 端窗口后台（最小化/遮挡）几分钟后整窗空白」加装，**零行为变化**（未动 backgroundThrottling、无自愈 reload，定因后再针对性修）。
+
+- **文件**：`userData/logs/main.log`（Windows `%APPDATA%\HermesChat\logs\main.log`，macOS `~/Library/Application Support/HermesChat/logs/main.log`），本地时间戳 + 级别，超 1MB 轮转 `.old`。渲染层经 IPC `desktop:log`（preload `log()`）汇入**同一文件**，主/渲染层时间线统一。
+- **主进程埋点**（`desktop/main.ts`）：启动版本/代理端口、窗口 minimize/restore/show/hide/focus/blur、`render-process-gone`、`unresponsive/responsive`、`did-fail-load`/`did-finish-load`（页面是否被重载）、`child-process-gone`（GPU/Utility 全记）、SSH connect 成败/意外断连/forward 开关、代理 WS upgrade 与 /api 非 2xx（静态请求不记）。
+- **渲染层埋点**：`src/utils/webDiagnostics.ts`（仅 Electron 生效，浏览器零开销）——全局 `error`/`unhandledrejection`、`visibilitychange`、30s 心跳（state/vis/focus/ws/JS 堆）；`src/store/connection.ts` 连接状态机迁移（开始连接/就绪/断开原因/重连尝试/回前台重试）；`src/components/ErrorBoundary.tsx`（web 入口包裹 App）把 render 异常从「静默白屏」变成可见错误 + 日志。
+- **四类根因的日志指纹（互斥）**：
+  | 候选根因 | 指纹 |
+  |---|---|
+  | 渲染/GPU 进程死亡 | `render-process-gone` / `child-process-gone`（reason: crashed/oom/killed） |
+  | React render 异常卸载整树 | ErrorBoundary 上报堆栈；复现时窗口显示错误摘要而非纯空白 |
+  | JS 活着但不重绘（节流/合成器） | 无崩溃事件 + 心跳持续（心跳间隔被拉长 = 节流证据） |
+  | 连接断开 | SSH 意外断连 / `ws closed code=` / 代理 5xx 与空白时刻的时间线对齐（注：纯断连应显示橙色重连横幅 + 内容保留，与「整窗空白」不符） |
+
 ## （以下为原设计文档）
 
 ## 1. 核心判断
