@@ -29,6 +29,13 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      // RN 内部库（react-native-web vendored Animated/PerformanceLogger 等）
+      // 引用 Node 的裸 global（如 global.cancelAnimationFrame），浏览器/Electron
+      // 渲染层没有该变量——动画 stop 时抛 ReferenceError 致整树崩溃。
+      // 必须在模块脚本前执行（inline 经典脚本先于 type=module 运行）。
+      window.global = window;
+    </script>
     <script type="module" src="./index.web.js"></script>
   </body>
 </html>
