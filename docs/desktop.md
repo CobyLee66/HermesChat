@@ -75,12 +75,12 @@
 
 桌面/web 端助手气泡的复制**不走**手机端的长按弹窗（`ChatPane` 不传 `onSelectText` 是刻意设计），而是双入口（`src/components/MarkdownText.web.tsx`，浏览器与 Electron 共用）：
 
-1. **拖选即源码**：拖选气泡内渲染文本 → Cmd/Ctrl+C → 剪贴板得到所选范围的 Markdown 源码。实现：markdown-it 块级 token 的 `map`（文档级源行号）注入 `data-md-map` 属性（`src/utils/mdSourceMap.ts`），document 级单例 `copy` 监听（copy 事件派发到 activeElement 不冒泡经气泡容器，必须注册表模式）按「选区覆盖块的行范围并集」切源码替换剪贴板。**粒度是块级**（不会复制出半截表格/列表）；跨消息选择/输入框等可编辑元素不干预（浏览器默认行为）。
+1. **拖选即源码**：拖选气泡内渲染文本 → Cmd/Ctrl+C → 剪贴板得到所选范围的 Markdown 源码。实现：markdown-it 块级 token 的 `map`（文档级源行号）注入 `data-md-map` 属性（`src/utils/mdSourceMap.ts`），document 级单例 `copy` 监听（copy 事件派发到 activeElement 不冒泡经气泡容器，必须注册表模式）按「选区覆盖块的行范围并集」切源码替换剪贴板。**粒度是块级**（不会复制出半截表格/列表）；跨消息选择/输入框等可编辑元素不干预（浏览器默认行为）。**前提：web 端 assistant 气泡不包 TouchableOpacity**（`Bubble.tsx` 的 `Platform.OS === 'web'` 分支）——RNW 可点击容器渲染 `cursor:pointer` 且阻止 mousedown 启动文字选择（Windows 实测拖不出选区后修复）；真实拖选路径必须用真实鼠标事件测试，程序化 Selection API 会绕过该层。
 2. **右键菜单**：气泡右键 →「复制 Markdown」（整条源码）/「复制纯文本」（渲染后文本）。原生 `contextmenu` 监听（React 合成事件不派发，§见 SessionListPanel 先例），`navigator.clipboard.writeText`。
 
 **剪贴板权限（存量 bug 修复）**：`desktop/main.ts` 的 `setPermissionRequestHandler` 原本只放行 `media`，renderer 的 `navigator.clipboard.writeText` 被全拒——右键「复制会话标题」在 Electron 桌面一直静默失败（catch 吞掉）。现放行 `clipboard-read` / `clipboard-sanitized-write`，其余权限策略不变。
 
-验证：jest 196（mdSourceMap 12 例）；web + 真实 Electron 直连 live 9119 只读实测（拖选标题块得 `## …` 源码、全选拖选 ≡ 右键整条源码 914 字交叉验证、纯文本无 # 语法、输入框复制不受拦截），脚本 `scripts/web-md-copy-smoke.js`、`scripts/desktop-md-copy-smoke.js`。手机端等价能力：长按弹层加「复制全部」按钮（`clipboard.ts`/`clipboard.native.ts` 平台变体，RN 0.87 核心已无 Clipboard，用 `@react-native-clipboard/clipboard`）。
+验证：jest 196（mdSourceMap 12 例）；web + 真实 Electron 直连 live 9119 只读实测（拖选标题块得 `## …` 源码、**真实鼠标拖选** 5 字 → Cmd+C 得 `## 📦 清理结果`、全选拖选 ≡ 右键整条源码 914 字交叉验证、纯文本无 # 语法、输入框复制不受拦截），脚本 `scripts/web-md-copy-smoke.js`、`scripts/desktop-md-copy-smoke.js`。手机端等价能力：长按弹层加「复制全部」按钮（`clipboard.ts`/`clipboard.native.ts` 平台变体，RN 0.87 核心已无 Clipboard，用 `@react-native-clipboard/clipboard`），真机已验证。
 
 ## （以下为原设计文档）
 

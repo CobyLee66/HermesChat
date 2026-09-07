@@ -1,5 +1,5 @@
 import React from 'react';
-import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import {Platform, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 
 import {MarkdownText} from './MarkdownText';
 import {Colors} from './theme';
@@ -38,6 +38,22 @@ export function Bubble({text, isUser, onSelectText}: Props) {
     );
   }
 
+  // web/桌面端不包 TouchableOpacity：RNW 的可点击容器渲染 cursor:pointer 且
+  // 阻止鼠标拖选启动文字选择（实测选区为空）——桌面的复制入口是拖选复制
+  // 源码 + 右键菜单（见 MarkdownText.web.tsx），不需要长按；手机端保留。
+  if (Platform.OS === 'web') {
+    return (
+      <View style={[styles.row, styles.rowLeft]}>
+        <View style={[styles.touchable, styles.webSelect]}>
+          <View style={[styles.bubble, styles.assistant]}>
+            <View style={[styles.arrow, styles.arrowAssistant]} />
+            <MarkdownText text={text} />
+          </View>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.row, styles.rowLeft]}>
       <TouchableOpacity
@@ -69,6 +85,9 @@ const styles = StyleSheet.create({
   // 内容超宽会把气泡撑出屏幕;允许收缩后回到容器宽(原生 Yoga 本就按可用宽度
   // 测量文本,无溢出压力时收缩不触发,行为不变)
   touchable: {flexShrink: 1},
+  /** web 端替代 TouchableOpacity 容器：光标交给浏览器按内容决定（文本上
+   *  为 I-beam；RN 类型只允许 'auto'|'pointer'，原生端忽略该属性） */
+  webSelect: {cursor: 'auto'},
   bubble: {
     // 横向占满可用宽度（外层 12px 边距保留），不因对话者在一侧留白
     maxWidth: '100%',

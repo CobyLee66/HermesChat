@@ -130,6 +130,48 @@ async function main() {
   }
   console.log('PASS 1: 拖选标题块 → Cmd+C 得到以 # 开头的 Markdown 源码');
 
+  // 3b. 真实鼠标拖选标题块部分文字 → Cmd+C → 源码（程序化 Selection 会绕过
+  //     RNW Touchable 对拖选的阻止，必须补真实鼠标路径）
+  await page.evaluate(() => window.getSelection().removeAllRanges());
+  const vh = await page.evaluate(() => {
+    for (const t of ['h1', 'h2', 'h3']) {
+      const el = document.querySelector(`.hm-md ${t}`);
+      if (el) {
+        const r = el.getBoundingClientRect();
+        if (r.y >= 0 && r.y + r.height <= window.innerHeight) {
+          return {x: r.x, y: r.y, w: r.width, h: r.height};
+        }
+      }
+    }
+    return null;
+  });
+  if (vh) {
+    await page.mouse.move(vh.x + 10, vh.y + vh.h / 2);
+    await page.mouse.down();
+    await page.mouse.move(vh.x + Math.min(60, vh.w - 5), vh.y + vh.h / 2, {
+      steps: 6,
+    });
+    await page.mouse.up();
+    const dragSelLen = await page.evaluate(
+      () => String(window.getSelection()).length,
+    );
+    if (dragSelLen === 0) {
+      throw new Error('真实鼠标拖选未产生选区（RNW Touchable 阻止拖选回归？）');
+    }
+    await page.keyboard.press('ControlOrMeta+c');
+    const dragCopied = await readClip();
+    if (!/^#{1,6} /.test(dragCopied)) {
+      throw new Error(
+        `真实拖选复制未得到 # 源码: ${JSON.stringify(dragCopied.slice(0, 60))}`,
+      );
+    }
+    console.log(
+      `PASS 1b: 真实鼠标拖选（${dragSelLen} 字）→ Cmd+C 得到 ${JSON.stringify(dragCopied.slice(0, 24))}…`,
+    );
+  } else {
+    console.log('SKIP 1b: 视口内无标题块');
+  }
+
   // 4. 右键「复制 Markdown」→ 整条源码
   await page.evaluate(() => window.getSelection().removeAllRanges());
   const box = await page.locator('.hm-md').first().boundingBox();
