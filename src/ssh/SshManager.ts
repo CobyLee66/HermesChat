@@ -51,7 +51,7 @@ export class SshManager implements Connector {
    */
   readonly execRemote?: ExecRemoteFn;
 
-  /** onForeground：App 回前台时调用（connection store 用来立即重试）。 */
+  /** onForeground：App 回前台时调用（connection store 用来立即重试/探活）。 */
   constructor(opts?: {
     onForeground?: () => void;
     transportFactory?: TransportFactory;
@@ -183,10 +183,11 @@ export function initConnectionEngine(): void {
     require('../store/connection') as typeof import('../store/connection');
   const conn = useConnectionStore.getState();
   if (!conn.connector) {
-    conn.setConnector(
-      getSshManager({
-        onForeground: () => useConnectionStore.getState().retryNow(),
-      }),
-    );
+      conn.setConnector(
+        getSshManager({
+          onForeground: () =>
+            useConnectionStore.getState().handleForeground(),
+        }),
+      );
   }
 }

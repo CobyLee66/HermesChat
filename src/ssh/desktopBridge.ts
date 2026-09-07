@@ -78,7 +78,7 @@ export function initDesktopEngine(): void {
     conn.setConnector(
       new SshManager({
         transportFactory: desktopTransportFactory,
-        onForeground: () => useConnectionStore.getState().retryNow(),
+        onForeground: () => useConnectionStore.getState().handleForeground(),
       }),
     );
   }

@@ -309,4 +309,69 @@ describe('connection 状态机', () => {
     expect(connector.connectCalls).toBe(2); // 只重试一次
     expect(useConnectionStore.getState().state).toBe('ready');
   });
+
+  describe('健康探活看门狗（D028 僵尸连接兜底）', () => {
+    const originalFetch = (globalThis as {fetch?: unknown}).fetch;
+    let fetchMock: jest.Mock;
+
+    beforeEach(() => {
+      fetchMock = jest.fn();
+      (globalThis as {fetch?: unknown}).fetch = fetchMock;
+    });
+
+    afterEach(() => {
+      (globalThis as {fetch?: unknown}).fetch = originalFetch;
+    });
+
+    async function connectReady() {
+      const connector = makeConnector({});
+      useConnectionStore.getState().setConnector(connector);
+      const p = seedProfile();
+      await useConnectionStore.getState().connect(p.id);
+      expect(useConnectionStore.getState().state).toBe('ready');
+      return connector;
+    }
+
+    it('周期探活：单次失败不判定，连续 2 次失败触发重连', async () => {
+      const connector = await connectReady();
+
+      // 第 1 次探活失败：不误杀
+      fetchMock.mockResolvedValueOnce({ok: false});
+      await jest.advanceTimersByTimeAsync(30_000);
+      expect(useConnectionStore.getState().state).toBe('ready');
+      expect(connector.connectCalls).toBe(1);
+
+      // 第 2 次失败：判定断线 → reconnecting（30s 超时 + 1s 后重试成功）
+      fetchMock.mockResolvedValueOnce({ok: false});
+      await jest.advanceTimersByTimeAsync(30_000);
+      expect(useConnectionStore.getState().state).toBe('reconnecting');
+      await jest.advanceTimersByTimeAsync(1000);
+      expect(useConnectionStore.getState().state).toBe('ready');
+      expect(connector.connectCalls).toBe(2);
+
+      // 恢复后探活成功不触发
+      fetchMock.mockResolvedValueOnce({ok: true});
+      await jest.advanceTimersByTimeAsync(30_000);
+      expect(useConnectionStore.getState().state).toBe('ready');
+      expect(connector.connectCalls).toBe(2);
+    });
+
+    it('handleForeground：ready 时探活失败立即触发重连；reconnecting 时等价 retryNow', async () => {
+      const connector = await connectReady();
+
+      fetchMock.mockResolvedValueOnce({ok: false});
+      useConnectionStore.getState().handleForeground();
+      await jest.advanceTimersByTimeAsync(0);
+      expect(useConnectionStore.getState().state).toBe('reconnecting');
+      await jest.advanceTimersByTimeAsync(1000);
+      expect(useConnectionStore.getState().state).toBe('ready');
+
+      // reconnecting 态回前台 = retryNow（立即重试，不探活）
+      useConnectionStore.getState().handleDrop('drop');
+      useConnectionStore.getState().handleForeground();
+      await jest.advanceTimersByTimeAsync(1000);
+      expect(useConnectionStore.getState().state).toBe('ready');
+      expect(fetchMock).toHaveBeenCalledTimes(1); // 第二次前台未发探活
+    });
+  });
 });

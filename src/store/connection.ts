@@ -120,6 +120,8 @@ interface ConnectionStore {
   handleDrop(reason: string): void;
   /** 回前台等场景：立即重试（重置退避计数）。 */
   retryNow(): void;
+  /** 回前台：reconnecting 则立即重试；ready 则先探活（App Nap 僵尸连接兜底）。 */
+  handleForeground(): void;
   /** 等待连接就绪（重连中先立即触发一次重试）；已断开或超时则抛错。 */
   waitReady(timeoutMs?: number): Promise<void>;
 }
@@ -131,6 +133,72 @@ function clearReconnectTimer() {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
+}
+
+// ─── 僵尸连接探活（D028） ────────────────────────────────────────
+// 背景（2026-09-07 Mac 日志定因）：macOS App Nap 冻结整个 app 期间远端掐断
+// 连接，回前台后 state 仍是 ready（假活），点击的 RPC 全部掉进死管道且无横幅。
+// /api/health 走与 WS 相同的隧道，超时/失败即隧道已死——主动探测兜底。
+
+const HEALTH_INTERVAL_MS = 30_000;
+const HEALTH_TIMEOUT_MS = 10_000;
+/** 周期探活连续失败达到该次数才判定断线（单次抖动不误杀）；回前台探活单次即判 */
+const HEALTH_FAIL_STREAK = 2;
+
+let healthTimer: ReturnType<typeof setInterval> | null = null;
+let healthFailCount = 0;
+let healthProbeBusy = false;
+
+function clearHealthTimer() {
+  if (healthTimer !== null) {
+    clearInterval(healthTimer);
+    healthTimer = null;
+  }
+  healthFailCount = 0;
+  healthProbeBusy = false;
+}
+
+/** 探测隧道活性；true=健康。无 httpUrl（未连接）时不判定。 */
+async function probeHealthOnce(): Promise<boolean> {
+  const httpUrl = useConnectionStore.getState().httpUrl;
+  if (!httpUrl) {
+    return true;
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), HEALTH_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${httpUrl}/api/health`, {
+      signal: controller.signal,
+    });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** 仅在 ready 状态运行；reconnecting 后由退避重连接管（重连本身就是探测）。 */
+function startHealthWatchdog(get: () => ConnectionStore) {
+  clearHealthTimer();
+  healthTimer = setInterval(() => {
+    if (healthProbeBusy || get().state !== 'ready') {
+      return;
+    }
+    healthProbeBusy = true;
+    probeHealthOnce().then(ok => {
+      healthProbeBusy = false;
+      if (ok) {
+        healthFailCount = 0;
+        return;
+      }
+      healthFailCount += 1;
+      dlog('WARN', `周期探活失败（${healthFailCount}/${HEALTH_FAIL_STREAK}）`);
+      if (healthFailCount >= HEALTH_FAIL_STREAK && get().state === 'ready') {
+        get().handleDrop('健康探活连续失败：隧道无响应');
+      }
+    });
+  }, HEALTH_INTERVAL_MS);
 }
 
 /** 连接成功后的事件总线接线：session 事件 → chat store，全局事件 → sessions store。 */
@@ -183,6 +251,7 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => {
       reconnectAttempt: 0,
     });
     dlog('INFO', '连接就绪（隧道 + WS 建立）');
+    startHealthWatchdog(get);
     // 引导数据（失败不阻塞 ready）
     useSessionsStore.getState().markStale();
     return true;
@@ -316,6 +385,7 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => {
 
     async disconnect() {
       clearReconnectTimer();
+      clearHealthTimer();
       dlog('INFO', '主动断开');
       const connector = get().connector;
       set({state: 'disconnected', error: null, reconnectAttempt: 0});
@@ -336,6 +406,7 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => {
         return;
       }
       dlog('WARN', `连接断开：${reason}`);
+      clearHealthTimer(); // 探测交给重连循环本身
       setRpc(null);
       setExecRemote(null);
       set({state: 'reconnecting', error: reason, reconnectAttempt: 0});
@@ -349,6 +420,23 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => {
       dlog('INFO', '回前台/请求触发：立即重连');
       set({reconnectAttempt: 0});
       scheduleReconnect();
+    },
+
+    handleForeground() {
+      if (get().state === 'reconnecting') {
+        get().retryNow();
+        return;
+      }
+      if (get().state !== 'ready') {
+        return;
+      }
+      // ready 也可能已是僵尸（App Nap 冻结期间被远端掐断、状态机无感知）
+      probeHealthOnce().then(ok => {
+        if (!ok && get().state === 'ready') {
+          dlog('WARN', '回前台探活失败：连接已成僵尸，触发重连');
+          get().handleDrop('回前台探活失败：隧道无响应');
+        }
+      });
     },
 
     async waitReady(timeoutMs = 15000) {
@@ -377,4 +465,5 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => {
 /** 测试辅助：复位模块级定时器。 */
 export function _resetConnectionTimers() {
   clearReconnectTimer();
+  clearHealthTimer();
 }

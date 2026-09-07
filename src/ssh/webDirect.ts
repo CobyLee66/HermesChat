@@ -83,7 +83,7 @@ export function initWebDirectEngine(): void {
     conn.setConnector(
       new SshManager({
         transportFactory: webDirectTransportFactory,
-        onForeground: () => useConnectionStore.getState().retryNow(),
+        onForeground: () => useConnectionStore.getState().handleForeground(),
       }),
     );
   }

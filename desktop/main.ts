@@ -21,6 +21,7 @@ import {
   ipcMain,
   Menu,
   Notification,
+  powerSaveBlocker,
   session,
   type MenuItemConstructorOptions,
 } from 'electron';
@@ -839,7 +840,7 @@ function registerIpc(): void {
       ...cfg,
       port: typeof cfg.port === 'number' ? cfg.port : 22,
     });
-    void result.then(
+    result.then(
       r => appendLog('INFO', `SSH 连接成功：指纹 ${r.serverFingerprint}`),
       (err: Error) => appendLog('ERROR', `SSH 连接失败：${err.message}`),
     );
@@ -1088,6 +1089,8 @@ function createWindow(port: number): void {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // 本 app 是常驻连接客户端：后台时重连退避/探活/心跳/RPC 超时都要全速运行
+      backgroundThrottling: false,
     },
   });
   mainWindow = win;
@@ -1152,6 +1155,11 @@ if (!gotLock) {
       `应用启动：app ${app.getVersion()} electron ${process.versions.electron} ` +
         `node ${process.versions.node} platform=${process.platform}`,
     );
+    // 防 macOS App Nap / Windows 挂起把整个 app（含 SSH keepalive 与重连定时器）
+    // 冻结——已实测冻结期间远端掐断连接、回前台后变成僵尸窗口（2026-09-07 日志）。
+    // 常驻聊天客户端（后台还要发回复通知）明确不参与挂起，见 DECISIONS.md D028。
+    const blockerId = powerSaveBlocker.start('prevent-app-suspension');
+    appendLog('INFO', `powerSaveBlocker 启动（防系统挂起）：id=${blockerId}`);
     setupMenu();
     registerIpc();
     registerDesktopIpc();
