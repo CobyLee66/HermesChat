@@ -41,6 +41,7 @@ export function ConnectionHomeScreen() {
     error,
     connect,
     removeProfile,
+    setAutoProfile,
     loadPersisted,
   } = useConnectionStore();
 
@@ -130,6 +131,30 @@ export function ConnectionHomeScreen() {
                 <ActivityIndicator color={Colors.accent} />
               ) : (
                 <View style={styles.cardActions}>
+                  <TouchableOpacity
+                    style={styles.autoBtn}
+                    disabled={connecting}
+                    onPress={() =>
+                      setAutoProfile(p.id === autoProfileId ? null : p.id)
+                    }
+                    activeOpacity={0.7}>
+                    <View
+                      style={[
+                        styles.radioCircle,
+                        p.id === autoProfileId && styles.radioCircleOn,
+                      ]}>
+                      {p.id === autoProfileId ? (
+                        <View style={styles.radioDot} />
+                      ) : null}
+                    </View>
+                    <Text
+                      style={[
+                        styles.autoBtnText,
+                        p.id === autoProfileId && styles.autoBtnTextOn,
+                      ]}>
+                      自动连接
+                    </Text>
+                  </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.actionBtn}
                     onPress={() =>
@@ -249,6 +274,21 @@ const styles = StyleSheet.create({
   },
   cardAddr: {fontSize: 13, color: Colors.textSecondary, marginTop: 3},
   cardActions: {flexDirection: 'row', alignItems: 'center', marginLeft: 10},
+  autoBtn: {flexDirection: 'row', alignItems: 'center', paddingRight: 2},
+  radioCircle: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: Colors.border,
+    backgroundColor: Colors.card,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioCircleOn: {borderColor: Colors.accent},
+  radioDot: {width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.accent},
+  autoBtnText: {fontSize: 12, color: Colors.textSecondary, marginLeft: 5},
+  autoBtnTextOn: {color: Colors.accentDark, fontWeight: '600'},
   actionBtn: {paddingHorizontal: 6, paddingVertical: 4},
   editText: {fontSize: 14, color: Colors.accent},
   deleteText: {fontSize: 16},

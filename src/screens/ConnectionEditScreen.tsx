@@ -3,7 +3,6 @@ import {
   Platform,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -49,11 +48,9 @@ export function ConnectionEditScreen() {
   const profileId = route.params?.profileId;
   const {
     profiles,
-    autoProfileId,
     state,
     addProfile,
     updateProfile,
-    setAutoProfile,
   } = useConnectionStore();
 
   const existing = profileId
@@ -61,9 +58,6 @@ export function ConnectionEditScreen() {
     : undefined;
   const [form, setForm] = useState<ProfileForm>(() =>
     existing ? {...existing} : {...EMPTY_PROFILE},
-  );
-  const [auto, setAuto] = useState(
-    existing ? autoProfileId === existing.id : false,
   );
 
   const patch = (p: Partial<ProfileForm>) => setForm(f => ({...f, ...p}));
@@ -139,12 +133,6 @@ export function ConnectionEditScreen() {
       updateProfile(id, data);
     } else {
       id = addProfile(data).id;
-    }
-    // 自动连接全局唯一：开 = 顶替旧配置；关 = 若自己正是自动项则清除
-    if (auto) {
-      setAutoProfile(id);
-    } else if (autoProfileId === id) {
-      setAutoProfile(null);
     }
     navigation.goBack();
   };
@@ -313,16 +301,6 @@ export function ConnectionEditScreen() {
             ) : null}
           </>
         )}
-
-        <View style={styles.rowBetween}>
-          <Text style={styles.label}>打开应用后自动连接</Text>
-          <Switch
-            value={auto}
-            onValueChange={setAuto}
-            trackColor={{true: Colors.accent}}
-          />
-        </View>
-        <Text style={styles.hint}>自动连接全局仅一个，开启后会替换原有配置</Text>
 
         <TouchableOpacity
           style={styles.button}
