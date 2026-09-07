@@ -3,9 +3,10 @@
  *
  * 职责：
  * 1. BrowserWindow：加载本进程回环服务（renderer 与 /api 同源，无 CORS）。
- * 2. 回环 HTTP/WS 服务：静态 dist-web + /api 反代到 SSH 隧道本地端口，
- *    Host/Origin 重写策略对齐 vite.config.ts 已验证的 hermes DNS-rebinding
- *    防护绕过方案（web_server 对 WS upgrade 校验 Host/Origin）。
+ * 2. 回环 HTTP/WS 服务：静态 dist-web + /api 反代到代理上游（SSH 隧道
+ *    本地端口，或直连模式的 gateway 地址），Host/Origin 重写策略对齐
+ *    vite.config.ts 已验证的 hermes DNS-rebinding 防护绕过方案（web_server
+ *    对 WS upgrade 校验 Host/Origin）。
  * 3. SSH 隧道（ssh2 实现）：与 docs/ssh-module.md §2/§6 契约同构——
  *    错误码、keepalive 15s×3、exec 8MiB 上限、stopCommand/closeLocalForward/
  *    disconnect 幂等、被杀 task exit=-1 且每 task 恰好一次、HostKey accept-new。
@@ -600,10 +601,14 @@ function sshDisconnect(): Promise<void> {
   return Promise.resolve();
 }
 
-// ─── 回环代理（静态 dist-web + /api → 隧道端口） ─────────────────
+// ─── 回环代理（静态 dist-web + /api → 上游 gateway） ───────────────
 
-/** 当前 SSH 隧道本地端口（openLocalForward 成功后更新，disconnect 后清空） */
-let tunnelPort: number | null = null;
+/**
+ * 代理上游：SSH 隧道模式下是隧道本地端口（openLocalForward 登记），
+ * 直连模式下是 gateway 地址本身（desktop:directConnect 登记）。共用一个
+ * 槽位——同一时刻只有一条连接。
+ */
+let proxyUpstream: {host: string; port: number} | null = null;
 
 const STATIC_ROOT = path.join(app.getAppPath(), 'dist-web');
 
@@ -662,22 +667,22 @@ function serveStatic(req: http.IncomingMessage, res: http.ServerResponse): void 
   });
 }
 
-/** /api 反代：Host/Origin 重写为隧道端口（绕过 web_server DNS-rebinding 防护）。 */
+/** /api 反代：Host/Origin 重写为上游地址（绕过 web_server DNS-rebinding 防护）。 */
 function proxyApi(req: http.IncomingMessage, res: http.ServerResponse): void {
-  const port = tunnelPort;
-  if (port == null) {
-    appendLog('WARN', `API 503（隧道未建立）：${req.method} ${req.url}`);
+  const upstreamAddr = proxyUpstream;
+  if (!upstreamAddr) {
+    appendLog('WARN', `API 503（代理上游未建立）：${req.method} ${req.url}`);
     res.writeHead(503, {'content-type': 'application/json; charset=utf-8'});
-    res.end(JSON.stringify({error: 'SSH 隧道未建立'}));
+    res.end(JSON.stringify({error: '连接未建立（SSH 隧道未建立或直连未配置）'}));
     return;
   }
   const headers: Record<string, string | string[] | undefined> = {...req.headers};
-  headers.host = `127.0.0.1:${port}`;
-  headers.origin = `http://127.0.0.1:${port}`;
+  headers.host = `${upstreamAddr.host}:${upstreamAddr.port}`;
+  headers.origin = `http://${upstreamAddr.host}:${upstreamAddr.port}`;
   const upstream = http.request(
     {
-      host: '127.0.0.1',
-      port,
+      host: upstreamAddr.host,
+      port: upstreamAddr.port,
       path: req.url,
       method: req.method,
       headers: headers as Record<string, string>,
@@ -691,11 +696,14 @@ function proxyApi(req: http.IncomingMessage, res: http.ServerResponse): void {
     },
   );
   upstream.on('error', () => {
-    appendLog('WARN', `API 上游连接失败（隧道端口 ${port}）：${req.method} ${req.url}`);
+    appendLog(
+      'WARN',
+      `API 上游连接失败（${upstreamAddr.host}:${upstreamAddr.port}）：${req.method} ${req.url}`,
+    );
     if (!res.headersSent) {
       res.writeHead(502, {'content-type': 'application/json; charset=utf-8'});
     }
-    res.end(JSON.stringify({error: '隧道连接失败'}));
+    res.end(JSON.stringify({error: '上游连接失败'}));
   });
   req.pipe(upstream);
 }
@@ -706,14 +714,14 @@ function proxyUpgrade(
   socket: net.Socket,
   head: Buffer,
 ): void {
-  const port = tunnelPort;
-  if (port == null) {
-    appendLog('WARN', `WS upgrade 被拒（隧道未建立）：${req.url}`);
+  const addr = proxyUpstream;
+  if (!addr) {
+    appendLog('WARN', `WS upgrade 被拒（代理上游未建立）：${req.url}`);
     socket.destroy();
     return;
   }
-  appendLog('INFO', `WS upgrade：${req.url} → 127.0.0.1:${port}`);
-  const upstream = net.connect(port, '127.0.0.1', () => {
+  appendLog('INFO', `WS upgrade：${req.url} → ${addr.host}:${addr.port}`);
+  const upstream = net.connect(addr.port, addr.host, () => {
     const lines: string[] = [`${req.method} ${req.url} HTTP/1.1`];
     for (const [key, val] of Object.entries(req.headers)) {
       const lower = key.toLowerCase();
@@ -728,8 +736,8 @@ function proxyUpgrade(
         lines.push(`${key}: ${val}`);
       }
     }
-    lines.push(`Host: 127.0.0.1:${port}`);
-    lines.push(`Origin: http://127.0.0.1:${port}`);
+    lines.push(`Host: ${addr.host}:${addr.port}`);
+    lines.push(`Origin: http://${addr.host}:${addr.port}`);
     upstream.write(lines.join('\r\n') + '\r\n\r\n');
     if (head.length > 0) {
       upstream.write(head);
@@ -743,7 +751,10 @@ function proxyUpgrade(
   };
   socket.on('error', destroy);
   upstream.on('error', err => {
-    appendLog('WARN', `WS 上游连接失败（隧道端口 ${port}）：${err.message}`);
+    appendLog(
+      'WARN',
+      `WS 上游连接失败（${addr.host}:${addr.port}）：${err.message}`,
+    );
     destroy();
   });
   socket.on('close', destroy);
@@ -858,7 +869,7 @@ function registerIpc(): void {
   );
   ipcMain.handle('ssh:openLocalForward', (_e, remotePort: number) =>
     sshOpenLocalForward(remotePort).then(r => {
-      tunnelPort = r.localPort;
+      proxyUpstream = {host: '127.0.0.1', port: r.localPort};
       appendLog(
         'INFO',
         `隧道转发建立：127.0.0.1:${r.localPort} → 127.0.0.1:${remotePort}`,
@@ -867,16 +878,85 @@ function registerIpc(): void {
     }),
   );
   ipcMain.handle('ssh:closeLocalForward', (_e, localPort: number) => {
-    if (tunnelPort === localPort) {
-      tunnelPort = null;
+    if (proxyUpstream?.host === '127.0.0.1' && proxyUpstream.port === localPort) {
+      proxyUpstream = null;
     }
     appendLog('INFO', `隧道转发关闭：localPort=${localPort}`);
     return sshCloseLocalForward(localPort);
   });
   ipcMain.handle('ssh:disconnect', () => {
     appendLog('INFO', 'SSH 主动断开');
-    tunnelPort = null;
+    proxyUpstream = null;
     return sshDisconnect();
+  });
+
+  // ── 直连模式：渲染层与 gateway 跨源（CORS/Host/Origin 防护），连接
+  // 与 token 提取必须在主进程完成；/api 流量仍走回环代理（上游=gateway）。
+  ipcMain.handle(
+    'desktop:directConnect',
+    (_e, cfg: {host?: unknown; port?: unknown; token?: unknown}) => {
+      const host = typeof cfg?.host === 'string' ? cfg.host.trim() : '';
+      const port =
+        typeof cfg?.port === 'number' && Number.isInteger(cfg.port)
+          ? cfg.port
+          : 0;
+      if (!host || port < 1 || port > 65535) {
+        return Promise.reject(new Error('直连地址无效（host:port）'));
+      }
+      const manualToken = typeof cfg?.token === 'string' ? cfg.token.trim() : '';
+      appendLog('INFO', `直连请求：${host}:${port}（token：${manualToken ? '手动' : '自动提取'}）`);
+      const task: Promise<{token: string}> = (async () => {
+        proxyUpstream = {host, port};
+        try {
+          const token = manualToken || (await fetchGatewayToken(host, port));
+          if (!token) {
+            throw new Error('未能从 gateway 首页提取 session token，可在配置中手动填写');
+          }
+          appendLog('INFO', `直连就绪：${host}:${port}`);
+          return {token};
+        } catch (e) {
+          proxyUpstream = null;
+          throw e;
+        }
+      })();
+      task.catch((err: Error) =>
+        appendLog('ERROR', `直连失败：${err.message}`),
+      );
+      return task;
+    },
+  );
+  ipcMain.handle('desktop:directDisconnect', () => {
+    appendLog('INFO', '直连断开');
+    proxyUpstream = null;
+    return true;
+  });
+}
+
+/** GET gateway 首页 SPA HTML 提取 __HERMES_SESSION_TOKEN__（与渲染层 extractToken 同一正则）。 */
+function fetchGatewayToken(
+  host: string,
+  port: number,
+  timeoutMs = 10_000,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const req = http.get(
+      {host, port, path: '/', headers: {host: `${host}:${port}`}},
+      res => {
+        let data = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk: string) => {
+          data += chunk;
+        });
+        res.on('end', () => {
+          const m = data.match(/__HERMES_SESSION_TOKEN__="([^"]+)"/);
+          resolve(m ? m[1] : '');
+        });
+      },
+    );
+    req.setTimeout(timeoutMs, () =>
+      req.destroy(new Error(`连接 gateway 超时（${timeoutMs}ms）`)),
+    );
+    req.on('error', err => reject(err));
   });
 }
 

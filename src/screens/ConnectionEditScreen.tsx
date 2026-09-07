@@ -1,5 +1,6 @@
 import React, {useEffect, useState} from 'react';
 import {
+  Platform,
   ScrollView,
   StyleSheet,
   Switch,
@@ -27,6 +28,7 @@ import {
   EMPTY_PROFILE,
   useConnectionStore,
   type ConnectionProfile,
+  type ConnectionType,
 } from '../store/connection';
 import {Colors} from '../components/theme';
 import {hasDesktopBridge} from '../ssh/desktopHermesSsh';
@@ -65,6 +67,22 @@ export function ConnectionEditScreen() {
   );
 
   const patch = (p: Partial<ProfileForm>) => setForm(f => ({...f, ...p}));
+
+  /** 切换连接类型：直连模式下 host/port 代填 gateway 默认值，SSH 亦然 */
+  const switchType = (t: ConnectionType) => {
+    if (t === form.type) {
+      return;
+    }
+    if (t === 'direct') {
+      patch({
+        type: 'direct',
+        host: form.host.trim() ? form.host : '127.0.0.1',
+        port: !form.port.trim() || form.port === '22' ? '9119' : form.port,
+      });
+    } else {
+      patch({type: 'ssh', port: form.port === '9119' ? '22' : form.port});
+    }
+  };
 
   useEffect(() => {
     if (state === 'ready') {
@@ -144,84 +162,157 @@ export function ConnectionEditScreen() {
           style={styles.input}
           value={form.name}
           onChangeText={v => patch({name: v})}
-          placeholder="例如：公司服务器"
+          placeholder={form.type === 'direct' ? '例如：本机 gateway' : '例如：公司服务器'}
           autoCorrect={false}
         />
 
-        <Text style={styles.label}>SSH 主机</Text>
-        <TextInput
-          style={styles.input}
-          value={form.host}
-          onChangeText={v => patch({host: v})}
-          placeholder="例如 192.168.1.10"
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-        <View style={styles.row}>
-          <View style={styles.flex2}>
+        <Text style={styles.label}>连接类型</Text>
+        <View style={styles.typeRow}>
+          <TouchableOpacity
+            style={[styles.typeBtn, form.type === 'ssh' && styles.typeBtnActive]}
+            onPress={() => switchType('ssh')}
+            activeOpacity={0.8}>
+            <Text
+              style={[
+                styles.typeBtnText,
+                form.type === 'ssh' && styles.typeBtnTextActive,
+              ]}>
+              SSH 隧道
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.typeBtn,
+              form.type === 'direct' && styles.typeBtnActive,
+            ]}
+            onPress={() => switchType('direct')}
+            activeOpacity={0.8}>
+            <Text
+              style={[
+                styles.typeBtnText,
+                form.type === 'direct' && styles.typeBtnTextActive,
+              ]}>
+              直连
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {form.type === 'direct' ? (
+          <>
+            <Text style={styles.label}>Gateway 主机</Text>
+            <TextInput
+              style={styles.input}
+              value={form.host}
+              onChangeText={v => patch({host: v})}
+              placeholder="127.0.0.1"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
             <Text style={styles.label}>端口</Text>
             <TextInput
               style={styles.input}
               value={form.port}
               onChangeText={v => patch({port: v})}
-              placeholder="22"
+              placeholder="9119"
               keyboardType="number-pad"
             />
-          </View>
-          <View style={styles.flex3}>
-            <Text style={styles.label}>用户名</Text>
+            <Text style={styles.label}>Session Token（可选）</Text>
             <TextInput
               style={styles.input}
-              value={form.username}
-              onChangeText={v => patch({username: v})}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-          </View>
-        </View>
-        <Text style={styles.label}>密码</Text>
-        <TextInput
-          style={styles.input}
-          value={form.password}
-          onChangeText={v => patch({password: v})}
-          placeholder="使用私钥时可留空"
-          secureTextEntry
-          autoCapitalize="none"
-        />
-        <View style={styles.rowBetween}>
-          <Text style={styles.label}>私钥（可选，优先于密码）</Text>
-          <TouchableOpacity
-            style={styles.smallButton}
-            onPress={pickKeyFile}
-            activeOpacity={0.8}>
-            <Text style={styles.smallButtonText} numberOfLines={1}>
-              {form.keyFileName ? `已选: ${form.keyFileName}` : '选择密钥文件'}
-            </Text>
-          </TouchableOpacity>
-        </View>
-        <TextInput
-          style={[styles.input, styles.multiline]}
-          value={form.privateKey}
-          onChangeText={v => {
-            patch(v ? {privateKey: v} : {privateKey: '', keyFileName: ''});
-          }}
-          placeholder="粘贴 PEM 内容，或点上方按钮选择文件"
-          multiline
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-        {form.privateKey ? (
-          <>
-            <Text style={styles.label}>私钥口令（可选）</Text>
-            <TextInput
-              style={styles.input}
-              value={form.passphrase}
-              onChangeText={v => patch({passphrase: v})}
+              value={form.token}
+              onChangeText={v => patch({token: v})}
+              placeholder="留空则自动从 gateway 首页提取"
               secureTextEntry
               autoCapitalize="none"
             />
+            <Text style={styles.hint}>
+              需 gateway 已在该地址监听；局域网设备直连需 hermes serve 监听
+              0.0.0.0
+            </Text>
+            {Platform.OS === 'web' && !hasDesktopBridge() ? (
+              <Text style={styles.hint}>
+                浏览器环境受跨源限制，仅支持本机 127.0.0.1:9119（经开发服务器代理）
+              </Text>
+            ) : null}
           </>
-        ) : null}
+        ) : (
+          <>
+            <Text style={styles.label}>SSH 主机</Text>
+            <TextInput
+              style={styles.input}
+              value={form.host}
+              onChangeText={v => patch({host: v})}
+              placeholder="例如 192.168.1.10"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <View style={styles.row}>
+              <View style={styles.flex2}>
+                <Text style={styles.label}>端口</Text>
+                <TextInput
+                  style={styles.input}
+                  value={form.port}
+                  onChangeText={v => patch({port: v})}
+                  placeholder="22"
+                  keyboardType="number-pad"
+                />
+              </View>
+              <View style={styles.flex3}>
+                <Text style={styles.label}>用户名</Text>
+                <TextInput
+                  style={styles.input}
+                  value={form.username}
+                  onChangeText={v => patch({username: v})}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+            </View>
+            <Text style={styles.label}>密码</Text>
+            <TextInput
+              style={styles.input}
+              value={form.password}
+              onChangeText={v => patch({password: v})}
+              placeholder="使用私钥时可留空"
+              secureTextEntry
+              autoCapitalize="none"
+            />
+            <View style={styles.rowBetween}>
+              <Text style={styles.label}>私钥（可选，优先于密码）</Text>
+              <TouchableOpacity
+                style={styles.smallButton}
+                onPress={pickKeyFile}
+                activeOpacity={0.8}>
+                <Text style={styles.smallButtonText} numberOfLines={1}>
+                  {form.keyFileName ? `已选: ${form.keyFileName}` : '选择密钥文件'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            <TextInput
+              style={[styles.input, styles.multiline]}
+              value={form.privateKey}
+              onChangeText={v => {
+                patch(v ? {privateKey: v} : {privateKey: '', keyFileName: ''});
+              }}
+              placeholder="粘贴 PEM 内容，或点上方按钮选择文件"
+              multiline
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            {form.privateKey ? (
+              <>
+                <Text style={styles.label}>私钥口令（可选）</Text>
+                <TextInput
+                  style={styles.input}
+                  value={form.passphrase}
+                  onChangeText={v => patch({passphrase: v})}
+                  secureTextEntry
+                  autoCapitalize="none"
+                />
+              </>
+            ) : null}
+          </>
+        )}
 
         <View style={styles.rowBetween}>
           <Text style={styles.label}>打开应用后自动连接</Text>
@@ -261,6 +352,19 @@ const styles = StyleSheet.create({
   },
   multiline: {minHeight: 80, textAlignVertical: 'top'},
   row: {flexDirection: 'row', gap: 12},
+  typeRow: {flexDirection: 'row', gap: 8, marginBottom: 16},
+  typeBtn: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.card,
+    alignItems: 'center',
+  },
+  typeBtnActive: {borderColor: Colors.accent, borderWidth: 2},
+  typeBtnText: {fontSize: 14, color: Colors.textSecondary},
+  typeBtnTextActive: {color: Colors.accentDark, fontWeight: '600'},
   rowBetween: {
     flexDirection: 'row',
     alignItems: 'center',

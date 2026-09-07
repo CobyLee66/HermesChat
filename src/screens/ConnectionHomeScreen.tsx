@@ -110,12 +110,20 @@ export function ConnectionHomeScreen() {
               <View style={styles.cardBody}>
                 <View style={styles.cardTop}>
                   <Text style={styles.cardName}>{p.name}</Text>
+                  <Text
+                    style={
+                      p.type === 'direct' ? styles.directTag : styles.sshTag
+                    }>
+                    {p.type === 'direct' ? '直连' : 'SSH'}
+                  </Text>
                   {p.id === autoProfileId ? (
                     <Text style={styles.defaultTag}>默认</Text>
                   ) : null}
                 </View>
                 <Text style={styles.cardAddr}>
-                  {p.username}@{p.host}:{p.port}
+                  {p.type === 'direct'
+                    ? `${p.host}:${p.port}`
+                    : `${p.username}@${p.host}:${p.port}`}
                 </Text>
               </View>
               {connecting && p.id === currentProfileId ? (
@@ -216,6 +224,24 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: Colors.accentDark,
     backgroundColor: '#E8F7FF',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    marginLeft: 8,
+  },
+  sshTag: {
+    fontSize: 10,
+    color: Colors.textSecondary,
+    backgroundColor: Colors.bg,
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    marginLeft: 8,
+  },
+  directTag: {
+    fontSize: 10,
+    color: Colors.diffAddText,
+    backgroundColor: Colors.diffAddBg,
     borderRadius: 4,
     paddingHorizontal: 5,
     paddingVertical: 1,

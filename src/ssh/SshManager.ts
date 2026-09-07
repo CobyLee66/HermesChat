@@ -19,15 +19,23 @@ import type {
   ConnectionProfile,
 } from '../store/connection';
 import {useChatStore} from '../store/chat';
+import {DirectTransport} from './directTransport';
 import type {ExecRemoteFn} from './execRemote';
 import * as HermesSsh from './HermesSsh';
 import {SshTunnelTransport, type Transport} from './transport';
 
-/** transport 工厂：默认 SSH 隧道；web 直连注入 WebDirectTransport（见 ssh/webDirect.ts）。 */
+/** transport 工厂：按配置类型分发（SSH 隧道 / 直连）；web、桌面各自注入变体。 */
 export type TransportFactory = (cfg: ConnectionProfile) => Transport;
 
-const defaultTransportFactory: TransportFactory = cfg =>
-  new SshTunnelTransport({
+export const defaultTransportFactory: TransportFactory = cfg => {
+  if (cfg.type === 'direct') {
+    return new DirectTransport({
+      host: cfg.host,
+      port: parseInt(cfg.port, 10) || 9119,
+      token: cfg.token || undefined,
+    });
+  }
+  return new SshTunnelTransport({
     host: cfg.host,
     port: parseInt(cfg.port, 10) || 22,
     username: cfg.username,
@@ -35,6 +43,7 @@ const defaultTransportFactory: TransportFactory = cfg =>
     privateKey: cfg.privateKey || undefined,
     passphrase: cfg.passphrase || undefined,
   });
+};
 
 export class SshManager implements Connector {
   private transport: Transport | null = null;
@@ -47,9 +56,18 @@ export class SshManager implements Connector {
   private tearingDown = false;
   /**
    * 远端只读 exec（multiplex 归属扫描/历史查询用）。
-   * 仅 SSH 原生模块可用时提供（web 直连的 WebDirectTransport 无隧道层）。
+   * 仅当前连接为 SSH 隧道且原生模块可用时提供——直连配置没有 SSH 会话，
+   * exec 必然失败；调用方（namespaceMap 等）对 undefined 静默降级空映射。
    */
-  readonly execRemote?: ExecRemoteFn;
+  get execRemote(): ExecRemoteFn | undefined {
+    if (!this.sshMode || !HermesSsh.isAvailable) {
+      return undefined;
+    }
+    return (command, timeoutMs) =>
+      HermesSsh.exec(command, timeoutMs ?? HermesSsh.DEFAULT_EXEC_TIMEOUT_MS);
+  }
+  /** 当前连接是否 SSH 隧道（connect 时按配置类型更新） */
+  private sshMode = true;
 
   /** onForeground：App 回前台时调用（connection store 用来立即重试/探活）。 */
   constructor(opts?: {
@@ -58,10 +76,6 @@ export class SshManager implements Connector {
   }) {
     this.foregroundCb = opts?.onForeground ?? null;
     this.transportFactory = opts?.transportFactory ?? defaultTransportFactory;
-    if (HermesSsh.isAvailable) {
-      this.execRemote = (command, timeoutMs) =>
-        HermesSsh.exec(command, timeoutMs ?? HermesSsh.DEFAULT_EXEC_TIMEOUT_MS);
-    }
     this.appStateSub = AppState.addEventListener(
       'change',
       (s: AppStateStatus) => {
@@ -84,6 +98,7 @@ export class SshManager implements Connector {
 
   async connect(cfg: ConnectionProfile): Promise<ConnectResult> {
     this.tearingDown = false;
+    this.sshMode = cfg.type !== 'direct';
     // 先清理旧实例（重连路径）
     await this.teardownTransport();
 

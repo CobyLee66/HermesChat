@@ -16,7 +16,8 @@
   - 事件：`{"jsonrpc":"2.0","method":"event","params":{"type":"<事件名>","session_id":"<sid可选>","payload":{...}}}`
   - 全局广播事件无 session_id（如 `sessions.changed`、`skin.changed`）。
 - 认证（loopback 模式）：`ws://127.0.0.1:9119/api/ws?token=<SESSION_TOKEN>`；REST 用 header `X-Hermes-Session-Token: <token>`。
-- token 获取（优先级）：`HERMES_DASHBOARD_SESSION_TOKEN` 环境变量（启动时注入）> `--ssh-session-token-file <path>` > 随机生成（注入 SPA HTML：`GET /` → 正则 `__HERMES_SESSION_TOKEN__="([^"]+)"`，已实测可用）。
+- token 获取（优先级）：`HERMES_DASHBOARD_SESSION_TOKEN` 环境变量（启动时注入）> `--ssh-session-token-file <path>` > 随机生成（注入 SPA HTML：`GET /` → 正则 `__HERMES_SESSION_TOKEN__="([^"]+)"`，已实测可用）。App 侧「直连」配置类型（2026-09-08）用同一提取机制：`GET http://<host>:<port>/` 抓 SPA HTML（浏览器/桌面渲染层因跨源限制需经 vite dev proxy / 主进程代取），token 也可在配置中手动填写兜底。
+- 直连模式注意：web_server 有 Host/Origin 校验（DNS-rebinding 防护）——渲染层经代理时须重写 Host/Origin 为上游地址（vite.config.ts 与 desktop/main.ts 同策略）；Android 原生 WS/fetch 不受 CORS 限制可直连任意 host:port，但 gateway 默认只监听 127.0.0.1，局域网设备直连需 `hermes serve --host 0.0.0.0`。
 - 连接建立后服务端立即推事件 `gateway.ready`，payload `{"skin": {...}, "change_events": true}`。
 - 公开 REST（无需认证）：`/api/health`、`/api/status`、`/api/config/defaults`。
 - 断线恢复：服务端对孤儿会话有 ~20s 宽限（`HERMES_TUI_WS_ORPHAN_REAP_GRACE_S`），WS 重连后 `session.resume` 可重挂 inflight turn。服务端回收会话时广播 `session.reclaimed`。

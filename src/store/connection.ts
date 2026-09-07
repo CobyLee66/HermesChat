@@ -23,12 +23,18 @@ export type ConnectionState =
   | 'ready'
   | 'reconnecting';
 
+/** 连接类型：ssh=SSH 隧道（host/port 为 SSH 语义），direct=直连 gateway。 */
+export type ConnectionType = 'ssh' | 'direct';
+
 export interface ConnectionProfile {
   /** 本地生成（genProfileId） */
   id: string;
   /** 配置名称（卡片显示） */
   name: string;
+  type: ConnectionType;
+  /** ssh=SSH 主机；direct=gateway 主机（默认 127.0.0.1） */
   host: string;
+  /** ssh=SSH 端口（默认 22）；direct=gateway 端口（默认 9119） */
   port: string;
   username: string;
   /** 持久化于 App 沙盒（用户明确要求一键直连，免每次输入） */
@@ -38,11 +44,14 @@ export interface ConnectionProfile {
   passphrase: string;
   /** 上次选择的密钥文件名（仅显示用，随私钥一起持久化） */
   keyFileName: string;
+  /** 直连模式手动 session token（留空自动从 gateway 首页提取，§3.6 兜底） */
+  token: string;
 }
 
 /** 新增配置的初始表单值。 */
 export const EMPTY_PROFILE: Omit<ConnectionProfile, 'id'> = {
   name: '',
+  type: 'ssh',
   host: '',
   port: '22',
   username: '',
@@ -50,6 +59,7 @@ export const EMPTY_PROFILE: Omit<ConnectionProfile, 'id'> = {
   privateKey: '',
   passphrase: '',
   keyFileName: '',
+  token: '',
 };
 
 /**
@@ -95,7 +105,7 @@ interface ConnectionStore {
   wsUrl: string;
   httpUrl: string;
   token: string;
-  /** 全部 SSH 配置 */
+  /** 全部连接配置（SSH 隧道 / 直连） */
   profiles: ConnectionProfile[];
   /** 当前连接使用的配置（重连也用它） */
   currentProfileId: string | null;
@@ -214,6 +224,28 @@ function wireEvents(rpc: RpcClient) {
         .applyEvent(evt.session_id, evt.type, evt.payload);
     }
   });
+}
+
+/**
+ * 旧 v2 持久化数据迁移：早期配置无 type/token 字段。
+ * 缺 type 默认 'ssh'；web-direct 伪配置（host 哨兵值）归为 'direct'。
+ */
+function migrateProfile(p: Partial<ConnectionProfile>): ConnectionProfile {
+  const type: ConnectionType =
+    p.type === 'direct' || p.host === 'web-direct' ? 'direct' : 'ssh';
+  return {
+    id: p.id ?? genProfileId(),
+    name: p.name ?? '',
+    type,
+    host: p.host ?? '',
+    port: p.port ?? '22',
+    username: p.username ?? '',
+    password: p.password ?? '',
+    privateKey: p.privateKey ?? '',
+    passphrase: p.passphrase ?? '',
+    keyFileName: p.keyFileName ?? '',
+    token: p.token ?? '',
+  };
 }
 
 export const useConnectionStore = create<ConnectionStore>((set, get) => {
@@ -348,12 +380,12 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => {
           return;
         }
         const saved = JSON.parse(raw) as {
-          profiles?: ConnectionProfile[];
+          profiles?: Partial<ConnectionProfile>[];
           currentProfileId?: string | null;
           autoProfileId?: string | null;
         };
         set({
-          profiles: saved.profiles ?? [],
+          profiles: (saved.profiles ?? []).map(migrateProfile),
           currentProfileId: saved.currentProfileId ?? null,
           autoProfileId: saved.autoProfileId ?? null,
         });

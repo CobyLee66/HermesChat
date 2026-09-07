@@ -50,7 +50,7 @@ keepalive：native 侧 `session.setServerAliveInterval(15000)` + `setServerAlive
 3. 复用优先：`exec("curl -s -m 2 http://127.0.0.1:9119/api/health")` 有响应 → 已运行实例，`exec("curl -s http://127.0.0.1:9119/ | grep -oE '__HERMES_SESSION_TOKEN__=\"[^\"]+\"'")` 提取 token，remotePort=9119。
 4. 否则拉起：生成随机 token，`startCommand("HERMES_DASHBOARD_SESSION_TOKEN=<token> \"<hermes绝对路径>\" serve --isolated --host 127.0.0.1 --port 0")`，从 stdout 事件解析 `HERMES_BACKEND_READY port=(\d+)`。
 5. `openLocalForward(remotePort)` → JS 连 `ws://127.0.0.1:<localPort>/api/ws?token=<token>`。
-6. 全部失败 → 允许用户手动填 host/port/token 直连（兜底）。
+6. 全部失败 → 允许用户手动填 host/port/token 直连（兜底）。已以「直连」配置类型落地（2026-09-08）：`ConnectionProfile.type='direct'`，token 留空自动提取、可手动填写兜底，见 §5 DirectTransport。
 
 ## 4. 文件清单（Android）
 
@@ -70,7 +70,8 @@ export interface Transport {
   onDrop?: () => void  // 意外断开回调
 }
 ```
-- `SshTunnelTransport`（生产）：走 §3 流程。（开发直连 `DirectWsTransport` 已移除。）
+- `SshTunnelTransport`（生产）：走 §3 流程。
+- `DirectTransport`（`src/ssh/directTransport.ts`，2026-09-08）：不经 SSH，WS/HTTP 直连已运行的 gateway（`ConnectionProfile.type='direct'`，host/port 为 gateway 地址）。token 手动优先，留空则 GET `http://host:port/` 提取 `__HERMES_SESSION_TOKEN__`（与 SSH 隧道同一 `extractToken`，10s 超时兜底——RN fetch 默认永不超时）；每次 connect 重新提取，gateway 重启换 token 天然兼容。适用 Android 原生（无 CORS、manifest 允许明文）；桌面经主进程代理变体 `DesktopDirectTransport`（`desktopBridge.ts`，`desktop:directConnect` IPC 由主进程代取 token 并把回环代理上游设为 gateway 地址）；浏览器走 `WebDirectTransport`（vite 代理，目标固定本机 9119）。直连配置下 SshManager 不提供 execRemote（无 SSH 会话，multiplex 扫描静默降级空映射）。
 
 ## 6. Android 实现备注（首次落地记录）
 

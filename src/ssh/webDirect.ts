@@ -12,7 +12,7 @@
 
 import {Platform} from 'react-native';
 
-import {useConnectionStore} from '../store/connection';
+import {useConnectionStore, type ConnectionProfile} from '../store/connection';
 import {SshManager} from './SshManager';
 import {extractToken, type Transport, type TransportResult} from './transport';
 
@@ -65,12 +65,17 @@ export class WebDirectTransport implements Transport {
   }
 }
 
-/** SshManager 的 transportFactory：仅放行直连伪配置，拒绝真实 SSH 配置。 */
-export function webDirectTransportFactory(cfg: {host: string}): Transport {
-  if (cfg.host !== DIRECT_HOST) {
-    throw new Error('浏览器环境不支持 SSH 隧道，请使用「浏览器直连」入口');
+/**
+ * SshManager 的 transportFactory：直连配置与 web-direct 伪配置都走
+ * WebDirectTransport（浏览器受 CORS/Host/Origin 限制，实际目标固定为经
+ * vite 代理的本机 127.0.0.1:9119，配置里的 host/port 不参与寻址）；
+ * 真实 SSH 配置拒绝（无隧道能力）。
+ */
+export function webDirectTransportFactory(cfg: ConnectionProfile): Transport {
+  if (cfg.type === 'direct' || cfg.host === DIRECT_HOST) {
+    return new WebDirectTransport();
   }
-  return new WebDirectTransport();
+  throw new Error('浏览器环境不支持 SSH 隧道，请使用「浏览器直连」入口');
 }
 
 /**
@@ -99,6 +104,7 @@ export async function connectWebDirect(): Promise<boolean> {
   if (!id) {
     id = conn.addProfile({
       name: WEB_DIRECT_NAME,
+      type: 'direct',
       host: DIRECT_HOST,
       port: '9119',
       username: 'browser',
@@ -106,6 +112,7 @@ export async function connectWebDirect(): Promise<boolean> {
       privateKey: '',
       passphrase: '',
       keyFileName: '',
+      token: '',
     }).id;
   }
   return conn.connect(id);

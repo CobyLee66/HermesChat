@@ -32,6 +32,14 @@ export interface DesktopBridge {
   openLocalForward(remotePort: number): Promise<{localPort: number}>;
   closeLocalForward(localPort: number): Promise<void>;
   disconnect(): Promise<void>;
+  /** 直连模式：主进程记录代理上游并（必要时）代取 session token */
+  directConnect(cfg: {
+    host: string;
+    port: number;
+    token?: string;
+  }): Promise<{token: string}>;
+  /** 直连模式：清除代理上游 */
+  directDisconnect(): Promise<boolean>;
   onStdout(taskId: string, cb: (line: string) => void): () => void;
   onExit(taskId: string, cb: (exitCode: number) => void): () => void;
   onDisconnect(cb: (reason: string) => void): () => void;

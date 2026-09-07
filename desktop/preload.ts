@@ -51,6 +51,11 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
     ipcRenderer.invoke('ssh:closeLocalForward', localPort),
   disconnect: () => ipcRenderer.invoke('ssh:disconnect'),
 
+  // 直连模式：主进程设置代理上游并（必要时）代取 session token
+  directConnect: (cfg: {host: string; port: number; token?: string}) =>
+    ipcRenderer.invoke('desktop:directConnect', cfg),
+  directDisconnect: () => ipcRenderer.invoke('desktop:directDisconnect'),
+
   onStdout: (taskId: string, cb: (line: string) => void): (() => void) =>
     subscribe('stdout', taskId, p => cb(p.line ?? '')),
   onExit: (taskId: string, cb: (exitCode: number) => void): (() => void) =>

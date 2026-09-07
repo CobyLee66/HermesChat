@@ -8,8 +8,9 @@
 
 - **壳**：`desktop/main.ts`（Electron 主进程）+ `desktop/preload.ts`（contextBridge → `window.hermesDesktop`），tsconfig 独立（`desktop/tsconfig.json`，nodeNext），`npm run desktop:build` 编译到 `desktop/dist/`。
 - **SSH 隧道**：主进程 ssh2 实现 HermesSsh 契约（docs/ssh-module.md §2/§6 全语义对齐：错误码 E_*、keepalive 15s×3、exec 8MiB 上限、stopCommand/closeLocalForward/disconnect 幂等、被杀 task exit=-1 恰好一次、HostKey accept-new 持久化 `userData/known-hosts.json`）。渲染层 `src/ssh/desktopHermesSsh.ts` 是桥的 typed wrapper，**vite alias 把 `./HermesSsh` 指到它**（替代原 web-stubs/HermesSsh.ts），因此 `SshTunnelTransport`/`SshManager` 的 bootstrap 与重连逻辑单源复用，零改动（`isAvailable=true` 时 execRemote 自动启用，multiplex/foreign 只读链路可用）。
-- **回环代理（关键差异）**：渲染层从 `http://127.0.0.1:<port>` 加载（主进程 HTTP+WS 服务），同源无 CORS；`/api/**`（含 /api/ws upgrade）反代到隧道本地端口，Host/Origin 重写策略 = vite.config.ts 已验证方案。端口跨次启动稳定（`userData/proxy-port.json` 记忆，51899 起顺延）——**端口变 = localStorage origin 变 = 配置丢失**，故必须记忆复用。`src/ssh/desktopBridge.ts` 的 `DesktopSshTransport` 只做一件事：隧道 connect 后把 wsUrl/httpUrl 改写为同源相对地址。
-- **引擎选择**：`App.tsx` → `Platform.OS==='web'` 时 `hasDesktopBridge() ? initDesktopEngine() : initWebDirectEngine()`。桌面隐藏「浏览器直连」入口（回环代理只转发隧道端口）。
+- **回环代理（关键差异）**：渲染层从 `http://127.0.0.1:<port>` 加载（主进程 HTTP+WS 服务），同源无 CORS；`/api/**`（含 /api/ws upgrade）反代到**代理上游**，Host/Origin 重写策略 = vite.config.ts 已验证方案。端口跨次启动稳定（`userData/proxy-port.json` 记忆，51899 起顺延）——**端口变 = localStorage origin 变 = 配置丢失**，故必须记忆复用。`src/ssh/desktopBridge.ts` 的 `DesktopSshTransport` 只做一件事：隧道 connect 后把 wsUrl/httpUrl 改写为同源相对地址。
+- **代理上游（2026-09-08 直连模式泛化）**：主进程 `proxyUpstream: {host, port} | null` 单槽位，同一时刻只有一条连接。SSH 隧道 = `openLocalForward` 登记隧道本地端口（`127.0.0.1:<localPort>`）；直连配置 = 新 IPC `desktop:directConnect {host, port, token?}` 登记 gateway 地址本身，token 手动优先、否则主进程 GET 首页代提 `__HERMES_SESSION_TOKEN__`（渲染层与 gateway 跨源，fetch 不可靠），`desktop:directDisconnect` 清空；上游未建立时 /api 返回 503。渲染层变体 `DesktopDirectTransport`（同在 desktopBridge.ts）拿到 token 后同样改写为同源相对地址。
+- **引擎选择**：`App.tsx` → `Platform.OS==='web'` 时 `hasDesktopBridge() ? initDesktopEngine() : initWebDirectEngine()`。桌面隐藏「浏览器直连」入口（直连场景已由「直连」配置类型覆盖）。
 
 ### 8.2 响应式布局（宽度驱动，与是否 Electron 无关）
 

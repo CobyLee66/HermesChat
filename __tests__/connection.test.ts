@@ -99,6 +99,7 @@ describe('profiles 管理', () => {
   it('addProfile 生成 id，全字段持久化（含 password/privateKey）', async () => {
     const p = useConnectionStore.getState().addProfile({
       name: '办公电脑',
+      type: 'ssh',
       host: '10.0.0.2',
       port: '2222',
       username: 'dev',
@@ -106,6 +107,7 @@ describe('profiles 管理', () => {
       privateKey: 'PEM',
       passphrase: 'pp',
       keyFileName: 'id_rsa',
+      token: '',
     });
     expect(p.id).toBeTruthy();
     expect(useConnectionStore.getState().profiles).toHaveLength(1);
@@ -117,6 +119,7 @@ describe('profiles 管理', () => {
     expect(saved.profiles[0]).toMatchObject({
       id: p.id,
       name: '办公电脑',
+      type: 'ssh',
       host: '10.0.0.2',
       port: '2222',
       username: 'dev',
@@ -187,6 +190,48 @@ describe('profiles 管理', () => {
     expect(s.profiles[0].name).toBe('A');
     expect(s.currentProfileId).toBe(a.id);
     expect(s.autoProfileId).toBe(b.id);
+  });
+
+  it('loadPersisted 迁移旧 v2 数据：缺 type 默认 ssh，web-direct 伪配置归 direct', async () => {
+    // 模拟本功能上线前的持久化数据（无 type/token 字段）
+    const legacy = {
+      profiles: [
+        {
+          id: 'legacy-ssh',
+          name: '旧 SSH 配置',
+          host: '10.0.0.2',
+          port: '22',
+          username: 'dev',
+          password: '',
+          privateKey: '',
+          passphrase: '',
+          keyFileName: '',
+        },
+        {
+          id: 'legacy-direct',
+          name: '浏览器直连（本机 127.0.0.1:9119）',
+          host: 'web-direct',
+          port: '9119',
+          username: 'browser',
+          password: '',
+          privateKey: '',
+          passphrase: '',
+          keyFileName: '',
+        },
+      ],
+      currentProfileId: null,
+      autoProfileId: null,
+    };
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(legacy));
+
+    await useConnectionStore.getState().loadPersisted();
+    const s = useConnectionStore.getState();
+    expect(s.profiles[0]).toMatchObject({id: 'legacy-ssh', type: 'ssh', token: ''});
+    expect(s.profiles[1]).toMatchObject({
+      id: 'legacy-direct',
+      type: 'direct',
+      token: '',
+    });
   });
 });
 
@@ -357,7 +402,7 @@ describe('connection 状态机', () => {
     });
 
     it('handleForeground：ready 时探活失败立即触发重连；reconnecting 时等价 retryNow', async () => {
-      const connector = await connectReady();
+      await connectReady();
 
       fetchMock.mockResolvedValueOnce({ok: false});
       useConnectionStore.getState().handleForeground();
