@@ -5,7 +5,7 @@
 
 ---
 
-## 当前状态（截至 2026-09-06）
+## 当前状态（截至 2026-09-08）
 
 ### 进行中
 
@@ -13,6 +13,8 @@
 - 会话列表顶部信息 / Profile 名称显示 / 网页端气泡尺寸 / Profile 头像加载缓存打磨包（2026-09-05，1a9341a），真机效果待验证
 
 ### 最近完成
+
+- [x] 助手消息复制 Markdown 源码：桌面/web 拖选即源码 + 右键菜单，手机弹层加「复制全部」（2026-09-08，D030）— 桌面端（web/Electron 共用渲染层）双入口：①拖选气泡渲染文本 Cmd/Ctrl+C 得到所选范围的 Markdown 源码——`src/utils/mdSourceMap.ts` 用 markdown-it token.map 给块级 token 注入 `data-md-map` 源行号，`MarkdownText.web.tsx` 以 document 单例 copy 监听 + 容器注册表拦截 copy 事件，选区覆盖的块按行范围并集切源码替换剪贴板（块级粒度不碎表格/列表；跨消息选择不干预走浏览器默认；输入框等可编辑元素不干预）；②气泡右键菜单「复制 Markdown / 复制纯文本」（原生 contextmenu 监听，延续 SessionListPanel 先例）。手机端保留长按弹层，加「复制全部」按钮（已复制反馈 1.5s），新依赖 `@react-native-clipboard/clipboard`（RN 0.87 核心已无 Clipboard），`src/utils/clipboard.ts` / `clipboard.native.ts` 平台变体防 vite 打包原生模块。顺带修存量 bug：`desktop/main.ts` permission handler 原本只放行 media，renderer 的 `navigator.clipboard.writeText` 全被拒——「复制会话标题」右键功能在 Electron 桌面一直静默失败，现放行 clipboard-read/clipboard-sanitized-write。jest 196 全绿（新增 mdSourceMap 12 例）；web 与真实 Electron（隔离 userData）直连 live 9119 只读实测通过：拖选标题块 Cmd+C 得 `## 📦 清理结果`、全选拖选 ≡ 右键「复制 Markdown」（914 字交叉验证）、「复制纯文本」无 # 语法、输入框复制不受拦截；截图 docs/screenshots/web-mdcopy-*、desktop-mdcopy-*，冒烟脚本 `scripts/web-md-copy-smoke.js`、`scripts/desktop-md-copy-smoke.js`。⚠ 踩坑：①DOM copy 事件派发到 `document.activeElement`（通常 body），**不冒泡经过气泡容器**——挂气泡上收不到，必须 document 单例监听 + 模块级容器注册表（getText 走 ref 取流式最新）；②Electron 设了 permissionRequestHandler 后未明确放行的权限全拒，剪贴板写静默失败会让「上一段剪贴板内容」伪装成本次结果（断言假阳性）——测剪贴板功能先单独验 writeText 权限，读取断言走主进程 `electron.clipboard.readText()`（renderer read 也默认拒）；③Playwright mouse 右键依赖视口坐标，inverted FlatList 里 boundingBox 在视口外的气泡点不到，右键目标要按 getBoundingClientRect 过滤视口内；④Electron 1440 宽是三栏布局，`[tabindex]+img` 第一个命中左栏 profile 头像（web 900px 二栏才是会话行）——会话行按「含 M/D HH:MM 时间文本」特征定位；⑤隔离 userData 残留的配置卡片带隐藏「直连」标签，与编辑页分段按钮撞 `getByText`——smoke 启动前清空隔离目录 + 用「SSH 隧道」父容器相对定位。
 
 - [x] 自动连接改互斥单选：控制权从编辑页挪到连接首页（2026-09-08）— 编辑页删除「打开应用后自动连接」Switch（编辑/新建不再触碰 autoProfileId），首页每张配置卡操作区加圆点单选「自动连接」：点选即设为默认（自动顶替旧的，store 的 autoProfileId 单值语义本就互斥）、再点取消；Playwright 实测选甲→默认在甲行、选乙→顶替且仍只有一个默认、再点→取消、编辑页无开关（`scripts/web-auto-radio-smoke.js`，选中归属用「默认」标签与卡片名称的 boundingBox 同行判定）。⚠ 踩坑：RNW 无稳定 class，跨卡片断言归属别用 `:has()`/xpath 祖先链（外层容器包含所有卡片必然误中），boundingBox 比对 y 值最可靠
 

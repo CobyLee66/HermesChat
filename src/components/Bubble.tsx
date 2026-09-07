@@ -16,8 +16,11 @@ interface Props {
  * 聊天气泡：用户右（浅蓝）、助手左（白）。无头像占位，尽量撑满宽度。
  * 文本选择/复制策略：
  * - 用户消息：纯文本 Text(selectable)，系统原生长按选择；
- * - 助手消息：markdown 渲染在 RN 里无法整条连贯选择，长按 0.5s 上报
- *   onSelectText，由屏幕层弹出原始文本选择窗口（含 markdown 格式符号）。
+ * - 助手消息（手机端）：markdown 渲染在 RN 里无法整条连贯选择，长按 0.5s
+ *   上报 onSelectText，由屏幕层弹出原始文本选择窗口（含 markdown 格式符号，
+ *   附「复制全部」快捷按钮）；
+ * - 助手消息（web/桌面端）：不弹窗，直接拖选渲染文本 Cmd/Ctrl+C 得到所选
+ *   范围的 Markdown 源码，或右键菜单整条复制（见 MarkdownText.web.tsx）。
  * QQ 风格角标箭头：纯 View border 三角形，压在与气泡相接的上角
  * （assistant 左上指向左，user 右上指向右），颜色与气泡一致。
  */

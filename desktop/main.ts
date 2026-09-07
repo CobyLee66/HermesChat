@@ -1247,9 +1247,14 @@ if (!gotLock) {
     if (process.platform === 'win32') {
       app.setAppUserModelId('com.hermeschat.desktop');
     }
-    // 麦克风（语音输入）权限默认放行；其余保持默认策略
+    // 麦克风（语音输入）与剪贴板（气泡右键「复制 Markdown/纯文本」、
+    // 会话标题复制走 navigator.clipboard）放行；其余保持默认策略
     session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => {
-      cb(permission === 'media');
+      cb(
+        permission === 'media' ||
+          permission === 'clipboard-read' ||
+          permission === 'clipboard-sanitized-write',
+      );
     });
     const port = await startProxyServer();
     appendLog('INFO', `回环代理监听：127.0.0.1:${port}（日志文件：${logFilePath}）`);

@@ -20,6 +20,7 @@ import {useChatComposer} from '../panels/useChatComposer';
 import {useChatStore} from '../store/chat';
 import {useConnectionStore} from '../store/connection';
 import type {RootStackParamList} from '../navigation/types';
+import {copyText} from '../utils/clipboard';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'Chat'>;
 type Rt = RouteProp<RootStackParamList, 'Chat'>;
@@ -52,6 +53,15 @@ export function ChatScreen() {
   const [showDetail, setShowDetail] = useState(true);
   /** 文本选择层内容（助手气泡长按弹出；不用 Modal，见 Bubble 注释） */
   const [selectText, setSelectText] = useState<string | null>(null);
+  /** 「复制全部」点击后的已复制反馈（短暂显示后自动还原） */
+  const [copied, setCopied] = useState(false);
+
+  const openTextSelect = useCallback((text: string) => setSelectText(text), []);
+
+  const closeTextSelect = useCallback(() => {
+    setSelectText(null);
+    setCopied(false);
+  }, []);
 
   // 选择层打开时硬件返回键负责关闭（无 Modal 时默认会退出页面）
   useEffect(() => {
@@ -59,13 +69,29 @@ export function ChatScreen() {
       return;
     }
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      setSelectText(null);
+      closeTextSelect();
       return true;
     });
     return () => sub.remove();
-  }, [selectText]);
+  }, [selectText, closeTextSelect]);
 
-  const openTextSelect = useCallback((text: string) => setSelectText(text), []);
+  // 已复制反馈 1.5s 后自动还原
+  useEffect(() => {
+    if (!copied) {
+      return;
+    }
+    const t = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(t);
+  }, [copied]);
+
+  const onCopyAll = useCallback(() => {
+    if (selectText !== null) {
+      copyText(selectText).then(
+        () => setCopied(true),
+        () => {},
+      );
+    }
+  }, [selectText]);
 
   // 补全浮层打开时硬件返回键先关补全（无 Modal 时默认会退出页面）
   const {open: slashOpen, close: closeSlash} = slash;
@@ -178,12 +204,22 @@ export function ChatScreen() {
               spellCheck={false}
               showSoftInputOnFocus={false}
             />
-            <TouchableOpacity
-              style={styles.selectClose}
-              activeOpacity={0.8}
-              onPress={() => setSelectText(null)}>
-              <Text style={styles.selectCloseText}>关闭</Text>
-            </TouchableOpacity>
+            <View style={styles.selectActions}>
+              <TouchableOpacity
+                style={styles.selectCopy}
+                activeOpacity={0.8}
+                onPress={onCopyAll}>
+                <Text style={styles.selectCopyText}>
+                  {copied ? '已复制 ✓' : '复制全部'}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.selectClose}
+                activeOpacity={0.8}
+                onPress={closeTextSelect}>
+                <Text style={styles.selectCloseText}>关闭</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       ) : null}
@@ -253,8 +289,21 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     marginBottom: 10,
   },
+  selectActions: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  selectCopy: {
+    borderRadius: 17,
+    paddingHorizontal: 24,
+    paddingVertical: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    backgroundColor: Colors.bg,
+  },
+  selectCopyText: {fontSize: 14, color: Colors.text},
   selectClose: {
-    alignSelf: 'center',
     borderRadius: 17,
     paddingHorizontal: 28,
     paddingVertical: 8,
