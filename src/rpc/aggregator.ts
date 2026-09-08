@@ -81,6 +81,13 @@ export class TimelineAggregator {
 
   // ─── 历史投影 ──────────────────────────────────────────────
 
+  /**
+   * message.complete 后置位一次：本轮流式尾部是 inflight 纯文本投影重建的
+   * （fromInflightProjection），结构块（工具卡/思考）缺失，需重拉历史重建。
+   * 由 chat store 经 takeNeedsHistoryRefresh 消费。
+   */
+  private needsHistoryRefresh = false;
+
   /** 用 session.create/resume 返回的 messages 重建时间线。 */
   hydrate(messages: ProjectedMessage[]) {
     this.items = [];
@@ -88,6 +95,7 @@ export class TimelineAggregator {
     this.sealedText = false;
     this.lastStatus = null;
     this.lastThinkingHint = null;
+    this.needsHistoryRefresh = false;
     for (const m of messages) {
       if (!m || typeof m !== 'object') {
         continue;
@@ -443,8 +451,24 @@ export class TimelineAggregator {
     msg.streaming = false;
     this.sealedText = false;
     this.lastThinkingHint = null;
+    if (msg.fromInflightProjection) {
+      // 本轮尾部是重进 mid-turn 会话时的纯文本投影（工具卡/思考块缺失）；
+      // turn 已结束、历史投影已含结构——交给 chat store 重拉重建。
+      this.needsHistoryRefresh = true;
+    }
     this.touchCurrent();
     this.current = null;
+  }
+
+  /**
+   * message.complete 之后由 chat store 调用：本轮流式尾部若是 inflight
+   * 纯文本投影重建的（结构块缺失），返回 true 一次——调用方应随即用
+   * session.history 重拉历史并 hydrate 重建完整结构。
+   */
+  takeNeedsHistoryRefresh(): boolean {
+    const v = this.needsHistoryRefresh;
+    this.needsHistoryRefresh = false;
+    return v;
   }
 
   /** 把 text 块里的图片/文件引用拆成独立块（原位展开，保持顺序）。 */
@@ -723,11 +747,15 @@ export class TimelineAggregator {
         msg.blocks = blocks;
       }
     } else {
+      // 纯文本投影重建：App 重启后本地结构块已不在（previousStreaming 为空或
+      // 对不上），尾部只有文字没有工具卡/思考块——打标，turn 结束时由
+      // chat store 用 session.history 重拉历史重建（见 takeNeedsHistoryRefresh）。
       msg = {
         kind: 'assistant',
         id: nextId('a'),
         blocks: serverText ? [{type: 'text', text: serverText}] : [],
         streaming: true,
+        fromInflightProjection: true,
       };
     }
     msg.streaming = true;

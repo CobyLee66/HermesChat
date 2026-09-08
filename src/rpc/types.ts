@@ -404,6 +404,12 @@ export interface AssistantMsg {
   blocks: AssistantBlock[];
   /** 流式进行中（message.start 之后、message.complete 之前） */
   streaming: boolean;
+  /**
+   * 该尾部是重进 mid-turn 会话时用 inflight 纯文本投影重建的（App 重启后
+   * 本地结构块已没了）——本轮的工具卡/思考块缺失，turn 结束时需用
+   * session.history 重拉历史重建。
+   */
+  fromInflightProjection?: boolean;
   timestamp?: number;
 }
 

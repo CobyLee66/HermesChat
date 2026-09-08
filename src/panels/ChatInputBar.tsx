@@ -23,12 +23,14 @@ import {
   isErrorWithCode,
 } from '@react-native-documents/picker';
 
+import {BusyTicker} from '../components/BusyTicker';
 import {IconImage} from '../components/icons';
 import {Colors} from '../components/theme';
 import {VoiceButton} from '../components/VoiceButton';
 import {useChatStore} from '../store/chat';
 import {useConnectionStore} from '../store/connection';
 import {alertError} from '../utils/alert';
+import {isKawaiiHint} from '../utils/busyTicker';
 import {useKeyboardHeight} from '../utils/useKeyboardHeight';
 
 /** 附件来源注入：桌面传对话框实现，缺省用手机 documents-picker 流程。 */
@@ -73,7 +75,7 @@ export function ChatInputBar({
 
   const busy = chat?.busy ?? false;
   const status = chat?.status ?? null;
-  // thinking.delta 占位（(´･_･`) processing… 这类）比 status.update 更"活"
+  // thinking.delta 占位：kawaii 帧由 BusyTicker 动画接管，只透传 ⏳/⚠ 等待说明
   const thinkingHint = chat?.thinkingHint ?? null;
   const pending = useMemo(
     () => chat?.pendingAttachments ?? [],
@@ -185,11 +187,22 @@ export function ChatInputBar({
   return (
     // 底部操作区整体包一层：白底 + 底部安全区/输入法高度垫高
     <View style={[styles.bottomBar, {paddingBottom: bottomPad}]}>
-      {busy && (thinkingHint || status) ? (
+      {busy ? (
         <View style={styles.statusBar}>
-          <Text style={styles.statusText} numberOfLines={1}>
-            {thinkingHint || status?.text}
-          </Text>
+          {/* ① 非 kawaii 的 thinkingHint（⏳/⚠/↻/⚙ provider 等待说明）原文显示；
+              ② 否则 status.update 原文显示；③ 都没有时用客户端动画占位
+              （服务端 thinking.delta 每次 API 调用只发一条静态 kawaii 帧） */}
+          {thinkingHint && !isKawaiiHint(thinkingHint) ? (
+            <Text style={styles.statusText} numberOfLines={1}>
+              {thinkingHint}
+            </Text>
+          ) : status?.text ? (
+            <Text style={styles.statusText} numberOfLines={1}>
+              {status.text}
+            </Text>
+          ) : (
+            <BusyTicker />
+          )}
         </View>
       ) : null}
       {pending.length > 0 ? (

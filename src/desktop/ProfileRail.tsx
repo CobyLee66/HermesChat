@@ -87,9 +87,10 @@ const styles = StyleSheet.create({
     borderRightColor: Colors.border,
   },
   list: {alignItems: 'center', paddingTop: 10, gap: 8},
+  // 选中环与头像同心等距：头像 40px 圆角 round(40×0.22)=9，padding 3 → 环 9+3=12
   item: {
-    borderRadius: 22,
-    padding: 2,
+    borderRadius: 12,
+    padding: 3,
     borderWidth: 2,
     borderColor: 'transparent',
   },

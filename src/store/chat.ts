@@ -381,9 +381,34 @@ export const useChatStore = create<ChatStore>((set, get) => {
         }));
         return;
       }
-      const handled = aggFor(sid).applyEvent(type, payload);
+      const agg = aggFor(sid);
+      const handled = agg.applyEvent(type, payload);
       if (handled) {
         snapshot(sid);
+      }
+      // 重进 mid-turn 会话时尾部是 inflight 纯文本投影（本轮工具卡/思考块
+      // 缺失）；turn 结束后历史投影已含结构（tool 行/reasoning），重拉重建。
+      if (type === 'message.complete' && agg.takeNeedsHistoryRefresh()) {
+        getRpc()
+          .call<{messages?: ProjectedMessage[]}>('session.history', {
+            session_id: sid,
+          })
+          .then(r => {
+            // 竞态：下一 turn 已开始（流式中）则让位，结构等下次 attach 重建
+            if (agg.isStreaming()) {
+              return;
+            }
+            agg.hydrate(r.messages ?? []);
+            snapshot(sid, {busy: false});
+          })
+          .catch(e => {
+            dlog(
+              'WARN',
+              `message.complete 后重拉历史失败 ${sid.slice(0, 8)}: ${
+                e instanceof Error ? e.message : String(e)
+              }`,
+            );
+          });
       }
     },
 
