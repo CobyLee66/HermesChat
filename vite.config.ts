@@ -21,7 +21,9 @@ import {defineConfig} from 'vite';
 
 const r = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
-const DASHBOARD = 'http://127.0.0.1:9119';
+// 冒烟脚本可用环境变量把上游指到 mock gateway（如 127.0.0.1:9199），
+// 默认真实本机 dashboard；不碰 live 的流式冒烟靠这个分流
+const DASHBOARD = process.env.HERMES_VITE_UPSTREAM ?? 'http://127.0.0.1:9119';
 
 export default defineConfig({
   root: 'web',

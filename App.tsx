@@ -25,6 +25,7 @@ import {hasDesktopBridge, initDesktopEngine} from './src/ssh/desktopBridge';
 import {initConnectionEngine} from './src/ssh/SshManager';
 import {initWebDirectEngine} from './src/ssh/webDirect';
 import {useConnectionStore} from './src/store/connection';
+import {useSessionsStore} from './src/store/sessions';
 import type {RootStackParamList} from './src/navigation/types';
 
 enableScreens();
@@ -46,6 +47,8 @@ function App() {
     Platform.OS === 'web' && (state === 'ready' || state === 'reconnecting');
 
   useEffect(() => {
+    // 排序档位持久化恢复（进会话列表前完成，避免首帧闪默认档）
+    useSessionsStore.getState().loadSortModePreference();
     // web 构建按环境装配：Electron 桌面桥（ssh2 隧道）或浏览器直连引擎
     if (Platform.OS === 'web') {
       if (hasDesktopBridge()) {

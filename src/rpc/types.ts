@@ -54,6 +54,8 @@ export interface UsageInfo {
   prompt_tokens?: number;
   completion_tokens?: number;
   total_tokens?: number;
+  /** 当前生效模型（session.usage RPC / 事件同源返回；agent 未建时缺省） */
+  model?: string;
   /** 本 gateway 进程累计（input/output/total/calls）；resume 后从 0 重计 */
   total?: number;
   /** 上下文窗口占用（至少跑过一轮后才出现） */
@@ -293,6 +295,12 @@ export interface SessionListRow {
   namespaced?: boolean;
   /** namespaced=true 时的物理宿主 profile（历史读取/派生用） */
   hostProfile?: string;
+  /**
+   * 行活跃时间（last_activity_at 与最新消息时间的较新者，兜底 started_at）：
+   * 客户端 exec 扫描补齐（RPC 投影无此字段，见 src/ssh/namespaceMap.ts），
+   * 「最近消息」排序档与行时间展示用；缺失时回退 started_at。
+   */
+  last_active?: number;
 }
 
 // ─── 附件 / profile 编辑 RPC 结果 ──────────────────────────────

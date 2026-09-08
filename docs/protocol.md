@@ -1,6 +1,6 @@
 # Hermes serve 协议速查（App 开发用）
 
-> 来源：本机 Hermes Agent v0.20.1 源码 + 实测。源码 ground truth（不确定时直接查）：
+> 来源：本机 Hermes Agent v0.21.0 源码 + 实测。源码 ground truth（不确定时直接查）：
 > - `~/.hermes/hermes-agent/hermes_cli/web_server.py`（WS 握手、REST 路由）
 > - `~/.hermes/hermes-agent/tui_gateway/server.py` + `methods_*.py`（RPC 方法，搜 `@method`）
 > - `~/.hermes/hermes-agent/tui_gateway/ws.py`（WS 循环、事件推送）
@@ -36,6 +36,7 @@
 - `prompt.submit` params `{session_id, text}` → `{"status":"streaming"}`；真正的回复走事件流。**已实测**。
 - `session.interrupt` params `{session_id}` → `{"status":"interrupted"}`（中断当前 turn）。
 - `session.list` params `{limit?, profile?}` → `{sessions:[{id,title,preview,started_at,message_count,source}]}`。**已实测**（字段一致）。
+  - **返回顺序即「最近活跃」降序**（2026-09-08 查源码确认：methods_session.py 写死 `list_sessions_rich(order_by_last_active=True)`）：按 effective last_active 排（压缩链取 tip 活跃时间，`_effective_last_active`），但**投影不含 last_active 值**——客户端拿到的是「有序无值」的列表。会话列表「最近消息」排序档（D033）因此直接保持此顺序； multiplex 跨库合并时由 namespaceMap exec 扫描补齐每行活跃时间（`MAX(last_activity_at, MAX(messages.timestamp))` 兜底 started_at，同 hermes_state_common `_sql_session_last_active` 口径）做交错。REST `/api/sessions` 行虽带 `last_active` 且支持 `order=recent|created`，但行序与 WS 同源、App 无需为此引入 REST 依赖。
   - **`source` 取值与分类**（2026-09-05 查 dashboard 源码 + 实测 state.db）：写入端打的平台标签，本机实测有 `tui/cli/cron/qqbot/subagent`（qqbot 是 QQ 机器人的会话来源，与 multiplex 的 namespace 是两回事）。dashboard（`web/src/pages/SessionsPage.tsx` 的 `AUTOMATION_SESSION_SOURCES`）把 `cron/tool/api_server/acp/hermes_flow/vulcan_delegate/webhook` 归为**自动化**会话，其余（tui/cli/telegram/discord/qqbot/subagent…）归为普通聊天；三档过滤 chats/automation/all，默认 chats。App 侧同口径实现见 `src/utils/sessionSources.ts`。
   - **App 自建会话的 source**：`session.create` 不传 source 时由 tui_gateway `_resolve_session_platform()` 兜底——`HERMES_DESKTOP=1` → `desktop`，否则 `tui`，都落在「聊天」类，不会被自动化档误滤。WS `session.list` 无 source 过滤参数（REST `/api/sessions` 才有 `sources`/`exclude_sources`），客户端过滤是唯一选择。
 - `session.resume` params `{session_id, profile?, cols?, omit_messages?}` → 重挂会话（含历史消息，除非 omit_messages）。错误码：4007=session not found、4130=transcript 过大（`sessions.max_resume_messages`）。
@@ -43,8 +44,16 @@
   - **turn 进行中的恢复字段**：结果带 `running`（turn 进行中）与 `inflight {user, assistant, streaming, error?, corrections?}`（`_inflight_snapshot`：本轮 prompt + 已流出的助手部分文本，**纯文本投影**——不含思考块/工具卡）。mid-turn 重挂正确姿势：hydrate(messages) + 按 inflight 重建流式尾部（prompt 去重），后续 delta 继续追加；本地若已有同 turn 流式尾部（服务端文本是其前缀扩展）优先保留本地结构块（桌面端 preserveStructuralParts 同款取舍）。`running=true` 但 `inflight` 为空（prompt 排队/工具阶段）也建空流式尾部，否则 busy 会在下一次事件快照时闪断。
   - **App 侧补齐纯文本投影的结构丢失**（2026-09-08，D031）：App 重启后重进 mid-turn 会话，本地结构块已没了，inflight 尾部只有文本（工具卡/推理块"丢失"的根因）。修复：这种尾部打 `fromInflightProjection` 标记，`message.complete` 时（turn 结果已先写回 history/落盘，再 emit complete——server.py 顺序保证）用 `session.history`（live sid）重拉并整体 hydrate，工具卡/推理块全恢复。不走 `session.events.since` 重放整轮：replay 环每会话仅 512 帧、message.delta 逐帧计数，长 turn 必 truncated。
 - `session.history` params `{session_id}` → `{count, messages}`。⚠️ **只认 live sid**（`_sess_nowait` 直查内存 `_sessions`，key 是 8 位 live id）：对 session.list 返回的持久化 id 一律 4001（已实测，见 §5）。
-- `session.delete` params `{session_id, profile?}`；`session.close` params `{session_id}` → `{"closed":true}`（删除活动会话报 4023，先 close）。**session.close 已实测**。
-- `session.title`（改名）、`session.status`（返回 `{output}` 纯文本状态块）。
+- `session.usage` params `{session_id}` → **顶层 usage dict**（不是 `{usage:…}`——事件 payload 才包 usage 键；与 session.info/message.complete 的 usage 同构同源，`_get_usage(agent)` 单一计算点，2026-09-09 源码确认 methods_session.py:1825）。**只认 live sid**（`_sess_nowait`，持久化 id 一律 4001）→ 必须在 resume 拿到 live sid 之后调。agent 未建且无快照时返回 `{calls:0, input:0, output:0, total:0}` 零计数（**无 model、无 context_\***，落地后顶栏用量段自然不显示，属服务端口径）；返回可能附 `credits_lines`（Nous 门户积分行，TUI /usage 面板用），客户端忽略。用途：重进会话主动同步顶栏「模型/上下文用量」——resume 返回的 info 普遍缺 usage，不读回则要等新消息输出的事件才刷新（App 实现：chat store `syncSessionInfo`）。
+- `session.delete` params `{session_id, profile?}`；`session.close` params `{session_id}` → `{"closed":true}`（删除活动会话报 4023，先 close）。**已实测/源码确认（2026-09-08）**：
+  - **两者认的 id 不同**：`session.close` 直查网关内存 `_sessions`，**只认 live sid**（传持久化 id 静默 `closed:false` 不报错）；`session.delete` 的活动判定（4023）与查库都用**持久化 id**（传 live sid 一律 4007）。删除当前打开（活动）的会话必须 `close(live sid)` → `delete(持久化 id)` 配合。
+  - App 侧 `sessions store remove()` 已按此归一化（接受任一 id，内部经 chat store 反查），列表长按/右键删活动会话的存量 4023 死循环也一并修掉。
+  - **`profile` 参数决定在哪个库删**（2026-09-08 源码+实测）：`_profile_home(params.profile)` 选中该 profile 自己的 state.db 后 `WHERE id = ?` 精确匹配（`hermes_state.py delete_session`），无行即 4007。multiplex 下 namespaced 行物理在宿主库，**必须传宿主 profile**（本机为 main）——传名义 profile（如 finance）必 4007，且客户端删除失败时列表不过滤 → 「报 session not found 但行仍可见、重试恒失败」（某 profile profile 8/30 未命名会话 bug 根因）。App 侧 `remove()` 按行的 `namespaced/hostProfile` 标记路由到宿主库；实测 `20260830_195341_abcdef01`（finance 命名空间、物理在 main 库、finance 库无此行）传 `profile:"main"` 一次删除成功。
+- `session.title`（改名）params `{session_id, title?}`：**不带 `title` 即只读形式**（已从源码确认，methods_session.py:1425）→ `{title, session_key}`，返回库中 sanitize 后的值；会话行尚未落库时先把 `pending_title` 落库再返回（`_ensure_session_db_row`）。带 `title` 则改名 → `{pending, title}`。
+  - ⚠️ **手动 `/title` 斜杠命令不走这个 RPC**：`slash.exec` 把 title 交给 slash worker 子进程（CLI 的 `/title` 处理，`cli.py`）直接写 state.db，**服务端既不推 `session.title` 也不推 `session.info` 事件**（`_mirror_slash_side_effects` 无 title 分支），跨进程唯一信号是 `sessions.changed`（state.db mtime 签名，0.5s 检查 + 2s 合并窗口，见 server.py `_CHANGE_WATCHES`）。→ 客户端要「改完立即刷新」只能命令执行后主动读回本 RPC 只读形式（App 实现：chat store `refreshTitle`，`/title` 命令后调用）。
+  - `session.title` **事件**（首轮自动命名时推送，`agent._on_session_title` 钩子）payload `{session_id, title}`——注意 payload 里的 `session_id` 是**持久化 id**（`session_key`），事件帧外层的 `session_id` 才是 live sid（客户端按外层 key 归位，用 payload 的 id 回填列表行）。
+  - `session.info` 事件的 payload 也带 `title`（`_session_info` 里 `_session_live_title`）——改名 RPC/压缩/切模型等广播时同样可作标题回填来源。
+- `session.status`（返回 `{output}` 纯文本状态块）。
 - ⚠️ **`session.info` 不是 RPC 方法**（tui_gateway 里无对应 `@method`），只是事件 + create/resume 结果里的 `info` 字段。会话信息弹层用缓存的 info 即可，不要 RPC 调用它。
 - 会话"重开"：无专门 reset RPC。**已查源码确认方案 A 不可行**：`/reset` 是 `/new` 的别名（`hermes_cli/commands.py`，`gateway_only=True`），`slash.exec` 会把它路由到 slash worker 子进程里一个全新的 HermesCLI 实例执行，对 gateway 里的目标会话**没有影响**。→ 用方案 B：`session.create` 新会话（App 已按此实现，见 ChatScreen 注释）。
 - `slash.exec` params `{session_id, command}`（**已从源码确认**，methods_tools.py:1108；command **去掉前导 `/`**）→ `{output, warning?}`；命中 `_PENDING_INPUT_COMMANDS`（retry/queue/steer/goal/loop/undo/compress…）与 skill bundle 时服务端内部转 `command.dispatch`。**prompt.submit 不拦截斜杠文本**（methods_prompt.py 无任何 slash 逻辑）——客户端发送 `/` 开头文本前必须自行分流，否则命令被当普通消息直达模型。App 执行流水线在 `src/rpc/slash.ts`（移植 dashboard 官方预留给第三方客户端的 `web/src/lib/slashExec.ts` 契约）：先 `slash.exec`，失败（拒绝/未知/skill 命令 err 4018）回退 `command.dispatch`，其中 `type:"skill"|"send"` 取 `message` 再转 `prompt.submit`、`type:"alias"` 用 `target` 递归、`exec/plugin` 直接展示 `output`。
@@ -72,6 +81,7 @@
 - REST `POST /api/audio/transcribe`（web_server.py:4637）：**请求体 JSON `{data_url, mime_type?}`；`profile` 是查询参数**（FastAPI 函数形参，不在 body 模型里——desktop 客户端同时放 query 和 body，真正生效的是 `?profile=`）。header 认证 `X-Hermes-Session-Token`。响应 `{ok:true, transcript, provider?}`；**未检测到语音不是错误**：返回 `{ok:true, transcript:""}`。失败为 HTTP 错误 + `{detail}`（400 非法 payload/非音频/非 base64/空、413 超 25MB、500 转写失败）。m4a（AAC）可用，mime 须 `audio/*`（或 video/webm）。
   - **客户端行为**（2026-09-05）：App 侧 fetch 带 30s AbortController 超时（`rest.ts`，对齐 WS RPC 层），VoiceButton 再加 35s 整体 Promise.race 兜底——RN fetch 永不超时，SSH 隧道半开时请求无限挂起会把 UI 永久卡在「识别中」。
   - **识别语言完全由服务端决定，接口无 language 参数**（`AudioTranscriptionRequest` 只有 data_url/mime_type）。服务端解析链（transcription_tools.py `_resolve_stt_language`）：`stt.<provider>.language` → `stt.language` → env `HERMES_LOCAL_STT_LANGUAGE` → None=自动检测；但 `local_command` 路径（whisper 二进制）兜底**默认 "en"**。实测（2026-09-05 服务端日志）：faster-whisper `base` 对 ≤7s 的中文录音自动检测**全部误判 `lang=en`** 输出英文；要稳定中文须服务端配置 `stt.local.language: zh`（或换 `small`+ 模型）。App 暂不处理（D020），上游若加 language 参数后客户端再传。
+  - **`?profile=` 同时决定 STT 配置作用域**（2026-09-08 排查实锤，D034 修订 D020）：端点内 `_config_profile_scope(profile)` 把 HERMES_HOME 切到**该 profile 的 home** 再 `load_config()`（None/""/"current" = dashboard 自身 profile），语言/模型按「当前会话所属 profile」的 config.yaml 解析——multiplex 下只改 main/default 不够，其余 profile 的语音仍走自动检测误判 en（09-08 21:42 日志 `Transcribed hermes-desktop-voice-*.m4a ... lang=en` 实锤，该文件名前缀即本端点临时文件 `web_server.py:5381`）。`load_config()` 按 (mtime_ns, size) 逐次校验、按路径分键缓存：**改 yaml 即热生效，无需重启**。已把本机 6 个 profile 全量配 `stt.language: zh` + `local.model: small`（经用户授权的服务端配置修改，非代码改动）。
 - REST 文件下载（渲染消息里的图片）：`GET /api/files/download?path=<gateway 绝对路径>&token=<SESSION_TOKEN>`（web_server.py:2630）——path 须为**绝对路径**（无 locked_root 时）；这是**唯一允许 `?token=` 查询参数认证**的路由（`_QUERY_TOKEN_API_PATHS`，desktop `mediaExternalUrl` 同款），RN `<Image>` 用它。⚠️ **不要用 `/api/files/stream`**：它 `media_only=True`，只放行音视频扩展名（.avi/.flac/.m4a/.mkv/.mov/.mp3/.mp4/.ogg/.opus/.wav/.webm），图片会 415。download 路由同样接受 header 认证，上限 100MB（`_MANAGED_FILE_MAX_BYTES`）。
 - WS 帧上限 384MB（`_DESKTOP_ATTACHMENT_WS_MAX_BYTES`）——理论上限而已，客户端应先压缩再传（App：图片长边 2048 JPEG 80，头像 512×512 JPEG 80）。
 
@@ -89,6 +99,7 @@
   - **没有 `total_tokens` 别名**；`session.usage` 事件（turn 中每秒增量）payload 为 `{usage}`。
   - usage 计数器是 gateway 进程内运行时状态，**resume 历史会话后从 0 重计**（「一直显示 0」是服务端口径，不是 bug）；`session.create`/冷路径 resume 的 info **无 usage 键**。
   - `context_max`（模型上下文窗口上限）与 `context_used/context_percent` 只在本进程至少跑过一轮后才出现；无独立的上下文上限查询 RPC（`session.context_breakdown` 只认 live sid 且同样依赖跑过 turn）。
+  - **重进会话的主动同步**（2026-09-09）：resume 返回的 info 普遍缺 usage（快路径 lazy 无 usage/reasoning_effort，冷路径 0 计数）→ 客户端在 resume 拿到 live sid 后主动调 `session.usage` 只读 RPC 读回（App 实现：chat store `syncSessionInfo`，openSessionFlow 正常/fork 分支与重连恢复 resumeActiveSessions 调用；streaming 中让位——ticker 每秒推最新值）。会话已被 gateway 回收后重进走冷路径重建 agent，usage 从 0 重计、`context_*` 要等本进程跑完一轮才出现——主动读回也拿不到，属服务端口径；deferred agent build（lazy）完成后服务端会主动推 session.info 事件兜底思考等级。
 - 子代理事件（`subagent.*`）经 `message.*`/`tool.*` 转发，M0 不需要特殊处理。
 
 ## 4. 消息数据结构
@@ -114,7 +125,7 @@
 
 **客户端方案**（纯客户端，不改服务端）：
 1. **归属映射**（`src/ssh/namespaceMap.ts`）：SSH exec 一次只读扫描——逐 profile 库 + hermes 根库跑 `sqlite3 'file:<db>?mode=ro' "SELECT id || char(9) || session_key FROM sessions WHERE session_key LIKE 'agent:%'"`，`#DB` 标记行归属宿主，解析出 `sessionId → {namespace, host}`。远端无 sqlite3/exec 不可用（web 直连）→ 空映射静默降级（行为 = 现状）。库路径取自 profiles.list 的 `path`（本机实测：default → `~/.hermes`，main 等 → `~/.hermes/profiles/<name>`）。
-2. **列表分组**（`src/store/sessions.ts` refresh）：非宿主 profile = own + 从宿主列表过滤出 namespace==本 profile 的行（标记 `namespaced/hostProfile`），按 id 去重、started_at 降序；宿主 profile = own 排除 namespace 属于其他现存 profile 的行。连接后拉一次，`sessions.changed`/手动刷新重建。
+2. **列表分组**（`src/store/sessions.ts` refresh）：非宿主 profile = own + 从宿主列表过滤出 namespace==本 profile 的行（标记 `namespaced/hostProfile`），按 id 去重；排序保持服务端最近活跃序，跨库合并（有 foreign 行）时按扫描活跃时间交错（D033，`projectProfileSessions`）；宿主 profile = own 排除 namespace 属于其他现存 profile 的行。连接后拉一次，`sessions.changed`/手动刷新重建。
 3. **打开 foreign 会话**（`SessionListScreen.openSession`）：**不 resume**（避免错人格 agent），经 SSH exec 只读 sqlite 直读 messages 表投影历史（`src/ssh/remoteHistory.ts`，hex 传输 content，跳过 tool/hidden/compaction 行，上限 800 行）。聊天页顶部常驻浅灰提示条"QQ 来源会话 · 发送消息将派生到当前 profile 继续"。
 4. **首次发送派生**（chat store `forkForeignAndSend`）：只读历史 → `session.create {profile:X, parent_session_id: 原id, messages: 种子}` → attach 切到派生会话（旧 key 标 `migratedTo`，ChatScreen 换路由）→ `prompt.submit` 发这条。AsyncStorage 记 forkMap（`hermes.forkMap.v1`：原id → {forkId, profile}），之后打开直接 resume fork（正常 own 会话）。fork 失败在时间线出错误条。
 
@@ -124,3 +135,4 @@
 - token：见上文 SPA 提取（当前实测值可复用，但 dashboard 重启会变，脚本应每次重新提取）。
 - 实测 profile 列表：default、main(示例 agent，主助手)、finance(理财顾问)、mental-health(心理管家)、study(学习助手)、work(工作助理)。
 - **纪律**：harness 全流程只允许一次真实 `prompt.submit`（用最小提示如"回复 pong 两个字即可"），用完 `session.close` 清理；其余测试用 jest mock。
+- **写路径验证用 mock gateway**（2026-09-08 新增）：`scripts/mock-gateway.js` 是本地内存态 gateway（HTTP `/` 带 token + `/api/health` + WS JSON-RPC，已实现 profiles.list / session.list / session.resume / session.history / complete.slash / slash.exec(title) / session.title / model.options），照真实服务端行为保真——`/title` 只改内存且**不推事件**。写操作类改动（改名/发送等）的端到端验证一律打它，不打 live 9119（AGENTS.md 禁写）。范例：`scripts/desktop-title-refresh-smoke.js`（真实 Electron + 隔离 userData）。

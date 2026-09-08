@@ -2,12 +2,32 @@
  * TimelineView — 聊天时间线面板（inverted FlatList + 条目渲染 + 自绘滚动条 +
  * 回到底部 + 斜杠补全浮层挂点）。手机 ChatScreen 与桌面聊天列共用。
  *
+ * 贴底跟随策略（src/utils/timelineFollow.ts）：inverted 列表 offset 即距视觉
+ * 底部的距离——距底 ≤ 阈值视为「在底部」，流式等内容增长时显式钉底；用户上滑
+ * 离开底部即暂停跟随，并对内容增长做锚定补偿（内容在 offset 0 侧生长会把既有
+ * 内容往新消息方向推，不补偿则阅读位置被拖走）；滚回底部自动恢复。
+ *
  * 斜杠补全浮层必须挂在本面板的列表容器内（absolute 子元素渲染在父容器边界内，
  * Android 触摸命中才有保障）——通过 slashOverlay 插槽由调用方传入。
  */
 
-import React, {useCallback, useMemo, useRef, useState} from 'react';
-import {FlatList, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
+import React, {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import {
+  FlatList,
+  Platform,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 
 import {ApprovalCard} from '../components/ApprovalCard';
 import {Bubble} from '../components/Bubble';
@@ -19,37 +39,118 @@ import {Colors} from '../components/theme';
 import {StreamCursor, ThinkingBlock} from '../components/ThinkingBlock';
 import {ToolCallCard} from '../components/ToolCallCard';
 import {useChatStore} from '../store/chat';
+import {
+  isAtBottom,
+  offsetUntouched,
+  shouldPinToBottom,
+  shouldRestoreAnchor,
+} from '../utils/timelineFollow';
 import type {AssistantMsg, TimelineItem} from '../rpc/types';
 
 const EMPTY_ITEMS: TimelineItem[] = [];
 
-export function TimelineView({
-  sessionId,
-  showDetail,
-  onSelectText,
-  slashOverlay,
-}: {
+/** 发送消息等主动动作经此回到最新消息（父组件持 ref 调用） */
+export type TimelineViewHandle = {
+  revealBottom: () => void;
+};
+
+/** web 分支用：下一帧执行（此刻布局与 Chrome scroll anchoring 调整已完成） */
+function nextFrame(fn: () => void): void {
+  const raf = (globalThis as {requestAnimationFrame?: (cb: () => void) => number})
+    .requestAnimationFrame;
+  if (typeof raf === 'function') {
+    raf(fn);
+  } else {
+    setTimeout(fn, 16);
+  }
+}
+
+type TimelineViewProps = {
   sessionId: string;
   /** 是否显示工具调用/思考/推理等非对话内容 */
   showDetail: boolean;
   /** 助手气泡长按选择文本（手机端）；桌面端不传即关闭该交互 */
   onSelectText?: (text: string) => void;
   slashOverlay?: React.ReactNode;
-}) {
-  const chat = useChatStore(s => s.bySession[sessionId]);
-  const respondApproval = useChatStore(s => s.respondApproval);
-  const respondClarify = useChatStore(s => s.respondClarify);
+};
 
-  const items = useMemo(() => chat?.items ?? EMPTY_ITEMS, [chat?.items]);
-  const invertedItems = useMemo(() => [...items].reverse(), [items]);
+export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
+  function TimelineView({sessionId, showDetail, onSelectText, slashOverlay}, ref) {
+    const chat = useChatStore(s => s.bySession[sessionId]);
+    const respondApproval = useChatStore(s => s.respondApproval);
+    const respondClarify = useChatStore(s => s.respondClarify);
 
-  /** 列表滚动状态：驱动自绘滚动条与「回到底部」按钮 */
-  const [scroll, setScroll] = useState({offset: 0, content: 0, viewport: 0});
-  const listRef = useRef<FlatList<TimelineItem>>(null);
+    const items = useMemo(() => chat?.items ?? EMPTY_ITEMS, [chat?.items]);
+    const invertedItems = useMemo(() => [...items].reverse(), [items]);
 
-  const scrollTo = useCallback((offset: number, animated = false) => {
-    listRef.current?.scrollToOffset({offset, animated});
-  }, []);
+    /** 列表滚动状态：驱动自绘滚动条与「回到底部」按钮 */
+    const [scroll, setScroll] = useState({offset: 0, content: 0, viewport: 0});
+    const listRef = useRef<FlatList<TimelineItem>>(null);
+
+    /** 贴底跟随态（ref 避免流式高频重渲染）：初始与切会话时跟随 */
+    const followRef = useRef(true);
+    const lastOffsetRef = useRef(0);
+    const lastContentRef = useRef(0);
+
+    // 桌面切会话复用本组件实例（sessionId 变化不 remount），新会话一律重新贴底
+    useEffect(() => {
+      followRef.current = true;
+      lastOffsetRef.current = 0;
+      lastContentRef.current = 0;
+    }, [sessionId]);
+
+    const scrollTo = useCallback((offset: number, animated = false) => {
+      listRef.current?.scrollToOffset({offset, animated});
+    }, []);
+
+    /** 内容增长（流式 delta/图片加载等）：跟随→钉底；非跟随→锚定补偿 */
+    const handleContentGrowth = useCallback(
+      (deltaH: number) => {
+        if (shouldPinToBottom(followRef.current, deltaH)) {
+          listRef.current?.scrollToOffset({offset: 0, animated: false});
+          return;
+        }
+        if (!shouldRestoreAnchor(followRef.current, deltaH)) {
+          return;
+        }
+        const atGrowth = lastOffsetRef.current;
+        if (Platform.OS === 'web') {
+          // Chrome scroll anchoring 若已调整 scrollTop 会先产生 scroll 事件，
+          // 而 onScroll 有 32ms 节流——下一帧读滚动节点真实值判断，未被调整
+          // （也无用户滚动）才补偿，避免双重补偿
+          nextFrame(() => {
+            const node = listRef.current?.getScrollableNode() as unknown as
+              | {scrollTop?: number}
+              | null
+              | undefined;
+            if (
+              !followRef.current &&
+              node &&
+              typeof node.scrollTop === 'number' &&
+              offsetUntouched(node.scrollTop, atGrowth)
+            ) {
+              node.scrollTop = atGrowth + deltaH;
+            }
+          });
+        } else if (offsetUntouched(lastOffsetRef.current, atGrowth)) {
+          // 原生 ScrollView 无可见位置锚定（offset 不会自变），直接补偿
+          scrollTo(atGrowth + deltaH);
+        }
+      },
+      [scrollTo],
+    );
+
+    // 发送消息等主动动作：立即回底并恢复跟随（动画中间态不可靠，用瞬时滚动）
+    useImperativeHandle(
+      ref,
+      () => ({
+        revealBottom: () => {
+          followRef.current = true;
+          scrollTo(0);
+        },
+      }),
+      [scrollTo],
+    );
 
   const renderItem = useCallback(
     ({item}: {item: TimelineItem}) => {
@@ -144,11 +245,18 @@ export function TimelineView({
         onScroll={e => {
           // 合成事件是池化的，必须同步取出值，不能塞进 setState updater
           const offset = e.nativeEvent.contentOffset.y;
+          lastOffsetRef.current = offset;
+          followRef.current = isAtBottom(offset);
           setScroll(s => (s.offset === offset ? s : {...s, offset}));
         }}
-        onContentSizeChange={(_w, h) =>
-          setScroll(s => (s.content === h ? s : {...s, content: h}))
-        }
+        onContentSizeChange={(_w, h) => {
+          const delta = h - lastContentRef.current;
+          lastContentRef.current = h;
+          setScroll(s => (s.content === h ? s : {...s, content: h}));
+          if (delta !== 0) {
+            handleContentGrowth(delta);
+          }
+        }}
         onLayout={e => {
           const viewport = e.nativeEvent.layout.height;
           setScroll(s => (s.viewport === viewport ? s : {...s, viewport}));
@@ -165,7 +273,11 @@ export function TimelineView({
         <TouchableOpacity
           style={styles.jumpBtn}
           activeOpacity={0.85}
-          onPress={() => scrollTo(0, true)}>
+          onPress={() => {
+            // 显式置位：动画中间态 offset 会先越过阈值把跟随翻成 false
+            followRef.current = true;
+            scrollTo(0, true);
+          }}>
           <Text style={styles.jumpText}>↓ 回到底部</Text>
         </TouchableOpacity>
       ) : null}
@@ -173,7 +285,8 @@ export function TimelineView({
       {slashOverlay}
     </View>
   );
-}
+  },
+);
 
 /** 助手消息列：无头像占位，块列整宽（文本气泡/思考/工具/错误）。 */
 const AssistantRow = React.memo(function AssistantRow({

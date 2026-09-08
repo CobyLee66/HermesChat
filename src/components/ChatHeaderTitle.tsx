@@ -1,6 +1,10 @@
 /**
  * ChatHeaderTitle — 聊天顶栏标题：会话标题 + 模型/上下文/思考等级小字副标题。
- * 订阅 chat store，随 usage 事件自动刷新。手机原生 header 与桌面聊天列头共用。
+ * 订阅 chat store，随 usage/标题事件自动刷新。手机原生 header 与桌面聊天列头共用。
+ *
+ * title 参数只是「打开会话那一刻」的种子（路由参数/壳选中态），真正的标题以
+ * store 为准：/title 命令读回、首轮自动命名（session.title 事件）、
+ * session.info 都会改写 store 里的 title。
  */
 
 import React from 'react';
@@ -26,6 +30,8 @@ export const ChatHeaderTitle = React.memo(function ChatHeaderTitle({
   title: string;
 }) {
   const info = useChatStore(s => s.bySession[sessionId]?.info);
+  const storeTitle = useChatStore(s => s.bySession[sessionId]?.title);
+  const shownTitle = storeTitle || title || '会话';
   const used = info?.usage?.context_used;
   const max = info?.usage?.context_max;
   const parts: string[] = [];
@@ -42,5 +48,5 @@ export const ChatHeaderTitle = React.memo(function ChatHeaderTitle({
     parts.push(effort);
   }
   const subtitle = parts.length > 0 ? parts.join(' · ') : null;
-  return <HeaderTitleView title={title} subtitle={subtitle} />;
+  return <HeaderTitleView title={shownTitle} subtitle={subtitle} />;
 });

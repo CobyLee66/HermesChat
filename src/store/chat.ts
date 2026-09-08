@@ -7,7 +7,7 @@ import {create} from 'zustand';
 
 import {TimelineAggregator, type InflightSnapshot} from '../rpc/aggregator';
 import {getRpc} from '../rpc/runtime';
-import {executeSlash, looksLikeSlashCommand} from '../rpc/slash';
+import {executeSlash, looksLikeSlashCommand, parseSlash} from '../rpc/slash';
 import type {
   ApprovalChoice,
   ApprovalRequestPayload,
@@ -41,6 +41,12 @@ export interface PendingAttachment {
 
 export interface SessionChatState {
   items: TimelineItem[];
+  /**
+   * 会话标题（本地已知的最新值）。undefined = 未知（头部回退到路由参数）。
+   * 来源：attach 种子 / session.title 事件（首轮自动命名）/ session.info
+   * 事件 / /title 命令后主动读回（见 refreshTitle）。
+   */
+  title?: string;
   /** 最近一次 status.update（状态条） */
   status: {kind: string; text: string} | null;
   /** 最近一次 thinking.delta 占位（busy 指示器文本，空串已清除时为 null） */
@@ -131,6 +137,8 @@ interface ChatStore {
       storedSessionId?: string;
       /** foreign 只读视图标记（own 会话不传/传 null） */
       foreign?: {originId: string; hostProfile: string} | null;
+      /** 标题种子（会话列表行/新建会话标题）；缺省保留本地已有值 */
+      title?: string;
       /** resume 返回的挂起审批（事件单播给旧 transport，靠它补卡） */
       pendingApprovals?: ApprovalRequestPayload[];
       /** resume 返回的挂起澄清提问 */
@@ -149,6 +157,8 @@ interface ChatStore {
     liveSid: string,
     opts: {
       messages: ProjectedMessage[];
+      /** resume 返回的 info（重连后刷新模型/思考等级；usage 缺失时靠 syncSessionInfo 读回） */
+      info?: SessionInfoPayload;
       running?: boolean;
       inflight?: InflightSnapshot | null;
       pendingApprovals?: ApprovalRequestPayload[];
@@ -164,6 +174,27 @@ interface ChatStore {
    * 命令回显/输出走系统灰条，不产生用户气泡。
    */
   sendSlashCommand(sid: string, command: string): Promise<void>;
+  /**
+   * 读回权威标题：`session.title` RPC 只读形式（不带 title 参数，服务端返回
+   * 库中 sanitize 后的值），同时刷新本会话头部与会话列表行。
+   * /title 命令执行后调用——该命令由服务端 slash worker 写库，**不推任何
+   * 事件**（见 docs/protocol.md §2），只能主动读回。
+   */
+  refreshTitle(sid: string): Promise<void>;
+  /**
+   * 主动同步会话上下文信息：`session.usage` RPC 只读形式（与 session.usage
+   * 事件 / message.complete 同源口径，返回 model + context_used/max/percent）。
+   * 重进会话后调用——resume 返回的 info 普遍缺 usage（计数器是 gateway 进程
+   * 内状态，见 docs/protocol.md §3），不主动读回则顶栏「上下文用量」要等新
+   * 消息输出才出现。只认 live sid（持久化 id 一律 4001），须在 resume 之后调。
+   */
+  syncSessionInfo(sid: string): Promise<void>;
+  /**
+   * 重命名会话：`session.title` RPC 写形式（对齐官方 desktop 的 rename 路径，
+   * 优先 RPC 而非 slash 命令——结果结构化、无需读回），成功后本地落地标题
+   * （头部 + 会话列表行）；sanitize 被拒（4022 等）时抛错由调用方提示。
+   */
+  renameSession(sid: string, title: string): Promise<void>;
   /**
    * foreign 会话的首次发送：forkMap 命中 → resume 派生会话；否则
    * 只读 sqlite 取全量历史 → session.create(parent_session_id) 派生 →
@@ -246,6 +277,31 @@ export const useChatStore = create<ChatStore>((set, get) => {
     }
   }
 
+  /**
+   * 标题落地：更新本会话头部 + 会话列表行。空标题忽略（服务端可能还没
+   * 落库，用 "" 覆盖会把已有标题抹掉）。storedId 缺省用本地记录的持久化 id；
+   * 本地没有该会话状态（未打开）时只回填列表行，不建幽灵状态。
+   */
+  function applyTitle(sid: string, rawTitle: unknown, storedId?: string) {
+    const title = typeof rawTitle === 'string' ? rawTitle.trim() : '';
+    if (!title) {
+      return;
+    }
+    const prev = get().bySession[sid];
+    if (prev && prev.title !== title) {
+      set(s => ({
+        bySession: {
+          ...s.bySession,
+          [sid]: {...(s.bySession[sid] ?? EMPTY), title},
+        },
+      }));
+    }
+    const rowId = storedId || prev?.storedSessionId;
+    if (rowId) {
+      useSessionsStore.getState().patchTitle(rowId, title);
+    }
+  }
+
   return {
     bySession: {},
 
@@ -271,6 +327,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
         ...(opts?.storedSessionId !== undefined
           ? {storedSessionId: opts.storedSessionId}
           : null),
+        // 标题种子只在非空时覆盖：重进时列表行可能还是旧值，不能把
+        // 已读回的新标题降级（空串保留本地已有标题）
+        ...(opts?.title ? {title: opts.title} : null),
         // attach = 重新进入会话：foreign 标记以本次传入为准（own 会话清除）
         foreign: opts?.foreign ?? null,
         forking: false,
@@ -312,6 +371,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
             thinkingHint: null,
             busy: opts.running ?? false,
             resumeFailed: false,
+            // resume 返回的 info（模型/思考等级可能已变）：有则整体替换，
+            // usage 缺口由调用方随后的 syncSessionInfo 读回补齐
+            ...(opts.info ? {info: opts.info} : null),
           },
         },
       }));
@@ -370,6 +432,22 @@ export const useChatStore = create<ChatStore>((set, get) => {
             },
           },
         }));
+        // session.info 也带 title（服务端 _session_info）——改名 RPC/首轮命名
+        // 后的 info 事件都靠它刷新头部与列表
+        applyTitle(
+          sid,
+          info.title,
+          typeof info.stored_session_id === 'string'
+            ? info.stored_session_id
+            : undefined,
+        );
+        return;
+      }
+      if (type === 'session.title') {
+        // 首轮自动命名推送。注意 payload.session_id 是持久化 id（事件帧的
+        // session_id 才是 live sid，wireEvents 已用它作 key）
+        const p = (payload ?? {}) as {session_id?: string; title?: string};
+        applyTitle(sid, p.title, p.session_id);
         return;
       }
       if (type === 'session.reclaimed') {
@@ -443,6 +521,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
       const agg = aggFor(sid);
       agg.appendSystemMessage(command);
       snapshot(sid, {});
+      const {name} = parseSlash(command);
       await executeSlash({
         command,
         sessionId: sid,
@@ -457,6 +536,86 @@ export const useChatStore = create<ChatStore>((set, get) => {
           send: msg => submitPlain(sid, msg),
         },
       });
+      // /title 由服务端 slash worker 直接写库（回显 "Session title set: …"），
+      // 服务端不推 session.title/session.info 事件 → 主动读回权威标题，
+      // 否则头部/列表要等重连或重进才刷新
+      if (name === 'title') {
+        await get().refreshTitle(sid);
+      }
+    },
+
+    async refreshTitle(sid) {
+      try {
+        const r = await getRpc().call<{title?: string; session_key?: string}>(
+          'session.title',
+          {session_id: sid},
+        );
+        applyTitle(sid, r?.title, r?.session_key);
+      } catch (e) {
+        // 读回失败不打扰用户：命令输出已显示结果，头部保持旧标题
+        dlog(
+          'WARN',
+          `读回会话标题失败 ${sid.slice(0, 8)}: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        );
+      }
+    },
+
+    async syncSessionInfo(sid) {
+      try {
+        // RPC 顶层即 usage dict（与 session.usage 事件 payload.usage 同源）；
+        // agent 未建时服务端返回 {calls,input,output,total} 零计数（无 model、
+        // 无 context_*——落地后顶栏用量段自然不显示，属服务端口径）
+        const usage = await getRpc().call<UsageInfo>('session.usage', {
+          session_id: sid,
+        });
+        if (!usage || typeof usage !== 'object') {
+          return;
+        }
+        // turn 已开始则让位：ticker 每秒推 session.usage，读回值必是旧的
+        if (aggregators.get(sid)?.isStreaming()) {
+          return;
+        }
+        const prev = get().bySession[sid] ?? EMPTY;
+        const model = typeof usage.model === 'string' ? usage.model : '';
+        set(s => ({
+          bySession: {
+            ...s.bySession,
+            [sid]: {
+              ...prev,
+              info: {
+                ...(prev.info ?? {}),
+                usage,
+                // usage.model 是当前生效模型，顺带校正模型段（服务端侧
+                // 切模型未推 session.info 事件时也能对齐）
+                ...(model ? {model} : null),
+              },
+            },
+          },
+        }));
+      } catch (e) {
+        // 读回失败不打扰用户（服务端已回收/live sid 失效等），顶栏保持现状
+        dlog(
+          'WARN',
+          `读回会话用量失败 ${sid.slice(0, 8)}: ${
+            e instanceof Error ? e.message : String(e)
+          }`,
+        );
+      }
+    },
+
+    async renameSession(sid, title) {
+      const trimmed = title.trim();
+      if (!trimmed) {
+        return;
+      }
+      const r = await getRpc().call<{title?: string}>('session.title', {
+        session_id: sid,
+        title: trimmed,
+      });
+      // 服务端 sanitize 后的值优先；缺省用提交值
+      applyTitle(sid, r?.title ?? trimmed);
     },
 
     async forkForeignAndSend(sid, trimmed) {
@@ -533,6 +692,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
           info,
           profile,
           storedSessionId: storedId,
+          // 派生会话的服务端标题为空：先用来源会话标题占位（首轮自动命名后覆盖）
+          title: st?.title,
           pendingApprovals,
           pendingClarifies,
           running,

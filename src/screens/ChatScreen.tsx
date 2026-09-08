@@ -1,4 +1,4 @@
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   BackHandler,
   StyleSheet,
@@ -15,7 +15,10 @@ import {SlashSuggest} from '../components/SlashSuggest';
 import {Colors} from '../components/theme';
 import {ChatInputBar} from '../panels/ChatInputBar';
 import {ChatOverlays, type ChatOverlaysState} from '../panels/ChatOverlays';
-import {TimelineView} from '../panels/TimelineView';
+import {
+  TimelineView,
+  type TimelineViewHandle,
+} from '../panels/TimelineView';
 import {useChatComposer} from '../panels/useChatComposer';
 import {useChatStore} from '../store/chat';
 import {useConnectionStore} from '../store/connection';
@@ -43,10 +46,16 @@ export function ChatScreen() {
     setOverlays(s => ({...s, modelPickerVisible: true}));
   }, []);
 
-  // 输入框状态 + 斜杠补全 + 发送分流（与桌面 ChatPane 共用）
+  // 输入框状态 + 斜杠补全 + 发送分流（与桌面 ChatPane 共用）；
+  // 发送即回底恢复跟随（上滑浏览时发消息也能立刻看到回复）
+  const timelineRef = useRef<TimelineViewHandle>(null);
+  const onAfterSend = useCallback(() => {
+    timelineRef.current?.revealBottom();
+  }, []);
   const {input, setInput, slash, onInputKeyPress, onSend} = useChatComposer(
     sessionId,
     openModelPicker,
+    onAfterSend,
   );
 
   /** 是否显示工具调用/思考/推理等非对话内容（顶栏菜单切换） */
@@ -161,6 +170,7 @@ export function ChatScreen() {
         </View>
       ) : null}
       <TimelineView
+        ref={timelineRef}
         sessionId={sessionId}
         showDetail={showDetail}
         onSelectText={openTextSelect}
@@ -188,6 +198,7 @@ export function ChatScreen() {
         setState={patch => setOverlays(s => ({...s, ...patch}))}
         showDetail={showDetail}
         onToggleShowDetail={() => setShowDetail(v => !v)}
+        onSessionDeleted={() => navigation.goBack()}
       />
 
       {/* 文本选择层：直接在屏幕窗口树里渲染（Modal 对话框里可编辑 EditText

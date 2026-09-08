@@ -18,6 +18,7 @@ import {
   sourceBelongsToCategory,
   type SessionFilterCategory,
 } from '../utils/sessionSources';
+import {sortSessionRows, type SessionSortMode} from '../utils/sessionSort';
 import type {SessionListRow} from '../rpc/types';
 import {deleteSessionFlow, openSessionFlow, type OpenedSession} from './sessionFlows';
 
@@ -46,6 +47,11 @@ const FILTER_OPTIONS: {key: SessionFilterCategory; label: string}[] = [
   {key: 'chats', label: '聊天'},
   {key: 'automation', label: '自动化'},
   {key: 'all', label: '全部'},
+];
+
+const SORT_OPTIONS: {key: SessionSortMode; label: string}[] = [
+  {key: 'recent', label: '最近消息'},
+  {key: 'created', label: '创建时间'},
 ];
 
 /** 分隔线组件提为模块级稳定引用：内联箭头函数每次 render 换组件类型，行间线反复重挂 */
@@ -91,6 +97,8 @@ export function SessionListPanel({
   const avatarUri = useProfilesStore(s => s.avatars[profile]);
   const sessions = useSessionsStore(s => s.byProfile[profile] ?? EMPTY_SESSIONS);
   const refresh = useSessionsStore(s => s.refresh);
+  const sortMode = useSessionsStore(s => s.sortMode);
+  const setSortMode = useSessionsStore(s => s.setSortMode);
   const [filter, setFilter] = useState<SessionFilterCategory>('chats');
 
   // 面板挂载/切换 profile 时刷新（原屏幕 effect 行为保持）
@@ -99,8 +107,12 @@ export function SessionListPanel({
   }, [refresh, profile, refreshTrigger]);
 
   const filteredSessions = useMemo(
-    () => sessions.filter(s => sourceBelongsToCategory(s.source, filter)),
-    [sessions, filter],
+    () =>
+      sortSessionRows(
+        sessions.filter(s => sourceBelongsToCategory(s.source, filter)),
+        sortMode,
+      ),
+    [sessions, filter, sortMode],
   );
 
   const openSession = useCallback(
@@ -141,6 +153,23 @@ export function SessionListPanel({
           </TouchableOpacity>
         ))}
       </View>
+      <View style={styles.sortBar}>
+        {SORT_OPTIONS.map(o => (
+          <TouchableOpacity
+            key={o.key}
+            style={[styles.sortSeg, sortMode === o.key && styles.sortSegActive]}
+            onPress={() => setSortMode(o.key)}
+            activeOpacity={0.8}>
+            <Text
+              style={[
+                styles.sortText,
+                sortMode === o.key && styles.sortTextActive,
+              ]}>
+              {o.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
       <FlatList
         data={filteredSessions}
         keyExtractor={s => s.id}
@@ -159,6 +188,7 @@ export function SessionListPanel({
             item={item}
             avatarName={nicknameText}
             avatarUri={avatarUri}
+            showActivityTime={sortMode === 'recent'}
             onOpen={openSession}
             onDelete={onDelete}
             onRowContextMenu={onRowContextMenu}
@@ -174,6 +204,7 @@ function SessionRow({
   item,
   avatarName,
   avatarUri,
+  showActivityTime,
   onOpen,
   onDelete,
   onRowContextMenu,
@@ -181,6 +212,8 @@ function SessionRow({
   item: SessionListRow;
   avatarName: string;
   avatarUri?: string;
+  /** 「最近消息」档展示行活跃时间（缺失回退创建时间）；创建时间档展示 started_at */
+  showActivityTime: boolean;
   onOpen: (row: SessionListRow) => void;
   onDelete: (sessionId: string, title: string) => void;
   onRowContextMenu?: (row: SessionListRow, pos: RowContextMenuPos) => void;
@@ -228,7 +261,11 @@ function SessionRow({
               {automationSourceLabel(item.source)}
             </Text>
           ) : null}
-          <Text style={styles.time}>{formatTime(item.started_at)}</Text>
+          <Text style={styles.time}>
+            {formatTime(
+              showActivityTime ? item.last_active || item.started_at : item.started_at,
+            )}
+          </Text>
         </View>
         <Text style={styles.preview} numberOfLines={1}>
           {item.preview || `${item.message_count} 条消息`}
@@ -258,6 +295,25 @@ const styles = StyleSheet.create({
   filterSegActive: {backgroundColor: Colors.card},
   filterText: {fontSize: 13, color: Colors.textSecondary},
   filterTextActive: {color: Colors.text, fontWeight: '600'},
+  // 排序档：同过滤条样式，但按内容自适应宽度（两档不必占满一行）
+  sortBar: {
+    flexDirection: 'row',
+    alignSelf: 'flex-start',
+    marginHorizontal: 12,
+    marginBottom: 8,
+    backgroundColor: Colors.fill,
+    borderRadius: 9,
+    padding: 2,
+  },
+  sortSeg: {
+    paddingVertical: 5,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+    borderRadius: 7,
+  },
+  sortSegActive: {backgroundColor: Colors.card},
+  sortText: {fontSize: 12, color: Colors.textSecondary},
+  sortTextActive: {color: Colors.text, fontWeight: '600'},
   row: {
     flexDirection: 'row',
     alignItems: 'center',

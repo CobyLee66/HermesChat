@@ -160,11 +160,16 @@ describe('collectDbPaths / buildScanCommand', () => {
     expect(dbPaths).not.toContain('/data/state.db');
   });
 
-  it('扫描命令：只读 mode=ro、#DB 标记、agent:% 过滤、路径加引号', () => {
+  it('扫描命令：只读 mode=ro、#DB 标记、全表带活跃时间、路径加引号', () => {
     const cmd = buildScanCommand(['/h/.hermes/state.db', "/h/o'b/state.db"]);
     expect(cmd).toContain('mode=ro');
     expect(cmd).toContain('#DB $db');
-    expect(cmd).toContain(`session_key LIKE 'agent:%'`);
+    // 活跃时间 = MAX(last_activity_at 心跳, 最新消息时间)，兜底 started_at
+    expect(cmd).toContain('last_activity_at');
+    expect(cmd).toContain('MAX(m.timestamp)');
+    expect(cmd).toContain('s.started_at, 0');
+    // 全表扫描（归属映射在解析侧过滤 agent: 前缀），不再 LIKE 过滤
+    expect(cmd).not.toContain(`session_key LIKE 'agent:%'`);
     expect(cmd).toContain(`'/h/.hermes/state.db'`);
     // 单引号转义
     expect(cmd).toContain(`'/h/o'\\''b/state.db'`);
@@ -174,18 +179,19 @@ describe('collectDbPaths / buildScanCommand', () => {
 // ─── 扫描输出解析 ────────────────────────────────────────────────
 
 describe('parseScanOutput', () => {
-  it('按 #DB 标记归属宿主，垃圾行/未知宿主跳过', () => {
+  it('按 #DB 标记归属宿主，垃圾行/未知宿主跳过；活跃时间全行收集', () => {
     const stdout = [
       '#DB /h/.hermes/profiles/main/state.db',
-      'rowA\tagent:finance:qqbot:dm:HASH1',
-      'rowB\tagent:main:qqbot:dm:HASH2',
+      'rowA\tagent:finance:qqbot:dm:HASH1\t1000.5',
+      'rowB\tagent:main:qqbot:dm:HASH2\t2000',
+      'appRow\t\t2500.75', // App 创建（无 agent: 前缀）：只进活跃表
       'garbage line without tab',
       '\t',
       'noTabLine',
       '#DB /h/.hermes/profiles/finance/state.db',
-      'rowC\tagent:work:qqbot:dm:HASH3',
+      'rowC\tagent:work:qqbot:dm:HASH3\tnot-a-number', // 非数字活跃时间：仅归属
       '#DB /h/unknown/state.db',
-      'rowD\tagent:finance:qqbot:dm:HASH4',
+      'rowD\tagent:finance:qqbot:dm:HASH4\t3000', // 宿主未知：不进归属表、进活跃表
     ].join('\n');
     const map = parseScanOutput(stdout, {
       '/h/.hermes/profiles/main/state.db': 'main',
@@ -196,6 +202,12 @@ describe('parseScanOutput', () => {
       rowB: {namespace: 'main', host: 'main'},
       rowC: {namespace: 'work', host: 'finance'},
       // rowD：宿主不在已知 profile 表 → 丢弃
+    });
+    expect(map.lastActiveById).toEqual({
+      rowA: 1000.5,
+      rowB: 2000,
+      appRow: 2500.75,
+      rowD: 3000,
     });
   });
 });
@@ -211,8 +223,8 @@ describe('fetchNamespaceMap / foreignHostsOf', () => {
         stdout: [
           '#DB /h/.hermes/state.db',
           '#DB /h/.hermes/profiles/main/state.db',
-          'rowA\tagent:finance:qqbot:dm:H1',
-          'rowB\tagent:main:qqbot:dm:H2',
+          'rowA\tagent:finance:qqbot:dm:H1\t111',
+          'rowB\tagent:main:qqbot:dm:H2\t222',
         ].join('\n'),
         stderr: '',
         exitCode: 0,
@@ -226,6 +238,7 @@ describe('fetchNamespaceMap / foreignHostsOf', () => {
     expect(seenCmd).toContain('/h/.hermes/state.db');
     expect(map.byId.rowA).toEqual({namespace: 'finance', host: 'main'});
     expect(map.byId.rowB).toEqual({namespace: 'main', host: 'main'});
+    expect(map.lastActiveById).toEqual({rowA: 111, rowB: 222});
     // finance 的 foreign 宿主 = main；main 自身不是自己的 foreign 宿主
     expect(foreignHostsOf(map, 'finance', 'finance')).toEqual(['main']);
     expect(foreignHostsOf(map, 'main', 'main')).toEqual([]);
@@ -251,10 +264,11 @@ describe('projectProfileSessions 分组过滤', () => {
       qqMain: {namespace: 'main', host: 'main'},
       qqGhost: {namespace: 'ghost', host: 'main'}, // ghost 不在现存 profile 里
     },
+    lastActiveById: {},
   };
   const known = new Set(['default', 'main', 'finance', 'work']);
 
-  it('宿主（main）视角：排除其他现存 profile 的命名空间，保留无归属/自身/未知', () => {
+  it('宿主（main）视角：排除其他现存 profile 的命名空间，单库行保持服务端返回序', () => {
     const own = [
       row('app1', 300), // App 创建（无映射）
       row('qqFin', 200),
@@ -271,7 +285,20 @@ describe('projectProfileSessions 分组过滤', () => {
     expect(out.map(r => r.id)).toEqual(['app1', 'qqMain', 'qqGhost']);
   });
 
-  it('foreign 视角（finance）：own + 大库 foreign 行合并去重、started_at 降序', () => {
+  it('无 foreign：不按 started_at 重排（服务端 last_active 序是唯一权威）', () => {
+    const own = [row('oldButActive', 100), row('newIdle', 900)];
+    const out = projectProfileSessions({
+      own,
+      foreign: [],
+      map: MAP,
+      profile: 'main',
+      knownProfiles: known,
+    });
+    // started_at 降序会得到 [newIdle, oldButActive]，必须保持原序
+    expect(out.map(r => r.id)).toEqual(['oldButActive', 'newIdle']);
+  });
+
+  it('foreign 视角（finance）：合并去重；无活跃数据时回退 started_at 降序', () => {
     const own = [row('ownF', 400)];
     const foreign = [
       row('qqFin', 200, {namespaced: true, hostProfile: 'main'}),
@@ -289,6 +316,47 @@ describe('projectProfileSessions 分组过滤', () => {
     expect(out[1].namespaced).toBe(true);
     expect(out[1].hostProfile).toBe('main');
   });
+
+  it('有 foreign：按扫描活跃时间跨库交错（活跃时间 ≠ started_at）', () => {
+    const map: NamespaceMap = {
+      byId: {qqFin: {namespace: 'finance', host: 'main'}},
+      lastActiveById: {ownOld: 100, qqNew: 500, ownMid: 300},
+    };
+    const own = [
+      row('ownOld', 100, {last_active: 100}),
+      row('ownMid', 300, {last_active: 300}),
+    ];
+    const foreign = [row('qqNew', 200, {namespaced: true, hostProfile: 'main'})];
+    const out = projectProfileSessions({
+      own,
+      foreign,
+      map,
+      profile: 'finance',
+      knownProfiles: known,
+    });
+    // started_at 序是 [ownMid(300), qqNew(200), ownOld(100)]；
+    // 活跃序应为 qqNew(500) > ownMid(300) > ownOld(100)
+    expect(out.map(r => r.id)).toEqual(['qqNew', 'ownMid', 'ownOld']);
+  });
+
+  it('扫描活跃时间挂到行（last_active）；与 started_at 相同/缺失时不改行', () => {
+    const map: NamespaceMap = {
+      byId: {},
+      lastActiveById: {a: 111, b: 222},
+    };
+    const own = [row('a', 111), row('b', 999), row('c', 50)];
+    const out = projectProfileSessions({
+      own,
+      foreign: [],
+      map,
+      profile: 'finance',
+      knownProfiles: known,
+    });
+    expect(out.find(r => r.id === 'a')?.last_active).toBeUndefined(); // 与 started_at 相同 → 不复制行
+    expect(out.find(r => r.id === 'b')?.last_active).toBe(222);
+    expect(out.find(r => r.id === 'c')?.last_active).toBeUndefined(); // 扫描缺失
+    expect(out.map(r => r.id)).toEqual(['a', 'b', 'c']); // 服务端原序
+  });
 });
 
 // ─── sessions store refresh 分组 ──────────────────────────────
@@ -305,8 +373,8 @@ describe('sessions store refresh 分组', () => {
       stdout: [
         '#DB /h/.hermes/state.db',
         '#DB /h/.hermes/profiles/main/state.db',
-        'rowA\tagent:finance:qqbot:dm:H1',
-        'rowB\tagent:main:qqbot:dm:H2',
+        'rowA\tagent:finance:qqbot:dm:H1\t1700',
+        'rowB\tagent:main:qqbot:dm:H2\t1600',
         '#DB /h/.hermes/profiles/finance/state.db',
       ].join('\n'),
       stderr: '',
@@ -342,8 +410,8 @@ describe('sessions store refresh 分组', () => {
     setExecRemote(async () => ({
       stdout: [
         '#DB /h/.hermes/profiles/main/state.db',
-        'rowA\tagent:finance:qqbot:dm:H1',
-        'rowB\tagent:main:qqbot:dm:H2',
+        'rowA\tagent:finance:qqbot:dm:H1\t1700',
+        'rowB\tagent:main:qqbot:dm:H2\t1600',
       ].join('\n'),
       stderr: '',
       exitCode: 0,
@@ -363,9 +431,43 @@ describe('sessions store refresh 分组', () => {
 
     await useSessionsStore.getState().refresh('main', true);
     const list = useSessionsStore.getState().byProfile.main;
-    // rowA（finance 命名空间）被排除；按 started_at 降序
-    expect(list.map(r => r.id)).toEqual(['cron1', 'rowB']);
+    // rowA（finance 命名空间）被排除；无 foreign → 保持服务端返回序
+    expect(list.map(r => r.id)).toEqual(['rowB', 'cron1']);
     expect(list.every(r => !r.namespaced)).toBe(true);
+  });
+
+  it('finance：跨库行按扫描活跃时间交错（最近消息档口径）', async () => {
+    setExecRemote(async () => ({
+      stdout: [
+        '#DB /h/.hermes/profiles/main/state.db',
+        'qqA\tagent:finance:qqbot:dm:H1\t5000', // QQ 会话刚活跃
+        '#DB /h/.hermes/profiles/finance/state.db',
+        'ownOld\t\t1000', // App 创建的老会话（创建时间晚于 qqA 但久未活跃）
+        'ownNew\t\t900',
+      ].join('\n'),
+      stderr: '',
+      exitCode: 0,
+    }));
+    mockCall.mockImplementation(async (method: string, params) => {
+      if (method === 'session.list') {
+        const p = (params as {profile: string}).profile;
+        if (p === 'main') {
+          return {sessions: [row('qqA', 200, {source: 'qqbot'})]};
+        }
+        if (p === 'finance') {
+          // own 库按服务端 last_active 序返回
+          return {sessions: [row('ownOld', 3000), row('ownNew', 800)]};
+        }
+        return {sessions: []};
+      }
+      throw new Error(`unexpected rpc: ${method}`);
+    });
+
+    await useSessionsStore.getState().refresh('finance', true);
+    const list = useSessionsStore.getState().byProfile.finance;
+    // 活跃序 qqA(5000) > ownOld(1000) > ownNew(900)；started_at 序会错置 ownOld 第一
+    expect(list.map(r => r.id)).toEqual(['qqA', 'ownOld', 'ownNew']);
+    expect(list.map(r => r.last_active)).toEqual([5000, 1000, 900]);
   });
 
   it('exec 不可用（web）：映射为空，行为 = 现状（只拉自己）', async () => {

@@ -26,6 +26,7 @@ export async function createSessionFlow(profile: string): Promise<OpenedSession>
     info: result.info,
     profile,
     storedSessionId: result.stored_session_id,
+    title: '新会话',
   });
   return {sessionId: result.session_id, title: '新会话'};
 }
@@ -52,11 +53,13 @@ export async function openSessionFlow(
         info: result.info,
         profile,
         storedSessionId: result.stored_session_id ?? fork.forkId,
+        title,
         pendingApprovals: result.pending_approval,
         pendingClarifies: result.pending_clarify,
         running: result.running,
         inflight: result.inflight,
       });
+      void useChatStore.getState().syncSessionInfo(result.session_id);
       return {sessionId: result.session_id, title};
     }
     const exec = getExecRemote();
@@ -71,6 +74,7 @@ export async function openSessionFlow(
       messages,
       profile,
       storedSessionId: row.id,
+      title,
       foreign: {originId: row.id, hostProfile: row.hostProfile},
     });
     return {sessionId: row.id, title};
@@ -83,31 +87,38 @@ export async function openSessionFlow(
     info: result.info,
     profile,
     storedSessionId: result.stored_session_id ?? row.id,
+    title,
     pendingApprovals: result.pending_approval,
     pendingClarifies: result.pending_clarify,
     // turn 进行中（如 cron/QQ 侧发起的回合）：恢复流式尾部实时续流
     running: result.running,
     inflight: result.inflight,
   });
+  // 重进会话主动同步上下文信息：resume 返回的 info 普遍缺 usage（计数器是
+  // gateway 进程内状态），只读读回 session.usage，顶栏「模型/上下文用量」
+  // 不等新消息输出即正确。fire-and-forget，不阻塞导航。
+  void useChatStore.getState().syncSessionInfo(liveSid);
   return {sessionId: liveSid, title};
 }
 
-/** 删除会话（确认框 → remove），手机长按与桌面右键菜单共用。 */
+/** 删除会话（确认框 → remove），返回是否已删除（确认取消/失败均 false）。 */
 export async function deleteSessionFlow(
   profile: string,
   sessionId: string,
   title: string,
-): Promise<void> {
+): Promise<boolean> {
   const ok = await confirmDialog(
     '删除会话',
     `确定删除「${title || '未命名会话'}」吗？`,
   );
   if (!ok) {
-    return;
+    return false;
   }
   try {
     await useSessionsStore.getState().remove(profile, sessionId);
   } catch (e) {
     alertError('删除失败', e instanceof Error ? e.message : String(e));
+    return false;
   }
+  return true;
 }

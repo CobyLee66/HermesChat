@@ -139,14 +139,19 @@ export class SshManager implements Connector {
         });
         const liveSid = result?.session_id || sid;
         // resume 返回历史 + 断线期间挂起的审批/澄清（事件单播给旧
-        // transport，错过只能靠 pending_* 恢复）：重挂到原 key 或迁移新 key
+        // transport，错过只能靠 pending_* 恢复）：重挂到原 key 或迁移新 key。
+        // info 一并落地（断线期间模型/思考等级可能已变）
         chat.reattachAfterResume(sid, liveSid, {
           messages: result?.messages ?? [],
+          info: result?.info,
           running: result?.running,
           inflight: result?.inflight,
           pendingApprovals: result?.pending_approval,
           pendingClarifies: result?.pending_clarify,
         });
+        // 重连后主动读回 usage：resume 的 info 普遍缺 usage（计数器是
+        // gateway 进程内状态），不读回则顶栏用量要等新消息输出才恢复
+        void chat.syncSessionInfo(liveSid);
       } catch {
         // 单个会话恢复失败不阻塞其他会话（服务端可能已回收）
         chat.markResumeFailed(sid);

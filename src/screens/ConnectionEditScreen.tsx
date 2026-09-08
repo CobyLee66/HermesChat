@@ -26,20 +26,23 @@ import RNFS from 'react-native-fs';
 import {
   EMPTY_PROFILE,
   useConnectionStore,
-  type ConnectionProfile,
   type ConnectionType,
 } from '../store/connection';
 import {Colors} from '../components/theme';
 import {hasDesktopBridge} from '../ssh/desktopHermesSsh';
 import {desktopPickTextFile} from '../desktop/desktopMedia';
 import {alertError} from '../utils/alert';
+import {
+  formatProfileErrors,
+  validateProfileForm,
+  type ProfileForm,
+  type ProfileFormErrors,
+} from '../utils/profileValidation';
 import {useKeyboardHeight} from '../utils/useKeyboardHeight';
 import type {RootStackParamList} from '../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'ConnectionEdit'>;
 type EditRoute = RouteProp<RootStackParamList, 'ConnectionEdit'>;
-
-type ProfileForm = Omit<ConnectionProfile, 'id'>;
 
 export function ConnectionEditScreen() {
   const navigation = useNavigation<Nav>();
@@ -59,14 +62,42 @@ export function ConnectionEditScreen() {
   const [form, setForm] = useState<ProfileForm>(() =>
     existing ? {...existing} : {...EMPTY_PROFILE},
   );
+  const [errors, setErrors] = useState<ProfileFormErrors>({});
 
   const patch = (p: Partial<ProfileForm>) => setForm(f => ({...f, ...p}));
+
+  /** 更新表单并清除指定字段的错误标注（用户改正后红框/红字即时消失） */
+  const patchClearing = (
+    p: Partial<ProfileForm>,
+    keys: (keyof ProfileFormErrors)[],
+  ) => {
+    setForm(f => ({...f, ...p}));
+    setErrors(prev => {
+      if (!keys.some(k => prev[k])) {
+        return prev;
+      }
+      const next = {...prev};
+      for (const k of keys) {
+        delete next[k];
+      }
+      return next;
+    });
+  };
+
+  /** 出错字段的输入框红边框 */
+  const inputStyle = (err: string | undefined) =>
+    err ? [styles.input, styles.inputError] : styles.input;
+
+  /** 字段下方的红字错误提示 */
+  const fieldError = (err: string | undefined) =>
+    err ? <Text style={styles.errorText}>{err}</Text> : null;
 
   /** 切换连接类型：直连模式下 host/port 代填 gateway 默认值，SSH 亦然 */
   const switchType = (t: ConnectionType) => {
     if (t === form.type) {
       return;
     }
+    setErrors({});
     if (t === 'direct') {
       patch({
         type: 'direct',
@@ -92,7 +123,9 @@ export function ConnectionEditScreen() {
         if (!picked) {
           return;
         }
-        patch({privateKey: picked.content, keyFileName: picked.name});
+        patchClearing({privateKey: picked.content, keyFileName: picked.name}, [
+          'auth',
+        ]);
         return;
       }
       const [res] = await pick({type: [types.allFiles]});
@@ -105,7 +138,9 @@ export function ConnectionEditScreen() {
         throw new Error(copy.copyError);
       }
       const content = await RNFS.readFile(copy.localUri, 'utf8');
-      patch({privateKey: content, keyFileName: res.name ?? '已选择'});
+      patchClearing({privateKey: content, keyFileName: res.name ?? '已选择'}, [
+        'auth',
+      ]);
     } catch (e) {
       if (
         !hasDesktopBridge() &&
@@ -128,6 +163,12 @@ export function ConnectionEditScreen() {
       host: form.host.trim(),
       username: form.username.trim(),
     };
+    const errs = validateProfileForm(data);
+    if (Object.keys(errs).length > 0) {
+      setErrors(errs);
+      alertError('无法保存', formatProfileErrors(errs));
+      return;
+    }
     let id = profileId ?? null;
     if (id) {
       updateProfile(id, data);
@@ -151,6 +192,7 @@ export function ConnectionEditScreen() {
           value={form.name}
           onChangeText={v => patch({name: v})}
           placeholder={form.type === 'direct' ? '例如：本机 gateway' : '例如：公司服务器'}
+          placeholderTextColor={Colors.textSecondary}
           autoCorrect={false}
         />
 
@@ -189,27 +231,32 @@ export function ConnectionEditScreen() {
           <>
             <Text style={styles.label}>Gateway 主机</Text>
             <TextInput
-              style={styles.input}
+              style={inputStyle(errors.host)}
               value={form.host}
-              onChangeText={v => patch({host: v})}
+              onChangeText={v => patchClearing({host: v}, ['host'])}
               placeholder="127.0.0.1"
+              placeholderTextColor={Colors.textSecondary}
               autoCapitalize="none"
               autoCorrect={false}
             />
+            {fieldError(errors.host)}
             <Text style={styles.label}>端口</Text>
             <TextInput
-              style={styles.input}
+              style={inputStyle(errors.port)}
               value={form.port}
-              onChangeText={v => patch({port: v})}
+              onChangeText={v => patchClearing({port: v}, ['port'])}
               placeholder="9119"
+              placeholderTextColor={Colors.textSecondary}
               keyboardType="number-pad"
             />
+            {fieldError(errors.port)}
             <Text style={styles.label}>Session Token（可选）</Text>
             <TextInput
               style={styles.input}
               value={form.token}
               onChangeText={v => patch({token: v})}
               placeholder="留空则自动从 gateway 首页提取"
+              placeholderTextColor={Colors.textSecondary}
               secureTextEntry
               autoCapitalize="none"
             />
@@ -227,41 +274,49 @@ export function ConnectionEditScreen() {
           <>
             <Text style={styles.label}>SSH 主机</Text>
             <TextInput
-              style={styles.input}
+              style={inputStyle(errors.host)}
               value={form.host}
-              onChangeText={v => patch({host: v})}
+              onChangeText={v => patchClearing({host: v}, ['host'])}
               placeholder="例如 192.168.1.10"
+              placeholderTextColor={Colors.textSecondary}
               autoCapitalize="none"
               autoCorrect={false}
             />
+            {fieldError(errors.host)}
             <View style={styles.row}>
               <View style={styles.flex2}>
                 <Text style={styles.label}>端口</Text>
                 <TextInput
-                  style={styles.input}
+                  style={inputStyle(errors.port)}
                   value={form.port}
-                  onChangeText={v => patch({port: v})}
+                  onChangeText={v => patchClearing({port: v}, ['port'])}
                   placeholder="22"
+                  placeholderTextColor={Colors.textSecondary}
                   keyboardType="number-pad"
                 />
+                {fieldError(errors.port)}
               </View>
               <View style={styles.flex3}>
                 <Text style={styles.label}>用户名</Text>
                 <TextInput
-                  style={styles.input}
+                  style={inputStyle(errors.username)}
                   value={form.username}
-                  onChangeText={v => patch({username: v})}
+                  onChangeText={v => patchClearing({username: v}, ['username'])}
+                  placeholder="例如 root"
+                  placeholderTextColor={Colors.textSecondary}
                   autoCapitalize="none"
                   autoCorrect={false}
                 />
+                {fieldError(errors.username)}
               </View>
             </View>
             <Text style={styles.label}>密码</Text>
             <TextInput
-              style={styles.input}
+              style={inputStyle(errors.auth)}
               value={form.password}
-              onChangeText={v => patch({password: v})}
+              onChangeText={v => patchClearing({password: v}, ['auth'])}
               placeholder="使用私钥时可留空"
+              placeholderTextColor={Colors.textSecondary}
               secureTextEntry
               autoCapitalize="none"
             />
@@ -277,16 +332,25 @@ export function ConnectionEditScreen() {
               </TouchableOpacity>
             </View>
             <TextInput
-              style={[styles.input, styles.multiline]}
+              style={[
+                styles.input,
+                styles.multiline,
+                errors.auth ? styles.inputError : null,
+              ]}
               value={form.privateKey}
               onChangeText={v => {
-                patch(v ? {privateKey: v} : {privateKey: '', keyFileName: ''});
+                patchClearing(
+                  v ? {privateKey: v} : {privateKey: '', keyFileName: ''},
+                  ['auth'],
+                );
               }}
               placeholder="粘贴 PEM 内容，或点上方按钮选择文件"
+              placeholderTextColor={Colors.textSecondary}
               multiline
               autoCapitalize="none"
               autoCorrect={false}
             />
+            {fieldError(errors.auth)}
             {form.privateKey ? (
               <>
                 <Text style={styles.label}>私钥口令（可选）</Text>
@@ -294,6 +358,8 @@ export function ConnectionEditScreen() {
                   style={styles.input}
                   value={form.passphrase}
                   onChangeText={v => patch({passphrase: v})}
+                  placeholder="密钥有口令时填写"
+                  placeholderTextColor={Colors.textSecondary}
                   secureTextEntry
                   autoCapitalize="none"
                 />
@@ -329,6 +395,13 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   multiline: {minHeight: 80, textAlignVertical: 'top'},
+  inputError: {borderColor: Colors.danger},
+  errorText: {
+    fontSize: 12,
+    color: Colors.danger,
+    marginTop: -10,
+    marginBottom: 16,
+  },
   row: {flexDirection: 'row', gap: 12},
   typeRow: {flexDirection: 'row', gap: 8, marginBottom: 16},
   typeBtn: {

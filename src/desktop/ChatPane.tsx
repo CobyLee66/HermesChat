@@ -16,7 +16,10 @@ import {
 } from './desktopMedia';
 import {ChatInputBar} from '../panels/ChatInputBar';
 import {ChatOverlays, type ChatOverlaysState} from '../panels/ChatOverlays';
-import {TimelineView} from '../panels/TimelineView';
+import {
+  TimelineView,
+  type TimelineViewHandle,
+} from '../panels/TimelineView';
 import {useChatComposer} from '../panels/useChatComposer';
 import {useChatStore} from '../store/chat';
 import {useConnectionStore} from '../store/connection';
@@ -91,9 +94,15 @@ export function ChatPane({
     setOverlays(s => ({...s, modelPickerVisible: true}));
   }, []);
 
+  // 发送即回底恢复跟随（上滑浏览时发消息也能立刻看到回复）
+  const timelineRef = useRef<TimelineViewHandle>(null);
+  const onAfterSend = useCallback(() => {
+    timelineRef.current?.revealBottom();
+  }, []);
   const {input, setInput, slash, onInputKeyPress, onSend} = useChatComposer(
     chat.sessionId,
     openModelPicker,
+    onAfterSend,
   );
 
   /** 是否显示工具调用/思考/推理等非对话内容（菜单切换） */
@@ -295,6 +304,7 @@ export function ChatPane({
       ) : null}
 
       <TimelineView
+        ref={timelineRef}
         sessionId={chat.sessionId}
         showDetail={showDetail}
         slashOverlay={
@@ -332,6 +342,7 @@ export function ChatPane({
         setState={patch => setOverlays(s => ({...s, ...patch}))}
         showDetail={showDetail}
         onToggleShowDetail={() => setShowDetail(v => !v)}
+        onSessionDeleted={close}
       />
     </View>
   );

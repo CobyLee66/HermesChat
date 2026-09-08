@@ -12,6 +12,8 @@ import {useSlashCompletion} from '../utils/useSlashCompletion';
 export function useChatComposer(
   sessionId: string,
   onOpenModelPicker: () => void,
+  /** 消息真正发出后的回调（裸 /model 早退不触发）：发送即回底恢复跟随 */
+  onAfterSend?: () => void,
 ) {
   const connState = useConnectionStore(s => s.state);
   const sendPrompt = useChatStore(s => s.sendPrompt);
@@ -63,7 +65,8 @@ export function useChatComposer(
     }
     sendPrompt(sessionId, input);
     setInput('');
-  }, [input, sendPrompt, sessionId, onOpenModelPicker]);
+    onAfterSend?.();
+  }, [input, sendPrompt, sessionId, onOpenModelPicker, onAfterSend]);
 
   return {
     input,
