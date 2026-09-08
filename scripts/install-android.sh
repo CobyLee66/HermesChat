@@ -10,7 +10,7 @@ SERIAL="${2:-}"
 REMOTE_HOST="构建机"
 ADB='C:\Softwares\Android\platform-tools\adb.exe'
 
-[ -f "$APK" ] || { echo "找不到 APK: $APK（先在 Mac 上跑 scripts/build-android-remote.sh）"; exit 1; }
+[ -f "$APK" ] || { echo "找不到 APK: ${APK}（先在 Mac 上跑 scripts/build-android-remote.sh）"; exit 1; }
 APK="$(cd "$(dirname "$APK")" && pwd)/$(basename "$APK")"
 
 echo "==> 推送 APK 到 $REMOTE_HOST"

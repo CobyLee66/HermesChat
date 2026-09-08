@@ -39,7 +39,7 @@ SETUP_EXE="$(ls -t dist-desktop/*.exe 2>/dev/null | head -1 || true)"
 UNPACKED_EXE="dist-desktop/win-unpacked/HermesChat.exe"
 if [ -n "$SETUP_EXE" ]; then
   ls -lh "$SETUP_EXE"
-  echo "安装包：$SETUP_EXE（未签名，首次运行 SmartScreen 选「仍要运行」）"
+  echo "安装包：${SETUP_EXE}（未签名，首次运行 SmartScreen 选「仍要运行」）"
 fi
 if [ -f "$UNPACKED_EXE" ]; then
   echo "免安装版：$UNPACKED_EXE"

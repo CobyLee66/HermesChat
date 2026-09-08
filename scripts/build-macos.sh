@@ -41,7 +41,7 @@ UNPACKED_APP="dist-desktop/mac-arm64/HermesChat.app"
 [ -d "$UNPACKED_APP" ] || UNPACKED_APP="dist-desktop/mac/HermesChat.app"
 if [ -n "$DMG" ]; then
   ls -lh "$DMG"
-  echo "安装包：$DMG（未签名，首次打开若被 Gatekeeper 拦截：右键 → 打开，或 xattr -cr dist-desktop）"
+  echo "安装包：${DMG}（未签名，首次打开若被 Gatekeeper 拦截：右键 → 打开，或 xattr -cr dist-desktop）"
 fi
 if [ -d "$UNPACKED_APP" ]; then
   echo "免安装版：$UNPACKED_APP"
