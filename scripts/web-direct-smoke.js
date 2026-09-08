@@ -9,11 +9,17 @@
  * 用法：node scripts/web-direct-smoke.js
  */
 
+const fs = require('node:fs');
 const {chromium} = require('playwright-core');
 
-const EXE =
-  '~/Library/Caches/ms-playwright/chromium_headless_shell-1234/' +
-  'chrome-headless-shell-mac-arm64/chrome-headless-shell';
+// Chromium 路径由 playwright-core 按自身版本解析（默认 ~/Library/Caches/ms-playwright，
+// 可用 PLAYWRIGHT_BROWSERS_PATH 覆盖），升级依赖后重跑下方安装命令即可，勿硬编码版本目录。
+const EXE = chromium.executablePath();
+if (!fs.existsSync(EXE)) {
+  console.error(`未找到 Chromium：${EXE}`);
+  console.error('请先安装：npx playwright-core install chromium');
+  process.exit(1);
+}
 const BASE = 'http://localhost:5188/';
 const OUT = 'docs/screenshots';
 
