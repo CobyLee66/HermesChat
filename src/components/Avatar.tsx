@@ -16,6 +16,11 @@ interface Props {
  * 缓存）加载零开销，渐现反而把瞬时呈现伪装成「加载中」（切会话过滤档 / 切 profile
  * / 重进列表时行会重挂载或换 uri，每次重播动画就是肉眼可见的「头像刷新」）；仅
  * data URL 回退（落盘/转换失败）保留 120ms 渐现柔化解码空窗。
+ *
+ * 圆角只允许一层：圆角+底色收敛在 Image 自身（无图回退分支在外层 View）。
+ * 外层 View 与内层 Image 同时设 borderRadius 会在 Android 触发双层抗锯齿接缝，
+ * 渲染出沿圆角一圈的深色线框（2026-09-09 定因：头像文件/web/桌面均像素级干净，
+ * 线框仅在真机出现；web 实验室已验证单层变体无此产物）。
  */
 export function Avatar({name, uri, size = 44}: Props) {
   const radius = Math.round(size * 0.22);
@@ -52,22 +57,23 @@ export function Avatar({name, uri, size = 44}: Props) {
   }, [fade, loaded]);
 
   const initial = (name || '?').trim().charAt(0) || '?';
+  const fallbackBlock = {
+    width: size,
+    height: size,
+    borderRadius: radius,
+    backgroundColor: avatarColor(name),
+  };
   return (
     <View
-      style={[
-        styles.block,
-        {
-          width: size,
-          height: size,
-          borderRadius: radius,
-          backgroundColor: avatarColor(name),
-        },
-      ]}>
+      style={[styles.block, {width: size, height: size}, !source && fallbackBlock]}>
       {source ? (
         <Animated.Image
           source={source}
           fadeDuration={0}
-          style={[styles.img, {borderRadius: radius, opacity: fade}]}
+          style={[
+            styles.img,
+            {borderRadius: radius, backgroundColor: avatarColor(name), opacity: fade},
+          ]}
           onLoad={() => setLoaded(true)}
         />
       ) : (

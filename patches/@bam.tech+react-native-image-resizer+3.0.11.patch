@@ -1,0 +1,63 @@
+diff --git a/node_modules/@bam.tech/react-native-image-resizer/android/src/main/java/com/reactnativeimageresizer/ImageResizer.java b/node_modules/@bam.tech/react-native-image-resizer/android/src/main/java/com/reactnativeimageresizer/ImageResizer.java
+index d148265..da494b6 100644
+--- a/node_modules/@bam.tech/react-native-image-resizer/android/src/main/java/com/reactnativeimageresizer/ImageResizer.java
++++ b/node_modules/@bam.tech/react-native-image-resizer/android/src/main/java/com/reactnativeimageresizer/ImageResizer.java
+@@ -5,6 +5,7 @@ import android.content.ContentResolver;
+ import android.database.Cursor;
+ import android.graphics.Bitmap;
+ import android.graphics.BitmapFactory;
++import android.graphics.Canvas;
+ import android.graphics.Matrix;
+ import androidx.exifinterface.media.ExifInterface;
+ import android.net.Uri;
+@@ -218,6 +219,17 @@ public class ImageResizer {
+     }
+ 
+     ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
++    // HermesChat patch: JPEG has no alpha channel — flatten translucent bitmaps
++    // onto white first, otherwise premultiplied RGB (black at fully transparent
++    // pixels, darkened at semi-transparent edges) gets encoded as black areas.
++    if (compressFormat == Bitmap.CompressFormat.JPEG && bitmap.hasAlpha()) {
++      Bitmap flattened = Bitmap.createBitmap(
++          bitmap.getWidth(), bitmap.getHeight(), Bitmap.Config.ARGB_8888);
++      flattened.eraseColor(0xFFFFFFFF);
++      Canvas flattenCanvas = new Canvas(flattened);
++      flattenCanvas.drawBitmap(bitmap, 0f, 0f, null);
++      bitmap = flattened;
++    }
+     bitmap.compress(compressFormat, quality, outputStream);
+     byte[] bitmapData = outputStream.toByteArray();
+ 
+diff --git a/node_modules/@bam.tech/react-native-image-resizer/ios/ImageResizer.mm b/node_modules/@bam.tech/react-native-image-resizer/ios/ImageResizer.mm
+index ac23dd8..eccc410 100644
+--- a/node_modules/@bam.tech/react-native-image-resizer/ios/ImageResizer.mm
++++ b/node_modules/@bam.tech/react-native-image-resizer/ios/ImageResizer.mm
+@@ -71,6 +71,28 @@ - (void)createResizedImage:(NSString *)uri width:(double)width height:(double)he
+ 
+ bool saveImage(NSString * fullPath, UIImage * image, NSString * format, float quality, NSMutableDictionary *metadata)
+ {
++    // HermesChat patch: JPEG has no alpha channel — flatten translucent images
++    // onto white first, otherwise transparent pixels get encoded as black.
++    if ([format isEqualToString:@"JPEG"] && image.CGImage != nil) {
++        CGImageAlphaInfo alphaInfo = CGImageGetAlphaInfo(image.CGImage);
++        BOOL hasAlpha = alphaInfo != kCGImageAlphaNone
++            && alphaInfo != kCGImageAlphaNoneSkipLast
++            && alphaInfo != kCGImageAlphaNoneSkipFirst;
++        if (hasAlpha) {
++            UIGraphicsBeginImageContextWithOptions(image.size, NO, image.scale);
++            CGContextRef context = UIGraphicsGetCurrentContext();
++            if (context != NULL) {
++                [[UIColor whiteColor] setFill];
++                UIRectFill(CGRectMake(0, 0, image.size.width, image.size.height));
++                [image drawInRect:CGRectMake(0, 0, image.size.width, image.size.height)];
++                UIImage *flattened = UIGraphicsGetImageFromCurrentImageContext();
++                if (flattened != nil) {
++                    image = flattened;
++                }
++            }
++            UIGraphicsEndImageContext();
++        }
++    }
+     if(metadata == nil){
+         NSData* data = nil;
+         if ([format isEqualToString:@"JPEG"]) {
