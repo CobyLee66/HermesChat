@@ -17,10 +17,11 @@ interface Props {
  * / 重进列表时行会重挂载或换 uri，每次重播动画就是肉眼可见的「头像刷新」）；仅
  * data URL 回退（落盘/转换失败）保留 120ms 渐现柔化解码空窗。
  *
- * 圆角只允许一层：圆角+底色收敛在 Image 自身（无图回退分支在外层 View）。
- * 外层 View 与内层 Image 同时设 borderRadius 会在 Android 触发双层抗锯齿接缝，
- * 渲染出沿圆角一圈的深色线框（2026-09-09 定因：头像文件/web/桌面均像素级干净，
- * 线框仅在真机出现；web 实验室已验证单层变体无此产物）。
+ * 圆角只允许一层且**图片分支不得垫底色**：圆角收敛在 Image 自身（无图回退分支
+ * 在外层 View）。两个历史教训（2026-09-09 像素级定因，D036）：①外层 View 与内层
+ * Image 同时设 borderRadius 会在 Android 触发双层抗锯齿接缝；②Image 下垫
+ * avatarColor 底色会从圆角裁剪的抗锯齿边缘渗出，在白底头像四周形成一圈彩色
+ * 「瑕疵线框」（三端真实 GPU 窗口均可见，无头截图/灰度分析会漏掉，须查色度）。
  */
 export function Avatar({name, uri, size = 44}: Props) {
   const radius = Math.round(size * 0.22);
@@ -72,7 +73,7 @@ export function Avatar({name, uri, size = 44}: Props) {
           fadeDuration={0}
           style={[
             styles.img,
-            {borderRadius: radius, backgroundColor: avatarColor(name), opacity: fade},
+            {borderRadius: radius, opacity: fade},
           ]}
           onLoad={() => setLoaded(true)}
         />
