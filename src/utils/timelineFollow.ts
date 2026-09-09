@@ -10,6 +10,10 @@
 /** 距底多小算「在底部」：容忍手势惯性/回弹的过冲 */
 export const FOLLOW_THRESHOLD = 32;
 
+/** 距上次 scroll 事件多久以内算「滚动中」：惯性/滚轮动画期间 scroll 事件
+ * 持续到达，停滚后超过该静默窗才认为用户已停。 */
+export const SCROLL_QUIET_MS = 200;
+
 export function isAtBottom(offset: number): boolean {
   return offset <= FOLLOW_THRESHOLD;
 }
@@ -19,12 +23,21 @@ export function shouldPinToBottom(follow: boolean, deltaH: number): boolean {
   return follow && deltaH > 0;
 }
 
-/** 内容增长且非跟随态时需要锚定补偿 */
+/**
+ * 内容增长且非跟随态时需要锚定补偿，须同时满足：
+ * - streaming：仅流式增长（视觉底部生长）需要补偿；历史 cell 懒挂载/图片
+ *   加载的增长在视觉顶端一侧、不移动视口，补偿反而把用户向前瞬移；
+ * - !scrolling：滚动未停时无法区分增长来源（流式中上滑滚入未挂载区时两者
+ *   同时发生），且此时视口本来就随手势在动——停滚后的流式增长才补偿，
+ *   滚动中的增长交给用户手势与平台 anchoring。
+ */
 export function shouldRestoreAnchor(
   follow: boolean,
   deltaH: number,
+  streaming: boolean,
+  scrolling: boolean,
 ): boolean {
-  return !follow && deltaH > 0;
+  return !follow && deltaH > 0 && streaming && !scrolling;
 }
 
 /**

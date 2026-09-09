@@ -66,6 +66,56 @@ const CSS = `
 .hm-md img { max-width: 100%; }
 `;
 
+let stylesInjected = false;
+
+/**
+ * hm-md 样式只在首个气泡挂载时注入一次。此前每气泡渲染一份 <style>，长会话
+ * 首次滚动批量挂载历史消息时重复插入样式表，每次都触发全文档样式重算，
+ * 是首滚掉帧的一大来源。
+ */
+function ensureMarkdownStyles() {
+  if (stylesInjected) {
+    return;
+  }
+  const doc = (globalThis as {
+    document?: {
+      createElement?: (tag: string) => {textContent?: string};
+      head?: {appendChild?: (el: unknown) => void};
+    };
+  }).document;
+  if (!doc?.createElement || !doc.head?.appendChild) {
+    return;
+  }
+  const style = doc.createElement('style');
+  style.textContent = CSS;
+  doc.head.appendChild(style);
+  stylesInjected = true;
+}
+
+ensureMarkdownStyles();
+
+/** md.render 结果缓存（FIFO 有界）：长会话滚动时 cell 频繁卸载重挂载，
+ * 命中缓存可跳过重复解析渲染。流式期间同一条消息的中间文本也会进缓存
+ * （命中不了，只为限流内存），FIFO 逐渐淘汰。 */
+const renderCache = new Map<string, string>();
+const RENDER_CACHE_MAX = 300;
+
+function cachedRender(text: string): string {
+  const hit = renderCache.get(text);
+  if (hit !== undefined) {
+    return hit;
+  }
+  const html = md.render(text);
+  renderCache.set(text, html);
+  if (renderCache.size > RENDER_CACHE_MAX) {
+    const oldest = renderCache.keys().next().value;
+    if (oldest !== undefined) {
+      renderCache.delete(oldest);
+    }
+  }
+  return html;
+}
+
 /* ---------- DOM 最小能力面（无 DOM lib：结构类型断言） ---------- */
 
 /** 挂载 copy 拦截与 contextmenu 的宿主节点（web 下即 hm-md 容器 div）。 */
@@ -210,7 +260,7 @@ interface Props {
 }
 
 export function MarkdownText({text}: Props) {
-  const html = useMemo(() => md.render(text), [text]);
+  const html = useMemo(() => cachedRender(text), [text]);
   const hostRef = useRef<MdHostNode | null>(null);
   // 流式更新时注册表里的 getText 走 ref 取最新源文本
   const textRef = useRef(text);
@@ -261,7 +311,6 @@ export function MarkdownText({text}: Props) {
 
   return (
     <>
-      <style>{CSS}</style>
       <div
         className="hm-md"
         ref={node => {

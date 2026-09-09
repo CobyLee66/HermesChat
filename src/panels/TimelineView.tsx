@@ -4,8 +4,10 @@
  *
  * 贴底跟随策略（src/utils/timelineFollow.ts）：inverted 列表 offset 即距视觉
  * 底部的距离——距底 ≤ 阈值视为「在底部」，流式等内容增长时显式钉底；用户上滑
- * 离开底部即暂停跟随，并对内容增长做锚定补偿（内容在 offset 0 侧生长会把既有
- * 内容往新消息方向推，不补偿则阅读位置被拖走）；滚回底部自动恢复。
+ * 离开底部即暂停跟随，仅对流式增长且用户停滚后做锚定补偿（内容在 offset 0 侧
+ * 生长会把既有内容往新消息方向推，不补偿则阅读位置被拖走）；历史浏览中新
+ * cell 挂载/图片加载导致的高度增长在视觉顶端一侧、不移动视口，不补偿（补偿
+ * 会把用户向前瞬移，是首次上滚抖动的根因）；滚回底部自动恢复。
  *
  * 斜杠补全浮层必须挂在本面板的列表容器内（absolute 子元素渲染在父容器边界内，
  * Android 触摸命中才有保障）——通过 slashOverlay 插槽由调用方传入。
@@ -42,6 +44,7 @@ import {useChatStore} from '../store/chat';
 import {
   isAtBottom,
   offsetUntouched,
+  SCROLL_QUIET_MS,
   shouldPinToBottom,
   shouldRestoreAnchor,
 } from '../utils/timelineFollow';
@@ -91,6 +94,10 @@ export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
     const followRef = useRef(true);
     const lastOffsetRef = useRef(0);
     const lastContentRef = useRef(0);
+    /** 会话是否流式进行中（ref：onContentSizeChange 回调里读最新值） */
+    const streamingRef = useRef(false);
+    /** 最近一次 scroll 事件时刻（判定「滚动中」） */
+    const lastScrollAtRef = useRef(0);
 
     // 桌面切会话复用本组件实例（sessionId 变化不 remount），新会话一律重新贴底
     useEffect(() => {
@@ -99,18 +106,38 @@ export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
       lastContentRef.current = 0;
     }, [sessionId]);
 
+    useEffect(() => {
+      streamingRef.current = chat?.busy ?? false;
+    }, [chat?.busy]);
+
     const scrollTo = useCallback((offset: number, animated = false) => {
       listRef.current?.scrollToOffset({offset, animated});
     }, []);
 
-    /** 内容增长（流式 delta/图片加载等）：跟随→钉底；非跟随→锚定补偿 */
+    /**
+     * 内容增长：跟随→钉底；流式中且已停滚的非跟随态→锚定补偿。其余一律
+     * 不做程序性滚动：历史浏览中新 cell 挂载/图片加载导致的增长（非流式）
+     * 在视觉顶端一侧、不移动视口，补偿反而会向前瞬移并打断惯性滚动（首次
+     * 上滚抖动根因）；滚动未停时无法区分增长来源（流式中上滑滚入未挂载区
+     * 两者并存），交还给用户手势与平台 anchoring。代价：流式结束后的
+     * history 重建（D031）若恰逢用户停在历史位置，可能有一次不补偿的位移，
+     * 可接受。
+     */
     const handleContentGrowth = useCallback(
       (deltaH: number) => {
         if (shouldPinToBottom(followRef.current, deltaH)) {
           listRef.current?.scrollToOffset({offset: 0, animated: false});
           return;
         }
-        if (!shouldRestoreAnchor(followRef.current, deltaH)) {
+        const scrolling = Date.now() - lastScrollAtRef.current < SCROLL_QUIET_MS;
+        if (
+          !shouldRestoreAnchor(
+            followRef.current,
+            deltaH,
+            streamingRef.current,
+            scrolling,
+          )
+        ) {
           return;
         }
         const atGrowth = lastOffsetRef.current;
@@ -125,6 +152,7 @@ export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
               | undefined;
             if (
               !followRef.current &&
+              streamingRef.current &&
               node &&
               typeof node.scrollTop === 'number' &&
               offsetUntouched(node.scrollTop, atGrowth)
@@ -132,7 +160,7 @@ export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
               node.scrollTop = atGrowth + deltaH;
             }
           });
-        } else if (offsetUntouched(lastOffsetRef.current, atGrowth)) {
+        } else {
           // 原生 ScrollView 无可见位置锚定（offset 不会自变），直接补偿
           scrollTo(atGrowth + deltaH);
         }
@@ -242,10 +270,15 @@ export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         scrollEventThrottle={32}
+        /* 首次上滚时批量首挂载重型消息 cell，批次小一点摊薄单帧成本，
+         * 也让 contentSize 阶梯更小；windowSize 保持默认（已浏览区域保持
+         * 挂载，二次滚动零挂载才平滑） */
+        maxToRenderPerBatch={6}
         onScroll={e => {
           // 合成事件是池化的，必须同步取出值，不能塞进 setState updater
           const offset = e.nativeEvent.contentOffset.y;
           lastOffsetRef.current = offset;
+          lastScrollAtRef.current = Date.now();
           followRef.current = isAtBottom(offset);
           setScroll(s => (s.offset === offset ? s : {...s, offset}));
         }}

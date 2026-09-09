@@ -60,8 +60,19 @@ function startMockGateway({
   title = MOCK_TITLE,
   /** prompt.submit 流式回包节奏（冒烟断言窗口要留足操作时间） */
   stream = {},
+  /** 额外种子 N 条历史消息（交替 user/assistant），测长历史懒挂载场景 */
+  historyCount = 0,
 } = {}) {
   const {chunks = 24, intervalMs = 400} = stream;
+  const seedHistory = [];
+  for (let i = 1; i <= historyCount; i++) {
+    seedHistory.push({
+      role: i % 2 === 1 ? 'user' : 'assistant',
+      text: `【历史 ${i}/${historyCount}】mock 种子历史消息，用于测试进会话后` +
+        '首次向上滚动时旧消息 cell 的懒挂载路径。',
+      timestamp: 1700000000 + i,
+    });
+  }
   const state = {
     title,
     /** RPC 调用流水 [{method, params}]——断言调用顺序用 */
@@ -71,7 +82,7 @@ function startMockGateway({
     /** 会话是否 live（session.resume 挂载 / session.close 摘除），delete 4023 判定用 */
     liveActive: false,
     /** 运行期消息投影（prompt 往里追加，resume/history 用） */
-    messages: [...INITIAL_HISTORY],
+    messages: [...INITIAL_HISTORY, ...seedHistory],
     /** 进行中的流式定时器（close 时清理） */
     timers: new Set(),
     /** 诊断：delta 发送计数 / WS 关闭信息 / 最近一次 send 异常 */
