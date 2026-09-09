@@ -18,6 +18,8 @@ import {DesktopApp} from './src/desktop/DesktopApp';
 import {ChatScreen} from './src/screens/ChatScreen';
 import {ConnectionEditScreen} from './src/screens/ConnectionEditScreen';
 import {ConnectionHomeScreen} from './src/screens/ConnectionHomeScreen';
+import {CronEditScreen} from './src/screens/CronEditScreen';
+import {CronRunsScreen} from './src/screens/CronRunsScreen';
 import {ProfileEditScreen} from './src/screens/ProfileEditScreen';
 import {ProfileListScreen} from './src/screens/ProfileListScreen';
 import {SessionListScreen} from './src/screens/SessionListScreen';
@@ -93,7 +95,8 @@ function App() {
             <Stack.Screen
               name="ProfileList"
               component={ProfileListScreen}
-              options={{title: 'Hermes', headerBackVisible: false}}
+              // 左上角标题位由 ProfileListScreen 注入视图切换控件（会话 | 定时任务）
+              options={{title: '', headerBackVisible: false}}
             />
             <Stack.Screen
               name="ProfileEdit"
@@ -102,6 +105,16 @@ function App() {
             />
             <Stack.Screen name="SessionList" component={SessionListScreen} />
             <Stack.Screen name="Chat" component={ChatScreen} />
+            <Stack.Screen
+              name="CronRuns"
+              component={CronRunsScreen}
+              options={{title: '运行历史'}}
+            />
+            <Stack.Screen
+              name="CronEdit"
+              component={CronEditScreen}
+              options={{title: '定时任务'}}
+            />
           </Stack.Navigator>
         </NavigationContainer>
       )}

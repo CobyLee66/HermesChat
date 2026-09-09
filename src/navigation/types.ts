@@ -9,4 +9,8 @@ export type RootStackParamList = {
   ProfileEdit: {profile: string};
   SessionList: {profile: string};
   Chat: {sessionId: string; profile: string; title?: string};
+  /** 定时任务运行历史（jobId + 展示名 + 归属 profile） */
+  CronRuns: {jobId: string; name: string; profile?: string};
+  /** 定时任务新建（无 jobId）/编辑（jobId）；profile 仅新建时可选 */
+  CronEdit: {jobId?: string; profile?: string};
 };

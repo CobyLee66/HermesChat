@@ -20,11 +20,22 @@ interface DesktopUiState {
   narrowPane: 'sessions' | 'chat';
   /** Profile 编辑弹层（值为 profile name；null 关闭） */
   profileEditOpen: string | null;
+  /** 定时任务编辑弹层（jobId 空 = 新建；null 关闭） */
+  cronEditOpen: {jobId?: string; profile?: string} | null;
+  /** 定时任务运行历史弹层（null 关闭） */
+  cronRunsOpen: {jobId: string; name: string; profile?: string} | null;
+  /** 主页首屏视图（Profile 列表 / 定时任务） */
+  homeView: 'sessions' | 'cron';
   selectProfile: (profile: string | null) => void;
   openChat: (chat: DesktopChatRef) => void;
   closeChat: () => void;
   setNarrowPane: (pane: 'sessions' | 'chat') => void;
   setProfileEditOpen: (profile: string | null) => void;
+  setCronEditOpen: (open: {jobId?: string; profile?: string} | null) => void;
+  setCronRunsOpen: (
+    open: {jobId: string; name: string; profile?: string} | null,
+  ) => void;
+  setHomeView: (view: 'sessions' | 'cron') => void;
   /** 断线清空（连接重建后壳重新选择） */
   reset: () => void;
 }
@@ -34,6 +45,9 @@ export const useDesktopUiStore = create<DesktopUiState>(set => ({
   chat: null,
   narrowPane: 'sessions',
   profileEditOpen: null,
+  cronEditOpen: null,
+  cronRunsOpen: null,
+  homeView: 'sessions',
   selectProfile: profile =>
     set(state =>
       state.selectedProfile === profile
@@ -45,12 +59,18 @@ export const useDesktopUiStore = create<DesktopUiState>(set => ({
   closeChat: () => set({chat: null, narrowPane: 'sessions'}),
   setNarrowPane: narrowPane => set({narrowPane}),
   setProfileEditOpen: profileEditOpen => set({profileEditOpen}),
+  setCronEditOpen: cronEditOpen => set({cronEditOpen}),
+  setCronRunsOpen: cronRunsOpen => set({cronRunsOpen}),
+  setHomeView: homeView => set({homeView}),
   reset: () =>
     set({
       selectedProfile: null,
       chat: null,
       narrowPane: 'sessions',
       profileEditOpen: null,
+      cronEditOpen: null,
+      cronRunsOpen: null,
+      homeView: 'sessions',
     }),
 }));
 

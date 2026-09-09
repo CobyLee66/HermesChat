@@ -87,7 +87,7 @@
 
 ## 3. 服务端事件（`params.type` → `params.payload`）
 
-- 会话/生命周期：`gateway.ready`、`session.info`、`session.usage`、`session.reclaimed`、`session.seeded`、`session.title {session_id, title}`（首轮后服务端自动命名时推送，**实测出现**）、全局 `sessions.changed`。
+- 会话/生命周期：`gateway.ready`、`session.info`、`session.usage`、`session.reclaimed`、`session.seeded`、`session.title {session_id, title}`（首轮后服务端自动命名时推送，**实测出现**）、全局 `sessions.changed`、全局 `cron.changed`（payload 空 `{}`；dashboard 进程每秒轮询 `~/.hermes/cron/jobs.json` mtime，变化即广播——App 用于定时任务列表自动刷新，见 §7）。
 - 消息流：`message.start`（payload 为空）→ `message.delta {text, rendered?}`（流式）→ `message.complete {text, usage, status?, rendered?, partial?, error?, reasoning?, warning?}`；`message.interim {text, already_streamed}`（工具回合间中间文本；`already_streamed=true` 表示文本已通过 delta 流出，客户端应密封当前文本段、后续 delta 开新段）。
 - 思考/推理：`thinking.delta {text}`、`reasoning.delta {text}`、`reasoning.available {text}`（**实测其 text 是最终回复而非推理内容**，渲染可忽略）。
   - **thinking.delta 是 busy 指示器改写，不是思考内容**（2026-09-05 查 conversation_loop.py:3250 确认）：每次 API 调用开始发一条 `f"{face} {verb}..."`（如 `(´･_･\`) processing...`，脸/动词随机自 KawaiiSpinner），调用结束/被打断发**空串**清除。客户端应按「最新覆盖 + 空串清除」做状态行（桌面端同款：全部不进 transcript 正文；⏳/⚠/↻/⚙ 开头的 provider 等待说明也走它）。**追加式渲染会永远卡在首条占位且不清除**（App 曾踩坑）。真思考走 reasoning.delta / message.complete.reasoning。**动态效果是客户端动画**（2026-09-08 查 ui-tui appChrome.tsx FaceTicker 确认）：服务端每次调用只发一条静态帧，官方 dashboard 的颜文字/动词轮换由客户端做（15 颜文字 content/faces.ts × 15 动词 content/verbs.ts，每 2500ms 顺序轮换、随机起始）——要动态须客户端自行轮换，勿等服务端推送（App 实现：`src/utils/busyTicker.ts` + `src/components/BusyTicker.tsx`，kawaii 帧由动画接管、⏳/⚠/↻/⚙ 等待说明仍原文透传）。
@@ -135,4 +135,45 @@
 - token：见上文 SPA 提取（当前实测值可复用，但 dashboard 重启会变，脚本应每次重新提取）。
 - 实测 profile 列表：default、main(示例 agent，主助手)、finance(理财顾问)、mental-health(心理管家)、study(学习助手)、work(工作助理)。
 - **纪律**：harness 全流程只允许一次真实 `prompt.submit`（用最小提示如"回复 pong 两个字即可"），用完 `session.close` 清理；其余测试用 jest mock。
+
+## 7. Cron 定时任务（2026-09-10 源码确认 + 实测，App 已实现）
+
+**通道选型（D038）**：App 走 dashboard REST `/api/cron/*`（9119，与 `/api/ws` 同进程；鉴权复用 `X-Hermes-Session-Token`）+ WS 事件 `cron.changed` 自动刷新。**不用** gateway 平台适配器的 `/api/jobs`（独立 aiohttp 端口 8642，`Authorization: Bearer <API_SERVER_KEY>` 第二凭据；PATCH 白名单只有 name/schedule/prompt/deliver/skills/skill/repeat/enabled）；WS RPC `cron.manage`（tui_gateway/methods_tools.py:1752，action: list/add/remove/pause/resume）**无 update/trigger/runs**，只作对照参考。
+
+### REST 端点清单（web_routers/cron.py；除 fire 外均 header 认证）
+
+全部端点支持 `?profile=` 查询参数（定位/聚合到指定 profile 的 cron 存储）；list 缺省 `profile=all` 跨 profile 聚合（job 行附加 `profile`/`profile_name`/`hermes_home`/`is_default_profile`）。返回 job 的端点在 job 不存在时 404 + `{detail}`。
+
+| 方法 路径 | 请求 | 返回 | 备注 |
+|---|---|---|---|
+| GET `/api/cron/jobs?profile=all` | — | `CronJob[]`（裸数组） | 原始存储记录 + dashboard 附加字段 |
+| GET `/api/cron/jobs/{id}` | — | `CronJob` | id 也可传 name（resolve） |
+| GET `/api/cron/jobs/{id}/runs?limit=20` | — | `{runs: SessionInfo[], limit}` | 该 job 产生的 `source=cron` 会话（id 形如 `cron_{job_id}_{ts}`），最新在前；limit 钳制 1..100 |
+| POST `/api/cron/jobs` | `CronJobCreate` | `CronJob` | 外部调度器注册失败 → 424 结构化 envelope |
+| PUT `/api/cron/jobs/{id}` | `{updates: {...}}` | `CronJob` | 任意字段 dict，服务端归一化；`id` 不可变；terminal（completed/error）不能经 update 重新激活 |
+| POST `/api/cron/jobs/{id}/pause` / `resume` | — | `CronJob` | 启停语义 = pause/resume（不是直接改 enabled） |
+| POST `/api/cron/jobs/{id}/trigger` | — | `CronJob` | **同步跑完整个 job 才返回**（desktop 客户端给 24h 超时；App 放宽 10 分钟）；已在运行/被其它调度器 CAS 抢占 → 409；one-shot 跑完自删时返回合成记录 `{...job, enabled:false, state:"completed"}` |
+| DELETE `/api/cron/jobs/{id}` | — | `{ok: true}` | |
+| GET `/api/cron/delivery-targets` | — | `{targets: [{id, name, home_target_set, home_env_var}]}` | 始终含 `local`；`home_target_set=false` 的平台前端提示未配置 home 渠道 |
+| GET `/api/cron/blueprints`、POST `/api/cron/blueprints/instantiate` | — | 模板目录/实例化 | App 未接入 |
+| POST `/api/cron/fire` | `{job_id}` | 200/503(+`Retry-After: 60`) | 公开路径 + NAS JWT（webhook 专用），App 不涉及 |
+
+**CronJobCreate**（POST body）：`prompt:str`、`schedule:str`（必填）、`name:str=""`（空则自动取 prompt 前 50 字符）、`deliver:str="local"`、`skills?:string[]`、`model?/provider?/base_url?`、`script?`、`context_from?: str|list`（保留项 `"self"` = continuity）、`enabled_toolsets?`、`workdir?`、`no_agent:bool=false`。**CronJobUpdate**：可选字段传 `null` 显式清空（避免残留旧值）——App 表单遵循此语义。
+
+### CronJob 记录关键字段（cron/jobs.py create_job / effective_job_state）
+
+- `id`（12 位 hex，不可变）、`name`、`prompt`（完整）、`skills/skill`、`model/provider/base_url`、`script`、`no_agent`（true=只跑 script）
+- `schedule: {kind: "once"|"interval"|"cron", run_at?|minutes?|expr?, display}` + `schedule_display`；schedule 字符串语法（`parse_schedule`，cron/jobs.py:962）：`"30m"/"2h"/"1d"`、`"every 30m"`、`"in 30m"`（一次性）、自然语言（`"daily at 9am"`/`"every monday 9am"`/`"weekdays at 9am"`）、5/6 字段 cron 表达式（需 croniter）、ISO 时间戳（naive 按配置时区锚定，**无 per-job timezone**）
+- `repeat: {times: int|null, completed}`（null=forever；one-shot 自动 times=1）
+- `enabled` + `state`（读侧派生：`scheduled`/`paused`/`completed`/`error`；`running` 瞬态不落盘；enabled=true 永不显示 paused，terminal 优先）
+- `next_run_at` / `last_run_at`（ISO datetime）/ `last_status`（封闭集 `ok`/`error`/`delivery_failed`/`blocked_config`，null=从未跑过）/ `last_error` / `last_delivery_error`（delivery_failed 时 last_error=null）/ `last_fire_error: {at, detail}`（定时 fire 未转发到 gateway）/ `failure_streak`
+- `deliver`：`local`/`origin`/`all`/`bot-chat[:profile]`/`platform:chat_id:thread_id`，可逗号组合
+
+### 客户端实现要点（App 口径）
+
+- 列表刷新：操作成功后重新拉 list 即可（无推送差异）；`cron.changed` 事件（§3）防抖 1s 静默刷新，仅在本会话加载过列表后响应。
+- **trigger 是同步长操作**：UI 行级 busy + 请求超时放宽（App：`rpc/cron.ts` `TRIGGER_TIMEOUT_MS=10min`，D019 的 30s 统一超时不适用于此端点）；409 单独提示「任务正在运行」。
+- `last_status ≠ ok` 不是失败一概而论：`delivery_failed` 的明细在 `last_delivery_error`；漏触发在 `last_fire_error`。错误展示优先级：last_fire_error > last_delivery_error > last_error。
+- 运行历史行的打开 = 普通 `session.resume`（source=cron 会话与普通会话同构）。
+- 对照警示：WS `cron.manage` 的 list 返回 `_format_job` 投影——字段名是 **`job_id`**（非 id）、prompt 只有 100 字符 preview、schedule 是 display 串。与 REST 原始记录不同，勿混用。
 - **写路径验证用 mock gateway**（2026-09-08 新增）：`scripts/mock-gateway.js` 是本地内存态 gateway（HTTP `/` 带 token + `/api/health` + WS JSON-RPC，已实现 profiles.list / session.list / session.resume / session.history / complete.slash / slash.exec(title) / session.title / model.options），照真实服务端行为保真——`/title` 只改内存且**不推事件**。写操作类改动（改名/发送等）的端到端验证一律打它，不打 live 9119（AGENTS.md 禁写）。范例：`scripts/desktop-title-refresh-smoke.js`（真实 Electron + 隔离 userData）。

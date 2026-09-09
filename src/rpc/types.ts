@@ -350,6 +350,118 @@ export interface ProfilesSetAssetResult {
   removed?: number;
 }
 
+// ─── Cron 定时任务（dashboard REST /api/cron/*，见 docs/protocol.md） ───
+
+/** 服务端 parse_schedule 产物的 schedule 结构。 */
+export interface CronSchedule {
+  kind: 'once' | 'interval' | 'cron';
+  /** kind=once：ISO 时间戳 */
+  run_at?: string;
+  /** kind=interval：间隔分钟数 */
+  minutes?: number;
+  /** kind=cron：5/6 字段 cron 表达式 */
+  expr?: string;
+  display?: string;
+  [key: string]: unknown;
+}
+
+/** repeat：times=null 永久；one-shot 自动 times=1。 */
+export interface CronJobRepeat {
+  times: number | null;
+  completed: number;
+}
+
+/**
+ * cron job 记录（/api/cron/jobs 返回的原始存储记录 + dashboard 附加字段）。
+ * state 由服务端读侧派生：scheduled/paused/completed/error（running 瞬态不落盘）。
+ */
+export interface CronJob {
+  id: string;
+  name: string;
+  prompt: string;
+  skills?: string[];
+  skill?: string | null;
+  model?: string | null;
+  provider?: string | null;
+  script?: string | null;
+  /** true = 只跑 script、stdout 原样投递 */
+  no_agent?: boolean;
+  /** 注入其它 job 最近输出；保留项 "self" = continuity */
+  context_from?: string[] | null;
+  schedule?: CronSchedule;
+  schedule_display?: string;
+  repeat?: CronJobRepeat;
+  enabled: boolean;
+  state: string;
+  paused_at?: string | null;
+  paused_reason?: string | null;
+  created_at?: string;
+  next_run_at?: string | null;
+  last_run_at?: string | null;
+  /** ok / error / delivery_failed / blocked_config；null = 从未跑过 */
+  last_status?: string | null;
+  last_error?: string | null;
+  last_delivery_error?: string | null;
+  last_delivery_unverified?: boolean;
+  last_fire_error?: {at: string; detail: string} | null;
+  failure_streak?: number;
+  /** local / origin / all / bot-chat[:profile] / platform:chat_id…，可逗号组合 */
+  deliver: string;
+  enabled_toolsets?: string[] | null;
+  workdir?: string | null;
+  /** dashboard API 附加：归属 profile（list profile=all 聚合时区分） */
+  profile?: string;
+  profile_name?: string;
+  [key: string]: unknown;
+}
+
+/** CronJobCreate（POST /api/cron/jobs body；schedule 字符串格式见 parse_schedule）。 */
+export interface CronJobCreateInput {
+  name?: string;
+  prompt: string;
+  schedule: string;
+  deliver?: string;
+  skills?: string[];
+  context_from?: string[] | null;
+  [key: string]: unknown;
+}
+
+/** PUT /api/cron/jobs/{id} body = {updates}；id 不可变，服务端归一化任意字段。 */
+export interface CronJobUpdateInput {
+  name?: string | null;
+  prompt?: string | null;
+  schedule?: string;
+  deliver?: string;
+  skills?: string[] | null;
+  context_from?: string[] | null;
+  [key: string]: unknown;
+}
+
+/** cron job 运行历史行（GET /api/cron/jobs/{id}/runs，session 形状，最新在前）。 */
+export interface CronRunRow {
+  id: string;
+  title?: string;
+  preview?: string;
+  /** epoch 秒 */
+  started_at?: number;
+  /** epoch 秒 */
+  last_active?: number;
+  message_count?: number;
+  is_active?: boolean;
+  archived?: boolean;
+  profile?: string;
+  source?: string;
+  [key: string]: unknown;
+}
+
+/** GET /api/cron/delivery-targets 的投递目标（始终含 local）。 */
+export interface CronDeliveryTarget {
+  id: string;
+  name: string;
+  home_target_set?: boolean;
+  home_env_var?: string | null;
+}
+
 // ─── TimelineItem（UI 渲染模型） ────────────────────────────────
 
 /**

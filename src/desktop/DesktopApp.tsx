@@ -13,6 +13,7 @@
 
 import React, {useEffect} from 'react';
 import {
+  ActivityIndicator,
   Modal,
   StyleSheet,
   Text,
@@ -25,9 +26,14 @@ import {createNativeStackNavigator} from '@react-navigation/native-stack';
 
 import {Avatar} from '../components/Avatar';
 import {Colors} from '../components/theme';
+import {ViewSwitcher} from '../components/ViewSwitcher';
+import {CronJobForm, useCronJobDraft} from '../panels/CronJobForm';
+import {CronPanel} from '../panels/CronPanel';
+import {CronRunsPanel} from '../panels/CronRunsPanel';
 import {useProfileNickname} from '../panels/SessionListPanel';
 import {ProfileEditScreen} from '../screens/ProfileEditScreen';
 import {useConnectionStore} from '../store/connection';
+import {useCronStore} from '../store/cron';
 import {useProfilesStore} from '../store/profiles';
 import {ConfirmDialogHost} from '../ui/ConfirmDialogHost';
 import {useBreakpoint} from '../ui/breakpoints';
@@ -59,6 +65,8 @@ function DesktopAppShell() {
   const chat = useDesktopUiStore(s => s.chat);
   const narrowPane = useDesktopUiStore(s => s.narrowPane);
   const profileEditOpen = useDesktopUiStore(s => s.profileEditOpen);
+  const cronEditOpen = useDesktopUiStore(s => s.cronEditOpen);
+  const cronRunsOpen = useDesktopUiStore(s => s.cronRunsOpen);
   const reset = useDesktopUiStore(s => s.reset);
 
   const refreshProfiles = useProfilesStore(s => s.refresh);
@@ -116,6 +124,10 @@ function DesktopAppShell() {
         {reconnecting ? <ReconnectingBanner /> : null}
         <ProfileListPane />
         {profileEditOpen ? <ProfileEditModal profile={profileEditOpen} /> : null}
+        {cronEditOpen ? (
+          <CronEditModal jobId={cronEditOpen.jobId} profile={cronEditOpen.profile} />
+        ) : null}
+        {cronRunsOpen ? <CronRunsModal runs={cronRunsOpen} /> : null}
       </View>
     );
   }
@@ -181,16 +193,20 @@ function EmptyChatPane() {
   );
 }
 
-/** Profile 全宽列表（未选 profile 时的首屏，所有断点共用）。 */
+/** Profile 全宽首屏（未选 profile 时）：会话（profile 列表）/ 定时任务双视图。 */
 function ProfileListPane() {
   const list = useProfilesStore(s => s.list);
+  const homeView = useDesktopUiStore(s => s.homeView);
+  const setHomeView = useDesktopUiStore(s => s.setHomeView);
   const selectProfile = useDesktopUiStore(s => s.selectProfile);
   const setProfileEditOpen = useDesktopUiStore(s => s.setProfileEditOpen);
+  const setCronEditOpen = useDesktopUiStore(s => s.setCronEditOpen);
+  const setCronRunsOpen = useDesktopUiStore(s => s.setCronRunsOpen);
 
   return (
     <View style={styles.profilePane}>
       <View style={styles.profilePaneHeader}>
-        <Text style={styles.profilePaneTitle}>选择 Profile</Text>
+        <ViewSwitcher value={homeView} onChange={setHomeView} />
         <TouchableOpacity
           activeOpacity={0.7}
           onPress={() => {
@@ -199,23 +215,39 @@ function ProfileListPane() {
           <Text style={styles.exitText}>退出连接</Text>
         </TouchableOpacity>
       </View>
-      <FlatList
-        data={list}
-        keyExtractor={p => p.name}
-        contentContainerStyle={styles.profileListContent}
-        renderItem={({item}) => (
-          <ProfilePaneRow
-            name={item.name}
-            preview={
-              item.last_session?.preview ||
-              item.description ||
-              `${item.skill_count ?? 0} 个技能`
+      {homeView === 'cron' ? (
+        <View style={styles.cronPane}>
+          <CronPanel
+            onCreate={() => setCronEditOpen({})}
+            onEditJob={job => setCronEditOpen({jobId: job.id, profile: job.profile})}
+            onOpenRuns={job =>
+              setCronRunsOpen({
+                jobId: job.id,
+                name: job.name,
+                profile: job.profile,
+              })
             }
-            onOpen={() => selectProfile(item.name)}
-            onEdit={() => setProfileEditOpen(item.name)}
           />
-        )}
-      />
+        </View>
+      ) : (
+        <FlatList
+          data={list}
+          keyExtractor={p => p.name}
+          contentContainerStyle={styles.profileListContent}
+          renderItem={({item}) => (
+            <ProfilePaneRow
+              name={item.name}
+              preview={
+                item.last_session?.preview ||
+                item.description ||
+                `${item.skill_count ?? 0} 个技能`
+              }
+              onOpen={() => selectProfile(item.name)}
+              onEdit={() => setProfileEditOpen(item.name)}
+            />
+          )}
+        />
+      )}
     </View>
   );
 }
@@ -287,6 +319,88 @@ function ProfileEditModal({profile}: {profile: string}) {
   );
 }
 
+/** 定时任务新建/编辑弹层（与手机 CronEditScreen 共用表单体与取数 hook）。 */
+function CronEditModal({
+  jobId,
+  profile,
+}: {
+  jobId?: string;
+  profile?: string;
+}) {
+  const setCronEditOpen = useDesktopUiStore(s => s.setCronEditOpen);
+  const close = () => setCronEditOpen(null);
+  const {job, error} = useCronJobDraft(jobId, profile);
+  const profileList = useProfilesStore(s => s.list);
+
+  return (
+    <Modal visible animationType="slide" onRequestClose={close}>
+      <View style={styles.modalRoot}>
+        <View style={styles.modalHeader}>
+          <TouchableOpacity activeOpacity={0.7} onPress={close} hitSlop={8}>
+            <Text style={styles.backText}>‹ 返回</Text>
+          </TouchableOpacity>
+          <Text style={styles.modalTitle}>
+            {jobId ? '编辑定时任务' : '新建定时任务'}
+          </Text>
+          <View style={styles.modalHeaderSpacer} />
+        </View>
+        {jobId && !job && !error ? (
+          <ActivityIndicator style={styles.modalLoading} color={Colors.accent} />
+        ) : jobId && !job ? (
+          <Text style={styles.modalError}>任务不存在或已被删除：{error}</Text>
+        ) : (
+          <CronJobForm
+            job={job}
+            profiles={profileList.map(p => p.name)}
+            defaultProfile={profile}
+            onSaved={() => {
+              void useCronStore.getState().refresh({silent: true});
+              close();
+            }}
+          />
+        )}
+      </View>
+    </Modal>
+  );
+}
+
+/** 定时任务运行历史弹层；点记录打开会话进聊天区。 */
+function CronRunsModal({
+  runs,
+}: {
+  runs: {jobId: string; name: string; profile?: string};
+}) {
+  const setCronRunsOpen = useDesktopUiStore(s => s.setCronRunsOpen);
+  const close = () => setCronRunsOpen(null);
+  return (
+    <Modal visible animationType="slide" onRequestClose={close}>
+      <View style={styles.modalRoot}>
+        <View style={styles.modalHeader}>
+          <TouchableOpacity activeOpacity={0.7} onPress={close} hitSlop={8}>
+            <Text style={styles.backText}>‹ 返回</Text>
+          </TouchableOpacity>
+          <Text style={styles.modalTitle} numberOfLines={1}>
+            {`运行历史 · ${runs.name}`}
+          </Text>
+          <View style={styles.modalHeaderSpacer} />
+        </View>
+        <CronRunsPanel
+          jobId={runs.jobId}
+          profile={runs.profile}
+          onOpenSession={opened => {
+            close();
+            openChat({
+              sessionId: opened.sessionId,
+              profile: runs.profile ?? 'default',
+              title: opened.title,
+            });
+          }}
+        />
+      </View>
+    </Modal>
+  );
+}
+
 const styles = StyleSheet.create({
   root: {flex: 1, backgroundColor: Colors.bg, flexDirection: 'row', flexWrap: 'nowrap'},
   sessionCol: {
@@ -311,6 +425,7 @@ const styles = StyleSheet.create({
   emptyText: {fontSize: 15, color: Colors.textSecondary},
   emptyHint: {fontSize: 13, color: Colors.textSecondary, marginTop: 6},
   profilePane: {flex: 1, backgroundColor: Colors.card},
+  cronPane: {flex: 1, maxWidth: 720, width: '100%', alignSelf: 'center'},
   profilePaneHeader: {
     height: 52,
     flexDirection: 'row',
@@ -321,6 +436,32 @@ const styles = StyleSheet.create({
     borderBottomColor: Colors.border,
   },
   profilePaneTitle: {fontSize: 17, fontWeight: '600', color: Colors.text},
+  modalRoot: {flex: 1, backgroundColor: Colors.bg},
+  modalHeader: {
+    height: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: Colors.border,
+    backgroundColor: Colors.card,
+  },
+  modalTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.text,
+  },
+  modalHeaderSpacer: {width: 48},
+  modalLoading: {marginTop: 48},
+  modalError: {
+    color: Colors.danger,
+    fontSize: 14,
+    textAlign: 'center',
+    marginTop: 48,
+    paddingHorizontal: 24,
+  },
   exitText: {fontSize: 14, color: Colors.danger},
   profileListContent: {maxWidth: 720, width: '100%', alignSelf: 'center'},
   profileRow: {

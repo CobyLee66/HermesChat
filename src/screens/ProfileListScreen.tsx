@@ -1,4 +1,4 @@
-import React, {useEffect} from 'react';
+import React, {useEffect, useState} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -14,6 +14,8 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {Avatar} from '../components/Avatar';
 import {Colors} from '../components/theme';
+import {ViewSwitcher, type HomeView} from '../components/ViewSwitcher';
+import {CronPanel} from '../panels/CronPanel';
 import {useConnectionStore} from '../store/connection';
 import {useProfilesStore} from '../store/profiles';
 import type {ProfileInfo} from '../rpc/types';
@@ -33,14 +35,18 @@ export function ProfileListScreen() {
   const {list, avatars, loading, error, refresh} = useProfilesStore();
   const connState = useConnectionStore(s => s.state);
   const reconnecting = connState === 'reconnecting';
+  // 主页视图：默认会话（profile 列表）；定时任务视图由 header 切换控件进入
+  const [view, setView] = useState<HomeView>('sessions');
 
   useEffect(() => {
     refresh();
   }, [refresh]);
 
-  // header 右上角"退出"：确认后断开连接，由下方 effect 带回 ConnectionHome
+  // header：左上角「Hermes」标题位换成视图切换控件；右上角退出按钮保留
   useEffect(() => {
     navigation.setOptions({
+      headerTitle: () => <ViewSwitcher value={view} onChange={setView} />,
+      headerTitleAlign: 'left',
       headerRight: () => (
         <TouchableOpacity
           activeOpacity={0.7}
@@ -60,7 +66,7 @@ export function ProfileListScreen() {
         </TouchableOpacity>
       ),
     });
-  }, [navigation]);
+  }, [navigation, view]);
 
   useEffect(() => {
     if (connState === 'disconnected') {
@@ -75,7 +81,24 @@ export function ProfileListScreen() {
           <Text style={styles.bannerText}>连接已断开，正在重连…</Text>
         </View>
       ) : null}
-      {loading && list.length === 0 ? (
+      {view === 'cron' ? (
+        <CronPanel
+          onCreate={() => navigation.navigate('CronEdit', {})}
+          onEditJob={job =>
+            navigation.navigate('CronEdit', {
+              jobId: job.id,
+              profile: job.profile,
+            })
+          }
+          onOpenRuns={job =>
+            navigation.navigate('CronRuns', {
+              jobId: job.id,
+              name: job.name,
+              profile: job.profile,
+            })
+          }
+        />
+      ) : loading && list.length === 0 ? (
         <ActivityIndicator style={styles.loading} color={Colors.accent} />
       ) : error && list.length === 0 ? (
         <View style={styles.emptyWrap}>
