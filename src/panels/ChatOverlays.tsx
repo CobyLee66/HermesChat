@@ -33,6 +33,7 @@ export function ChatOverlays({
   showDetail,
   onToggleShowDetail,
   onSessionDeleted,
+  onOpenSearch,
 }: {
   sessionId: string;
   profile: string;
@@ -43,6 +44,8 @@ export function ChatOverlays({
   onToggleShowDetail: () => void;
   /** 会话被删除后调用（手机 goBack / 桌面关聊天列） */
   onSessionDeleted?: () => void;
+  /** 打开顶部聊天记录搜索栏（foreign 只读会话历史完整，同样可用） */
+  onOpenSearch?: () => void;
 }) {
   const info = useChatStore(s => s.bySession[sessionId]?.info ?? null);
   // foreign 只读会话（未 resume 的 multiplex 大库行）：改名/删除 RPC 都够不到，
@@ -131,6 +134,14 @@ export function ChatOverlays({
                 setState({menuVisible: false, infoVisible: true});
               }}>
               <Text style={styles.menuText}>会话信息</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.menuItem}
+              onPress={() => {
+                setState({menuVisible: false});
+                onOpenSearch?.();
+              }}>
+              <Text style={styles.menuText}>查找聊天记录</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.menuItem}

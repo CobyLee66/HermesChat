@@ -11,6 +11,7 @@ import {useNavigation, useRoute, type RouteProp} from '@react-navigation/native'
 import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 
 import {ChatHeaderTitle} from '../components/ChatHeaderTitle';
+import {SearchBar} from '../components/SearchBar';
 import {SlashSuggest} from '../components/SlashSuggest';
 import {Colors} from '../components/theme';
 import {ChatInputBar} from '../panels/ChatInputBar';
@@ -20,6 +21,7 @@ import {
   type TimelineViewHandle,
 } from '../panels/TimelineView';
 import {useChatComposer} from '../panels/useChatComposer';
+import {useChatSearch} from '../panels/useChatSearch';
 import {useChatStore} from '../store/chat';
 import {useConnectionStore} from '../store/connection';
 import type {RootStackParamList} from '../navigation/types';
@@ -57,6 +59,11 @@ export function ChatScreen() {
     openModelPicker,
     onAfterSend,
   );
+
+  // 聊天记录查找：顶部搜索栏 + ↑/↓ 循环跳转命中消息（TimelineView 内滚动定位）
+  const search = useChatSearch(sessionId, timelineRef);
+  // effect 依赖用解构后的稳定引用（hide 是空依赖 useCallback）
+  const {visible: searchVisible, hide: hideSearch} = search;
 
   /** 是否显示工具调用/思考/推理等非对话内容（顶栏菜单切换） */
   const [showDetail, setShowDetail] = useState(true);
@@ -115,6 +122,18 @@ export function ChatScreen() {
     return () => sub.remove();
   }, [slashOpen, closeSlash]);
 
+  // 搜索栏打开时硬件返回键先关搜索（对齐补全/选择层先例）
+  useEffect(() => {
+    if (!searchVisible) {
+      return;
+    }
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      hideSearch();
+      return true;
+    });
+    return () => sub.remove();
+  }, [searchVisible, hideSearch]);
+
   const foreign = chat?.foreign ?? null;
   const forking = chat?.forking ?? false;
   const migratedTo = chat?.migratedTo;
@@ -169,10 +188,23 @@ export function ChatScreen() {
           <Text style={styles.bannerGrayText}>正在派生到当前 profile…</Text>
         </View>
       ) : null}
+      {search.visible ? (
+        <SearchBar
+          value={search.query}
+          onChangeText={search.setQuery}
+          onClose={search.hide}
+          placeholder="查找聊天记录"
+          total={search.total}
+          activeIndex={search.activeIndex}
+          onPrev={search.onPrev}
+          onNext={search.onNext}
+        />
+      ) : null}
       <TimelineView
         ref={timelineRef}
         sessionId={sessionId}
         showDetail={showDetail}
+        highlightMessageId={search.highlightId}
         onSelectText={openTextSelect}
         slashOverlay={
           slash.open ? (
@@ -199,6 +231,7 @@ export function ChatScreen() {
         showDetail={showDetail}
         onToggleShowDetail={() => setShowDetail(v => !v)}
         onSessionDeleted={() => navigation.goBack()}
+        onOpenSearch={search.show}
       />
 
       {/* 文本选择层：直接在屏幕窗口树里渲染（Modal 对话框里可编辑 EditText

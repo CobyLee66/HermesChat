@@ -8,6 +8,7 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 
 import {ChatHeaderTitle} from '../components/ChatHeaderTitle';
+import {SearchBar} from '../components/SearchBar';
 import {SlashSuggest} from '../components/SlashSuggest';
 import {Colors} from '../components/theme';
 import {
@@ -21,6 +22,7 @@ import {
   type TimelineViewHandle,
 } from '../panels/TimelineView';
 import {useChatComposer} from '../panels/useChatComposer';
+import {useChatSearch} from '../panels/useChatSearch';
 import {useChatStore} from '../store/chat';
 import {useConnectionStore} from '../store/connection';
 import {alertError} from '../utils/alert';
@@ -105,6 +107,11 @@ export function ChatPane({
     onAfterSend,
   );
 
+  // 聊天记录查找：顶部搜索栏 + ↑/↓ 循环跳转命中消息（TimelineView 内滚动定位）
+  const search = useChatSearch(chat.sessionId, timelineRef);
+  // effect 依赖用解构后的稳定引用（hide 是空依赖 useCallback）
+  const {visible: searchVisible, hide: hideSearch} = search;
+
   /** 是否显示工具调用/思考/推理等非对话内容（菜单切换） */
   const [showDetail, setShowDetail] = useState(true);
 
@@ -124,10 +131,14 @@ export function ChatPane({
     [],
   );
 
-  // Esc 关闭弹层（菜单 > 模型面板 > 会话信息）
+  // Esc 关闭：搜索栏 > 菜单 > 模型面板 > 会话信息
   useEffect(() => {
     const onKey = (ev: {key?: string}) => {
       if (ev.key !== 'Escape') {
+        return;
+      }
+      if (searchVisible) {
+        hideSearch();
         return;
       }
       setOverlays(s => {
@@ -149,7 +160,7 @@ export function ChatPane({
       (globalThis as {window?: {removeEventListener?: (t: string, l: unknown) => void}})
         .window?.removeEventListener?.('keydown', onKey);
     };
-  }, []);
+  }, [searchVisible, hideSearch]);
 
   // Ctrl+V 粘贴图片 → 待发附件
   useEffect(() => {
@@ -303,10 +314,24 @@ export function ChatPane({
         </View>
       ) : null}
 
+      {search.visible ? (
+        <SearchBar
+          value={search.query}
+          onChangeText={search.setQuery}
+          onClose={search.hide}
+          placeholder="查找聊天记录"
+          total={search.total}
+          activeIndex={search.activeIndex}
+          onPrev={search.onPrev}
+          onNext={search.onNext}
+        />
+      ) : null}
+
       <TimelineView
         ref={timelineRef}
         sessionId={chat.sessionId}
         showDetail={showDetail}
+        highlightMessageId={search.highlightId}
         slashOverlay={
           slash.open ? (
             <SlashSuggest
@@ -343,6 +368,7 @@ export function ChatPane({
         showDetail={showDetail}
         onToggleShowDetail={() => setShowDetail(v => !v)}
         onSessionDeleted={close}
+        onOpenSearch={search.show}
       />
     </View>
   );

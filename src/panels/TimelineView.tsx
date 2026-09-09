@@ -55,6 +55,8 @@ const EMPTY_ITEMS: TimelineItem[] = [];
 /** 发送消息等主动动作经此回到最新消息（父组件持 ref 调用） */
 export type TimelineViewHandle = {
   revealBottom: () => void;
+  /** 聊天记录查找：滚动定位到某条消息并置视口中部（未找到静默跳过） */
+  scrollToMessage: (id: string) => void;
 };
 
 /** web 分支用：下一帧执行（此刻布局与 Chrome scroll anchoring 调整已完成） */
@@ -74,11 +76,16 @@ type TimelineViewProps = {
   showDetail: boolean;
   /** 助手气泡长按选择文本（手机端）；桌面端不传即关闭该交互 */
   onSelectText?: (text: string) => void;
+  /** 聊天记录查找的当前命中消息（accent 描边高亮；null/不传无高亮） */
+  highlightMessageId?: string | null;
   slashOverlay?: React.ReactNode;
 };
 
 export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
-  function TimelineView({sessionId, showDetail, onSelectText, slashOverlay}, ref) {
+  function TimelineView(
+    {sessionId, showDetail, onSelectText, highlightMessageId, slashOverlay},
+    ref,
+  ) {
     const chat = useChatStore(s => s.bySession[sessionId]);
     const respondApproval = useChatStore(s => s.respondApproval);
     const respondClarify = useChatStore(s => s.respondClarify);
@@ -98,6 +105,8 @@ export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
     const streamingRef = useRef(false);
     /** 最近一次 scroll 事件时刻（判定「滚动中」） */
     const lastScrollAtRef = useRef(0);
+    /** scrollToIndex 失败重试计数（scrollToMessage 每次发起时清零） */
+    const scrollRetryRef = useRef(0);
 
     // 桌面切会话复用本组件实例（sessionId 变化不 remount），新会话一律重新贴底
     useEffect(() => {
@@ -176,81 +185,111 @@ export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
           followRef.current = true;
           scrollTo(0);
         },
+        scrollToMessage: (id: string) => {
+          const index = invertedItems.findIndex(it => it.id === id);
+          if (index < 0) {
+            return;
+          }
+          // 跳到历史位置后不能被流式钉底拉回；距底超阈值后 onScroll 自然维持 false
+          followRef.current = false;
+          // 瞬时定位：长距离动画晃眼且启动期易被布局变化打断（微信查找同款直接跳）
+          scrollRetryRef.current = 0;
+          listRef.current?.scrollToIndex({
+            index,
+            animated: false,
+            viewPosition: 0.5,
+          });
+        },
       }),
-      [scrollTo],
+      [scrollTo, invertedItems],
     );
 
   const renderItem = useCallback(
     ({item}: {item: TimelineItem}) => {
-      switch (item.kind) {
-        case 'user':
-          return (
-            <View style={styles.userCol}>
-              {item.images && item.images.length > 0 ? (
-                <View style={styles.userImages}>
-                  {item.images.map((img, i) => (
-                    <ChatImage key={i} image={img} />
-                  ))}
-                </View>
-              ) : null}
-              {item.files?.map((f, i) => (
-                <View key={i} style={styles.userFile}>
-                  <FileRefCard file={f} isUser />
-                </View>
-              ))}
-              {item.text ? (
-                <View style={styles.userBubbleWrap}>
-                  <Bubble text={item.text} isUser />
-                </View>
-              ) : null}
-            </View>
-          );
-        case 'system':
-          return (
-            <View
-              style={[
-                styles.systemBar,
-                item.eventKind === 'error' ? styles.systemBarError : null,
-              ]}>
-              <Text
+      const body = (() => {
+        switch (item.kind) {
+          case 'user':
+            return (
+              <View style={styles.userCol}>
+                {item.images && item.images.length > 0 ? (
+                  <View style={styles.userImages}>
+                    {item.images.map((img, i) => (
+                      <ChatImage key={i} image={img} />
+                    ))}
+                  </View>
+                ) : null}
+                {item.files?.map((f, i) => (
+                  <View key={i} style={styles.userFile}>
+                    <FileRefCard file={f} isUser />
+                  </View>
+                ))}
+                {item.text ? (
+                  <View style={styles.userBubbleWrap}>
+                    <Bubble text={item.text} isUser />
+                  </View>
+                ) : null}
+              </View>
+            );
+          case 'system':
+            return (
+              <View
                 style={[
-                  styles.systemText,
-                  item.eventKind === 'error' ? styles.systemTextError : null,
+                  styles.systemBar,
+                  item.eventKind === 'error' ? styles.systemBarError : null,
                 ]}>
-                {item.text}
-              </Text>
-            </View>
-          );
-        case 'approval':
-          return (
-            <ApprovalCard
-              card={item}
-              sessionId={sessionId}
-              onRespond={(rid, choice) => respondApproval(sessionId, rid, choice)}
-            />
-          );
-        case 'clarify':
-          return (
-            <ClarifyCard
-              card={item}
-              onAnswer={(rid, answer, qid) =>
-                respondClarify(sessionId, rid, answer, qid)
-              }
-            />
-          );
-        case 'assistant':
-          return (
-            <AssistantRow
-              msg={item}
-              showDetail={showDetail}
-              onSelectText={onSelectText}
-            />
-          );
-        default:
-          return null;
+                <Text
+                  style={[
+                    styles.systemText,
+                    item.eventKind === 'error' ? styles.systemTextError : null,
+                  ]}>
+                  {item.text}
+                </Text>
+              </View>
+            );
+          case 'approval':
+            return (
+              <ApprovalCard
+                card={item}
+                sessionId={sessionId}
+                onRespond={(rid, choice) => respondApproval(sessionId, rid, choice)}
+              />
+            );
+          case 'clarify':
+            return (
+              <ClarifyCard
+                card={item}
+                onAnswer={(rid, answer, qid) =>
+                  respondClarify(sessionId, rid, answer, qid)
+                }
+              />
+            );
+          case 'assistant':
+            return (
+              <AssistantRow
+                msg={item}
+                showDetail={showDetail}
+                onSelectText={onSelectText}
+              />
+            );
+          default:
+            return null;
+        }
+      })();
+      // 聊天记录查找的当前命中项：消息整体 accent 描边（不动各消息组件内部，
+      // 避开原生/web 两套 markdown 渲染实现）
+      if (body !== null && item.id === highlightMessageId) {
+        return <View style={styles.hitHighlight}>{body}</View>;
       }
+      return body;
     },
-    [onSelectText, respondApproval, respondClarify, sessionId, showDetail],
+    [
+      onSelectText,
+      respondApproval,
+      respondClarify,
+      sessionId,
+      showDetail,
+      highlightMessageId,
+    ],
   );
 
   return (
@@ -274,6 +313,28 @@ export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
          * 也让 contentSize 阶梯更小；windowSize 保持默认（已浏览区域保持
          * 挂载，二次滚动零挂载才平滑） */
         maxToRenderPerBatch={6}
+        /* scrollToMessage 跳向未测量区域时索引会失败：先按平均帧高估算定位
+         * （减半个视口近似 viewPosition 0.5），等批次渲染把目标 cell 测量出来
+         * 后重试精确索引；限次防估算/重试死循环 */
+        onScrollToIndexFailed={info => {
+          const viewport = scroll.viewport || 600;
+          const estimated = Math.max(
+            0,
+            info.index * info.averageItemLength - viewport / 2,
+          );
+          scrollTo(estimated);
+          if (scrollRetryRef.current >= 8) {
+            return;
+          }
+          scrollRetryRef.current += 1;
+          setTimeout(() => {
+            listRef.current?.scrollToIndex({
+              index: info.index,
+              animated: false,
+              viewPosition: 0.5,
+            });
+          }, 120);
+        }}
         onScroll={e => {
           // 合成事件是池化的，必须同步取出值，不能塞进 setState updater
           const offset = e.nativeEvent.contentOffset.y;
@@ -401,6 +462,12 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   jumpText: {fontSize: 13, color: Colors.accentDark, fontWeight: '600'},
+  /** 聊天记录查找的当前命中消息描边（包在最外层，不侵入消息组件内部） */
+  hitHighlight: {
+    borderWidth: 2,
+    borderColor: Colors.accent,
+    borderRadius: 10,
+  },
   systemBar: {
     alignSelf: 'center',
     maxWidth: '86%',

@@ -18,9 +18,11 @@ import {
 
 import {Avatar} from '../components/Avatar';
 import {Colors} from '../components/theme';
+import {SearchBar} from '../components/SearchBar';
 import {useProfilesStore} from '../store/profiles';
 import {useSessionsStore} from '../store/sessions';
 import {alertError} from '../utils/alert';
+import {filterSessionsByQuery} from '../utils/sessionSearch';
 import {
   automationSourceLabel,
   isAutomationSource,
@@ -154,26 +156,48 @@ export function SessionListPanel({
   const setSortMode = useSessionsStore(s => s.setSortMode);
   const [filter, setFilter] = useState<SessionFilterCategory>('chats');
   const [menuOpen, setMenuOpen] = useState<OpenMenu>(null);
+  // 会话搜索栏（与下拉菜单互斥展开；关闭即清空关键词）
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   // 菜单锚点：工具栏在容器内的底边 y（onLayout 实测，免疫字体缩放导致的行高变化）
   const [menuTop, setMenuTop] = useState(0);
 
-  // 面板挂载/切换 profile 时刷新（原屏幕 effect 行为保持）；顺手收起下拉
+  // 面板挂载/切换 profile 时刷新（原屏幕 effect 行为保持）；顺手收起下拉与搜索
   React.useEffect(() => {
     setMenuOpen(null);
+    setSearchOpen(false);
     refresh(profile);
   }, [refresh, profile, refreshTrigger]);
 
-  // Android 硬件返回键先关下拉，不退出页面（web 无此能力，自然跳过）
+  // 搜索栏开合与下拉互斥（搜索栏插在工具栏与列表之间，避免菜单浮层盖在其上）
+  const openSearch = useCallback(() => {
+    setMenuOpen(null);
+    setSearchOpen(true);
+  }, []);
+  const closeSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchQuery('');
+  }, []);
+  const openMenu = useCallback((which: OpenMenu) => {
+    setSearchOpen(false);
+    setMenuOpen(which);
+  }, []);
+
+  // Android 硬件返回键先关搜索/下拉，不退出页面（web 无此能力，自然跳过）
   React.useEffect(() => {
-    if (!menuOpen || Platform.OS === 'web') {
+    if ((!menuOpen && !searchOpen) || Platform.OS === 'web') {
       return;
     }
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      setMenuOpen(null);
+      if (searchOpen) {
+        closeSearch();
+      } else {
+        setMenuOpen(null);
+      }
       return true;
     });
     return () => sub.remove();
-  }, [menuOpen]);
+  }, [menuOpen, searchOpen, closeSearch]);
 
   const filterLabel =
     FILTER_OPTIONS.find(f => f.key === filter)?.label ?? filter;
@@ -182,11 +206,16 @@ export function SessionListPanel({
   const filteredSessions = useMemo(
     () =>
       sortSessionRows(
-        sessions.filter(s => sourceBelongsToCategory(s.source, filter)),
+        filterSessionsByQuery(
+          sessions.filter(s => sourceBelongsToCategory(s.source, filter)),
+          searchQuery,
+        ),
         sortMode,
       ),
-    [sessions, filter, sortMode],
+    [sessions, filter, sortMode, searchQuery],
   );
+  // 搜索开且有关键词但当前分类下无命中（区分「分类为空」与「搜索无结果」空态）
+  const searchNoHit = searchOpen && searchQuery.trim() !== '' && filteredSessions.length === 0;
 
   const openSession = useCallback(
     async (row: SessionListRow) => {
@@ -218,15 +247,36 @@ export function SessionListPanel({
           label={filterLabel}
           open={menuOpen === 'filter'}
           onPress={() =>
-            setMenuOpen(open => (open === 'filter' ? null : 'filter'))
+            menuOpen === 'filter' ? setMenuOpen(null) : openMenu('filter')
           }
         />
-        <DropdownPill
-          label={sortLabel}
-          open={menuOpen === 'sort'}
-          onPress={() => setMenuOpen(open => (open === 'sort' ? null : 'sort'))}
-        />
+        <View style={styles.toolbarRight}>
+          <DropdownPill
+            label={sortLabel}
+            open={menuOpen === 'sort'}
+            onPress={() =>
+              menuOpen === 'sort' ? setMenuOpen(null) : openMenu('sort')
+            }
+          />
+          {/* 搜索按钮：药丸样式（‹/⋯/▾ 文本字符惯例，不加图标资产） */}
+          <TouchableOpacity
+            style={[styles.pill, searchOpen && styles.searchPillActive]}
+            activeOpacity={0.7}
+            onPress={searchOpen ? closeSearch : openSearch}>
+            <Text style={styles.pillText}>搜索</Text>
+          </TouchableOpacity>
+        </View>
       </View>
+      {searchOpen ? (
+        <View style={styles.searchWrap}>
+          <SearchBar
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            onClose={closeSearch}
+            placeholder="搜索会话标题 / 摘要"
+          />
+        </View>
+      ) : null}
       <FlatList
         data={filteredSessions}
         keyExtractor={s => s.id}
@@ -237,7 +287,9 @@ export function SessionListPanel({
           <Text style={styles.empty}>
             {sessions.length === 0
               ? '还没有会话，点「新会话」开始'
-              : '该分类下暂无会话'}
+              : searchNoHit
+                ? '未找到匹配的会话'
+                : '该分类下暂无会话'}
           </Text>
         }
         renderItem={({item}) => (
@@ -373,7 +425,7 @@ function SessionRow({
 
 const styles = StyleSheet.create({
   container: {flex: 1, backgroundColor: Colors.card},
-  // 单行工具栏：筛选下拉靠左、排序下拉靠右
+  // 单行工具栏：筛选下拉靠左、排序下拉 + 搜索按钮靠右
   toolbar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -382,10 +434,12 @@ const styles = StyleSheet.create({
     marginHorizontal: 12,
     marginBottom: 8,
   },
+  toolbarRight: {flexDirection: 'row', alignItems: 'center', gap: 8},
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.fill,
+    // 比白底略深一点的大面积底色（原 fill 偏灰，调淡为 fillSubtle）
+    backgroundColor: Colors.fillSubtle,
     borderRadius: 9,
     paddingVertical: 6,
     paddingHorizontal: 12,
@@ -393,6 +447,10 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   pillOpen: {backgroundColor: Colors.card, borderColor: Colors.fillBorder},
+  /** 搜索按钮展开态：与下拉药丸展开态同款描边 */
+  searchPillActive: {backgroundColor: Colors.card, borderColor: Colors.fillBorder},
+  // 会话搜索栏：与工具栏同边距，贴在列表上方
+  searchWrap: {marginHorizontal: 12, marginBottom: 8},
   pillText: {fontSize: 13, color: Colors.text},
   pillCaret: {fontSize: 10, color: Colors.textSecondary, marginLeft: 5},
   pillCaretOpen: {color: Colors.accentDark},
