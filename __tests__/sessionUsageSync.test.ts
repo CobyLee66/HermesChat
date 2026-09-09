@@ -8,6 +8,7 @@
  */
 
 import {_resetChatAggregators, useChatStore} from '../src/store/chat';
+import {useConnectionStore} from '../src/store/connection';
 import {openSessionFlow} from '../src/panels/sessionFlows';
 import {useSessionsStore} from '../src/store/sessions';
 import type {SessionListRow, UsageInfo} from '../src/rpc/types';
@@ -54,6 +55,8 @@ describe('重进会话主动同步上下文信息', () => {
     _resetChatAggregators();
     useChatStore.setState({bySession: {}});
     useSessionsStore.setState({byProfile: {}, stale: false, nsMap: null});
+    // openSessionFlow 入口现在先 waitReady：种成 ready + hasRpc(mock) 直通
+    useConnectionStore.setState({state: 'ready'});
     mockCall.mockReset();
   });
 

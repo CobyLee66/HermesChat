@@ -161,9 +161,17 @@ async function main() {
   await page.screenshot({path: `${OUT}/web-session-sort-1-recent.png`});
   console.log(`OK 默认「最近消息」档：${uiRecent.length} 行与期望一致`);
 
-  // 5. 切「创建时间」档
+  // 5. 排序下拉：点药丸开菜单 → 菜单内选「创建时间」
+  await page.getByText('最近消息', {exact: true}).click(); // 排序药丸（当前值）
+  await page.getByText('创建时间', {exact: true}).waitFor({timeout: 3000}); // 菜单展开
+  await page.screenshot({path: `${OUT}/web-session-sort-2b-menu-open.png`});
   await page.getByText('创建时间', {exact: true}).click();
   await page.waitForTimeout(600);
+  // 药丸标签切为创建时间；菜单应收起（创建时间只剩药丸一处）
+  const sortPillCount = await page.getByText('创建时间', {exact: true}).count();
+  if (sortPillCount !== 1) {
+    throw new Error(`选完菜单未收起：创建时间 出现 ${sortPillCount} 处`);
+  }
   const uiCreated = await readUiOrder();
   if (JSON.stringify(uiCreated) !== JSON.stringify(createdTitles)) {
     console.log('[实际 created]', uiCreated.slice(0, 5));
@@ -171,6 +179,20 @@ async function main() {
   }
   await page.screenshot({path: `${OUT}/web-session-sort-2-created.png`});
   console.log(`OK 「创建时间」档：${uiCreated.length} 行与期望一致`);
+
+  // 5b. 筛选下拉：切「全部」再切回「聊天」（只验交互与药丸标签）
+  await page.getByText('聊天', {exact: true}).click(); // 筛选药丸
+  await page.getByText('自动化', {exact: true}).waitFor({timeout: 3000});
+  await page.getByText('全部', {exact: true}).click();
+  await page.waitForTimeout(400);
+  if ((await page.getByText('全部', {exact: true}).count()) !== 1) {
+    throw new Error('筛选下拉：选「全部」后菜单未收起');
+  }
+  await page.getByText('全部', {exact: true}).click();
+  await page.getByText('聊天', {exact: true}).waitFor({timeout: 3000});
+  await page.getByText('聊天', {exact: true}).click();
+  await page.waitForTimeout(400);
+  console.log('OK 筛选下拉：全部 ↔ 聊天 切换正常');
 
   // 6. 持久化落盘
   const stored = await page.evaluate(() =>
@@ -180,6 +202,18 @@ async function main() {
     throw new Error(`排序偏好未持久化：${stored}`);
   }
   console.log('OK 排序偏好已持久化：hermes.sessionSort.v1 = created');
+
+  // 7. 窄档（<900 单列）排版截图：同上下文缩窗口，配置/偏好已持久化
+  await page.setViewportSize({width: 420, height: 800});
+  await page.waitForTimeout(1200);
+  // 窄档可能回到 profile 首屏：以筛选药丸「聊天」为会话列表哨兵，必要时重新进入
+  if ((await page.getByText('聊天', {exact: true}).count()) === 0) {
+    await page.locator(`[aria-label="打开 profile ${nickname}"]`).click();
+    await page.getByText('聊天', {exact: true}).waitFor({timeout: 10000});
+    await page.waitForTimeout(1000);
+  }
+  await page.screenshot({path: `${OUT}/web-session-sort-3-narrow.png`});
+  console.log('OK 窄档（420px）截图完成');
 
   await browser.close();
   console.log('PASS 会话列表排序档位冒烟全部通过');

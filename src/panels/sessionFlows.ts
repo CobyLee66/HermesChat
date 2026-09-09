@@ -7,6 +7,7 @@
 import {getExecRemote} from '../ssh/execRemote';
 import {fetchRemoteHistory} from '../ssh/remoteHistory';
 import {useChatStore} from '../store/chat';
+import {useConnectionStore} from '../store/connection';
 import {getFork} from '../store/forkMap';
 import {useProfilesStore} from '../store/profiles';
 import {useSessionsStore} from '../store/sessions';
@@ -20,6 +21,9 @@ export interface OpenedSession {
 
 /** 新建会话（session.create + chat store attach）。 */
 export async function createSessionFlow(profile: string): Promise<OpenedSession> {
+  // 点击瞬间可能正处断线重连窗口（回前台探活判死 / WS 被后台掐断）：
+  // 等连接就绪再发 RPC，否则偶发 "rpc not connected"
+  await useConnectionStore.getState().waitReady();
   const result = await useSessionsStore.getState().create(profile);
   useChatStore.getState().attach(result.session_id, {
     messages: result.messages ?? [],
@@ -40,6 +44,9 @@ export async function openSessionFlow(
   profile: string,
   row: SessionListRow,
 ): Promise<OpenedSession> {
+  // 点击瞬间可能正处断线重连窗口（回前台探活判死 / WS 被后台掐断）：
+  // 等连接就绪再发 RPC，否则偶发 "rpc not connected"（再点才好的根因）
+  await useConnectionStore.getState().waitReady();
   const title = row.title || '会话';
   const {resume} = useSessionsStore.getState();
   const attach = useChatStore.getState().attach;
@@ -114,7 +121,9 @@ export async function deleteSessionFlow(
   if (!ok) {
     return false;
   }
+  // 确认框停留期间可能断线（用户犹豫时 App 切后台高发）：同 openSessionFlow
   try {
+    await useConnectionStore.getState().waitReady();
     await useSessionsStore.getState().remove(profile, sessionId);
   } catch (e) {
     alertError('删除失败', e instanceof Error ? e.message : String(e));
