@@ -8,7 +8,6 @@
 import React, {useEffect, useMemo, useRef, useState} from 'react';
 import {
   Modal,
-  PanResponder,
   Platform,
   ScrollView,
   StyleSheet,
@@ -43,20 +42,6 @@ const WEEKDAY_CHIPS: {key: number; label: string}[] = [
   {key: 6, label: '六'},
   {key: 0, label: '日'},
 ];
-
-/** web 端提示词输入区高度边界（默认/最小/最大，px）。 */
-const PROMPT_DEFAULT_HEIGHT = 200;
-const PROMPT_MIN_HEIGHT = 120;
-const PROMPT_MAX_HEIGHT = 480;
-/** 应用运行期内记忆拖拽结果（跨弹层开关保持；不写 AsyncStorage） */
-let cachedPromptHeight: number | null = null;
-
-function clampPromptHeight(h: number): number {
-  return Math.min(
-    PROMPT_MAX_HEIGHT,
-    Math.max(PROMPT_MIN_HEIGHT, Math.round(h)),
-  );
-}
 
 /** 'HH:mm' → {hour, minute}；非法返回 null。 */
 function parseTimeText(text: string): {hour: number; minute: number} | null {
@@ -190,47 +175,32 @@ export function CronJobForm({
     null,
   );
 
-  // web（桌面）：提示词输入区固定高度 + 拖拽手柄调高；原生随内容自动撑高
-  const isWeb = Platform.OS === 'web';
-  const promptHeightRef = useRef(
-    isWeb ? (cachedPromptHeight ?? PROMPT_DEFAULT_HEIGHT) : 0,
-  );
-  const [promptHeight, setPromptHeight] = useState(promptHeightRef.current);
-  const promptDragRef = useRef<{startY: number; startH: number} | null>(null);
-  const promptPanResponder = useMemo(() => {
-    if (!isWeb) {
-      return null;
+  /** 提示词输入区高度边界：默认 ≈8 行，上限 25 行（行高 20 + 上下 padding 20）。 */
+  const PROMPT_MIN_HEIGHT = 160;
+  const PROMPT_MAX_HEIGHT = 25 * 20 + 20;
+
+  // web 的 textarea 无原生自动长高（ChatInputBar 同款手动量高）：文本变化时
+  // 先收回最小高再量 scrollHeight 设高（不收回会被 clientHeight 托底，删行
+  // 后缩不回）；原生端输入框自带长高，靠样式 minHeight/maxHeight 约束即可
+  const promptInputRef = useRef<React.ComponentRef<typeof TextInput>>(null);
+  useEffect(() => {
+    if (Platform.OS !== 'web') {
+      return;
     }
-    return PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: e => {
-        promptDragRef.current = {
-          startY: e.nativeEvent.pageY,
-          startH: promptHeightRef.current,
-        };
-      },
-      onPanResponderMove: e => {
-        const drag = promptDragRef.current;
-        if (!drag) {
-          return;
-        }
-        const next = clampPromptHeight(
-          drag.startH + (e.nativeEvent.pageY - drag.startY),
-        );
-        promptHeightRef.current = next;
-        setPromptHeight(next);
-      },
-      onPanResponderRelease: () => {
-        promptDragRef.current = null;
-        cachedPromptHeight = promptHeightRef.current;
-      },
-      onPanResponderTerminate: () => {
-        promptDragRef.current = null;
-        cachedPromptHeight = promptHeightRef.current;
-      },
-    });
-  }, [isWeb]);
+    // RN-web 的 ref 即宿主 textarea；项目 tsconfig 无 DOM lib，用结构类型
+    const el = promptInputRef.current as unknown as {
+      style: {height: string};
+      scrollHeight: number;
+    } | null;
+    if (!el) {
+      return;
+    }
+    el.style.height = `${PROMPT_MIN_HEIGHT}px`;
+    el.style.height = `${Math.min(
+      Math.max(el.scrollHeight, PROMPT_MIN_HEIGHT),
+      PROMPT_MAX_HEIGHT,
+    )}px`;
+  }, [prompt]);
 
   // 预填（编辑）：schedule 结构反解为模式与字段
   useEffect(() => {
@@ -356,25 +326,14 @@ export function CronJobForm({
 
       <Text style={styles.label}>提示词</Text>
       <TextInput
-        style={[
-          styles.input,
-          styles.promptInput,
-          isWeb ? {height: promptHeight} : styles.promptInputNative,
-        ]}
+        ref={promptInputRef}
+        style={[styles.input, styles.promptInput]}
         value={prompt}
         onChangeText={setPrompt}
         placeholder="每次定时运行时 agent 收到的指令"
         placeholderTextColor={Colors.textSecondary}
         multiline
       />
-      {isWeb ? (
-        <View
-          style={styles.resizeHandle}
-          accessibilityLabel="调整提示词高度"
-          {...(promptPanResponder?.panHandlers ?? {})}>
-          <View style={styles.resizeGrip} />
-        </View>
-      ) : null}
 
       <Text style={styles.label}>计划</Text>
       {mode === 'interval' ? (
@@ -585,16 +544,12 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: Colors.text,
   },
-  promptInput: {textAlignVertical: 'top'},
-  /** 原生端：随内容自动撑高的合适默认高度 */
-  promptInputNative: {minHeight: 160},
-  /** web 端拖拽调高手柄（横向全宽热区 + 居中握把） */
-  resizeHandle: {alignItems: 'center', paddingVertical: 6},
-  resizeGrip: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: Colors.fillBorder,
+  // 随内容自动撑高（默认 ≈8 行）；上限 25 行（行高 20），超出输入区内部滚动
+  promptInput: {
+    textAlignVertical: 'top',
+    lineHeight: 20,
+    minHeight: 160,
+    maxHeight: 520,
   },
   inlineRow: {flexDirection: 'row', alignItems: 'center', gap: 8},
   smallInput: {width: 90, textAlign: 'center'},

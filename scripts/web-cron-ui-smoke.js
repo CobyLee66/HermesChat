@@ -4,10 +4,10 @@
  * 全程不打真实 gateway：本地 mock-gateway（cron REST + 会话消息只读端点），
  * vite build+preview，直连配置走同源代理。
  *
- * 场景（对应 2026-09-10 五项交互修改）：
+ * 场景（对应 2026-09-10 五项交互修改 + 09-11 提示词上限修订）：
  *   1. ViewSwitcher 切「定时任务」→ 任务列表渲染（名称/已调度徽章/中文计划）；
  *   2. 点任务行 → 默认打开**编辑**弹层（不再是运行历史）；
- *   3. 编辑弹层提示词输入区默认高 ≈200，拖拽手柄下移 100px → 高度增加 ≈100；
+ *   3. 提示词输入区默认高 ≈160；填 30 行文本自动撑高但封顶 25 行（≈520px）；拖拽手柄已移除；
  *   4. ⋯ 菜单 → 运行历史 → 列表渲染且内容 720 居中（900 视口 x≈90）；
  *   5. 点运行记录 → 运行详情弹层（元信息 + 对话回放；tool 行与 hidden 行不渲染）；
  *   6. 返回 → 回运行历史列表；再返回 → 回任务列表。
@@ -159,35 +159,32 @@ async function main() {
     await page.screenshot({path: `${OUT}/web-cron-ui-2-edit.png`});
     console.log('OK 场景2：点任务行默认打开编辑弹层（名称已预填）');
 
-    // ─── 场景 3：提示词高度默认 ≈200，拖手柄 +100px → 高度增加 ────
+    // ─── 场景 3：提示词默认 ≈160，填 30 行撑高封顶 25 行；无拖拽手柄 ──
+    if ((await page.locator('[aria-label="调整提示词高度"]').count()) !== 0) {
+      throw new Error('拖拽手柄应已移除');
+    }
     const textarea = page.locator('textarea').first();
-    const boxBefore = await textarea.boundingBox();
-    if (!boxBefore || Math.abs(boxBefore.height - 200) > 24) {
-      throw new Error(`提示词默认高度异常：${boxBefore?.height}`);
+    await textarea.scrollIntoViewIfNeeded();
+    const boxIdle = await textarea.boundingBox();
+    if (!boxIdle || Math.abs(boxIdle.height - 160) > 24) {
+      throw new Error(`提示词默认高度异常：${boxIdle?.height}`);
     }
-    const grip = page.locator('[aria-label="调整提示词高度"]');
-    // 手柄在表单 ScrollView 内、提示词区下方，先把表单滚动到底让它进视口
-    await grip.scrollIntoViewIfNeeded();
-    await page.waitForTimeout(200);
-    const gb = await grip.boundingBox();
-    if (gb.y < 0 || gb.y + gb.height > VIEW_H) {
-      throw new Error(`拖拽手柄不在视口内：y=${gb.y}`);
-    }
-    const gx = gb.x + gb.width / 2;
-    const gy = gb.y + gb.height / 2;
-    await page.mouse.move(gx, gy);
-    await page.mouse.down();
-    await page.mouse.move(gx, gy + 100, {steps: 8});
-    await page.mouse.up();
-    await page.waitForTimeout(300);
-    const boxAfter = await textarea.boundingBox();
-    const delta = boxAfter.height - boxBefore.height;
-    if (delta < 80 || delta > 120) {
-      throw new Error(`拖拽后高度变化异常：${boxBefore.height} → ${boxAfter.height}`);
+    // 30 行 > 25 行上限：应自动撑高到 520px（行高 20 × 25 + 上下 padding 20）后内部滚动
+    const longText = Array.from(
+      {length: 30},
+      (_, i) => `第${i + 1}行 提示词高度上限冒烟文本`,
+    ).join('\n');
+    await textarea.fill(longText);
+    await page.waitForTimeout(400);
+    const boxCapped = await textarea.boundingBox();
+    if (!boxCapped || Math.abs(boxCapped.height - 520) > 24) {
+      throw new Error(`25 行封顶高度异常：${boxCapped?.height}`);
     }
     await page.waitForTimeout(500);
-    await page.screenshot({path: `${OUT}/web-cron-ui-3-resize.png`});
-    console.log(`OK 场景3：提示词高度 ${boxBefore.height} → ${boxAfter.height}（拖拽生效）`);
+    await page.screenshot({path: `${OUT}/web-cron-ui-3-maxheight.png`});
+    console.log(
+      `OK 场景3：提示词默认 ${boxIdle.height} → 30 行封顶 ${boxCapped.height}（25 行上限生效，无拖拽手柄）`,
+    );
 
     await page.getByText('‹ 返回').click();
     await eventually(
@@ -260,23 +257,6 @@ async function main() {
     vite.kill('SIGTERM');
     await gw.close();
   }
-}
-
-async function eventually(fn, timeoutMs, label) {
-  const start = Date.now();
-  let last = null;
-  while (Date.now() - start < timeoutMs) {
-    try {
-      last = await fn();
-      if (last) {
-        return last;
-      }
-    } catch (e) {
-      last = e;
-    }
-    await page.waitForTimeout(200);
-  }
-  throw new Error(`等待超时: ${label}（last=${last}）`);
 }
 
 main().catch(e => {
