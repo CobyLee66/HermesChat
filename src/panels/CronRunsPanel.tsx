@@ -1,7 +1,7 @@
 /**
  * CronRunsPanel — 定时任务运行历史面板（GET /api/cron/jobs/{id}/runs）。
- * 运行记录即 source=cron 的会话；点记录经 openSessionFlow 打开进聊天页
- * （onOpenSession 由宿主注入：手机导航到 Chat，桌面 openChat）。
+ * 运行记录即 source=cron 的会话；点记录经 onOpenRun 由宿主打开运行详情
+ * （手机导航 CronRunDetail，桌面弹 CronRunDetailModal）。
  */
 
 import React, {useCallback, useEffect, useState} from 'react';
@@ -16,40 +16,26 @@ import {
 
 import {Colors} from '../components/theme';
 import {getCronJobRuns} from '../rpc/cron';
-import type {CronRunRow, SessionListRow} from '../rpc/types';
+import type {CronRunRow} from '../rpc/types';
 import {useConnectionStore} from '../store/connection';
-import {alertError} from '../utils/alert';
 import {formatEpoch} from '../utils/cronSchedule';
-import {openSessionFlow, type OpenedSession} from './sessionFlows';
 
 function RowSeparator() {
   return <View style={styles.sep} />;
 }
 
-function toSessionRow(run: CronRunRow): SessionListRow {
-  return {
-    id: run.id,
-    title: run.title || '运行记录',
-    preview: run.preview || '',
-    started_at: run.started_at ?? 0,
-    message_count: run.message_count ?? 0,
-    source: 'cron',
-  };
-}
-
 export function CronRunsPanel({
   jobId,
   profile,
-  onOpenSession,
+  onOpenRun,
 }: {
   jobId: string;
   profile?: string;
-  onOpenSession: (opened: OpenedSession) => void;
+  onOpenRun: (run: CronRunRow) => void;
 }) {
   const [runs, setRuns] = useState<CronRunRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [opening, setOpening] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -71,25 +57,6 @@ export function CronRunsPanel({
   useEffect(() => {
     void load();
   }, [load]);
-
-  const openRun = useCallback(
-    (run: CronRunRow) => {
-      if (opening) {
-        return;
-      }
-      setOpening(run.id);
-      openSessionFlow(profile ?? 'default', toSessionRow(run))
-        .then(opened => {
-          setOpening(null);
-          onOpenSession(opened);
-        })
-        .catch(e => {
-          setOpening(null);
-          alertError('打开运行会话失败', e instanceof Error ? e.message : String(e));
-        });
-    },
-    [opening, profile, onOpenSession],
-  );
 
   if (loading && runs.length === 0) {
     return <ActivityIndicator style={styles.loading} color={Colors.accent} />;
@@ -116,8 +83,7 @@ export function CronRunsPanel({
         <TouchableOpacity
           style={styles.row}
           activeOpacity={0.7}
-          disabled={opening === item.id}
-          onPress={() => openRun(item)}>
+          onPress={() => onOpenRun(item)}>
           <View style={styles.rowBody}>
             <View style={styles.rowTop}>
               <Text style={styles.title} numberOfLines={1}>
@@ -131,7 +97,7 @@ export function CronRunsPanel({
               </Text>
             </View>
             <Text style={styles.preview} numberOfLines={1}>
-              {item.preview || '查看会话详情'}
+              {item.preview || '查看运行详情'}
             </Text>
           </View>
         </TouchableOpacity>

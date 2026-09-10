@@ -7,6 +7,8 @@
 
 import {create} from 'zustand';
 
+import type {CronRunRow} from '../rpc/types';
+
 export interface DesktopChatRef {
   sessionId: string;
   profile: string;
@@ -24,6 +26,8 @@ interface DesktopUiState {
   cronEditOpen: {jobId?: string; profile?: string} | null;
   /** 定时任务运行历史弹层（null 关闭） */
   cronRunsOpen: {jobId: string; name: string; profile?: string} | null;
+  /** 定时任务运行详情弹层（叠在运行历史上层；null 关闭） */
+  cronRunDetailOpen: {run: CronRunRow; name?: string; profile?: string} | null;
   /** 主页首屏视图（Profile 列表 / 定时任务） */
   homeView: 'sessions' | 'cron';
   selectProfile: (profile: string | null) => void;
@@ -34,6 +38,9 @@ interface DesktopUiState {
   setCronEditOpen: (open: {jobId?: string; profile?: string} | null) => void;
   setCronRunsOpen: (
     open: {jobId: string; name: string; profile?: string} | null,
+  ) => void;
+  setCronRunDetailOpen: (
+    open: {run: CronRunRow; name?: string; profile?: string} | null,
   ) => void;
   setHomeView: (view: 'sessions' | 'cron') => void;
   /** 断线清空（连接重建后壳重新选择） */
@@ -47,6 +54,7 @@ export const useDesktopUiStore = create<DesktopUiState>(set => ({
   profileEditOpen: null,
   cronEditOpen: null,
   cronRunsOpen: null,
+  cronRunDetailOpen: null,
   homeView: 'sessions',
   selectProfile: profile =>
     set(state =>
@@ -61,6 +69,7 @@ export const useDesktopUiStore = create<DesktopUiState>(set => ({
   setProfileEditOpen: profileEditOpen => set({profileEditOpen}),
   setCronEditOpen: cronEditOpen => set({cronEditOpen}),
   setCronRunsOpen: cronRunsOpen => set({cronRunsOpen}),
+  setCronRunDetailOpen: cronRunDetailOpen => set({cronRunDetailOpen}),
   setHomeView: homeView => set({homeView}),
   reset: () =>
     set({
@@ -70,6 +79,7 @@ export const useDesktopUiStore = create<DesktopUiState>(set => ({
       profileEditOpen: null,
       cronEditOpen: null,
       cronRunsOpen: null,
+      cronRunDetailOpen: null,
       homeView: 'sessions',
     }),
 }));

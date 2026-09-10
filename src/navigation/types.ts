@@ -1,4 +1,5 @@
 /** 导航参数类型（独立文件，避免 screens ↔ App 循环依赖）。 */
+import type {CronRunRow} from '../rpc/types';
 
 export type RootStackParamList = {
   ConnectionHome: undefined;
@@ -13,4 +14,6 @@ export type RootStackParamList = {
   CronRuns: {jobId: string; name: string; profile?: string};
   /** 定时任务新建（无 jobId）/编辑（jobId）；profile 仅新建时可选 */
   CronEdit: {jobId?: string; profile?: string};
+  /** 定时任务运行详情（run = 运行记录行，即 source=cron 会话） */
+  CronRunDetail: {run: CronRunRow; name?: string; profile?: string};
 };

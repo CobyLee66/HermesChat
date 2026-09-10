@@ -11,7 +11,7 @@ import type {RootStackParamList} from '../navigation/types';
 type Nav = NativeStackNavigationProp<RootStackParamList, 'CronRuns'>;
 type Rt = RouteProp<RootStackParamList, 'CronRuns'>;
 
-/** 定时任务运行历史页（导航栈）：列表 + 点记录进聊天页查看。 */
+/** 定时任务运行历史页（导航栈）：列表 + 点记录进运行详情页。 */
 export function CronRunsScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Rt>();
@@ -26,11 +26,11 @@ export function CronRunsScreen() {
       <CronRunsPanel
         jobId={jobId}
         profile={profile}
-        onOpenSession={opened =>
-          navigation.navigate('Chat', {
-            sessionId: opened.sessionId,
-            profile: profile ?? 'default',
-            title: opened.title,
+        onOpenRun={run =>
+          navigation.navigate('CronRunDetail', {
+            run,
+            name,
+            profile: run.profile ?? profile,
           })
         }
       />

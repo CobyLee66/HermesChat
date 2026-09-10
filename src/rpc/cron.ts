@@ -51,7 +51,7 @@ function detailText(body: unknown): string | null {
   return null;
 }
 
-async function cronFetch<T>(
+export async function cronFetch<T>(
   httpUrl: string,
   token: string,
   path: string,

@@ -29,12 +29,14 @@ import {Colors} from '../components/theme';
 import {ViewSwitcher} from '../components/ViewSwitcher';
 import {CronJobForm, useCronJobDraft} from '../panels/CronJobForm';
 import {CronPanel} from '../panels/CronPanel';
+import {CronRunDetailPanel} from '../panels/CronRunDetailPanel';
 import {CronRunsPanel} from '../panels/CronRunsPanel';
 import {useProfileNickname} from '../panels/SessionListPanel';
 import {ProfileEditScreen} from '../screens/ProfileEditScreen';
 import {useConnectionStore} from '../store/connection';
 import {useCronStore} from '../store/cron';
 import {useProfilesStore} from '../store/profiles';
+import type {CronRunRow} from '../rpc/types';
 import {ConfirmDialogHost} from '../ui/ConfirmDialogHost';
 import {useBreakpoint} from '../ui/breakpoints';
 import {alertError} from '../utils/alert';
@@ -67,6 +69,7 @@ function DesktopAppShell() {
   const profileEditOpen = useDesktopUiStore(s => s.profileEditOpen);
   const cronEditOpen = useDesktopUiStore(s => s.cronEditOpen);
   const cronRunsOpen = useDesktopUiStore(s => s.cronRunsOpen);
+  const cronRunDetailOpen = useDesktopUiStore(s => s.cronRunDetailOpen);
   const reset = useDesktopUiStore(s => s.reset);
 
   const refreshProfiles = useProfilesStore(s => s.refresh);
@@ -128,6 +131,10 @@ function DesktopAppShell() {
           <CronEditModal jobId={cronEditOpen.jobId} profile={cronEditOpen.profile} />
         ) : null}
         {cronRunsOpen ? <CronRunsModal runs={cronRunsOpen} /> : null}
+        {/* 详情弹层排在运行历史之后，叠加在其上层（返回先回运行历史列表） */}
+        {cronRunDetailOpen ? (
+          <CronRunDetailModal detail={cronRunDetailOpen} />
+        ) : null}
       </View>
     );
   }
@@ -364,13 +371,14 @@ function CronEditModal({
   );
 }
 
-/** 定时任务运行历史弹层；点记录打开会话进聊天区。 */
+/** 定时任务运行历史弹层；点记录打开运行详情弹层（本层保留在下层）。 */
 function CronRunsModal({
   runs,
 }: {
   runs: {jobId: string; name: string; profile?: string};
 }) {
   const setCronRunsOpen = useDesktopUiStore(s => s.setCronRunsOpen);
+  const setCronRunDetailOpen = useDesktopUiStore(s => s.setCronRunDetailOpen);
   const close = () => setCronRunsOpen(null);
   return (
     <Modal visible animationType="slide" onRequestClose={close}>
@@ -384,18 +392,71 @@ function CronRunsModal({
           </Text>
           <View style={styles.modalHeaderSpacer} />
         </View>
-        <CronRunsPanel
-          jobId={runs.jobId}
-          profile={runs.profile}
-          onOpenSession={opened => {
-            close();
-            openChat({
-              sessionId: opened.sessionId,
-              profile: runs.profile ?? 'default',
-              title: opened.title,
-            });
-          }}
-        />
+        {/* 白底与 header 一致 + 720 居中（对齐 cronPane） */}
+        <View style={styles.modalPaneBody}>
+          <View style={styles.modalPaneCenter}>
+            <CronRunsPanel
+              jobId={runs.jobId}
+              profile={runs.profile}
+              onOpenRun={run =>
+                setCronRunDetailOpen({
+                  run,
+                  name: runs.name,
+                  profile: run.profile ?? runs.profile,
+                })
+              }
+            />
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+/** 定时任务运行详情弹层（只读对话回放）；可跳到该 profile 的聊天区继续对话。 */
+function CronRunDetailModal({
+  detail,
+}: {
+  detail: {run: CronRunRow; name?: string; profile?: string};
+}) {
+  const setCronRunDetailOpen = useDesktopUiStore(s => s.setCronRunDetailOpen);
+  const setCronRunsOpen = useDesktopUiStore(s => s.setCronRunsOpen);
+  const selectProfile = useDesktopUiStore(s => s.selectProfile);
+  const close = () => setCronRunDetailOpen(null);
+  const {run} = detail;
+  const profile = run.profile ?? detail.profile ?? 'default';
+  return (
+    <Modal visible animationType="slide" onRequestClose={close}>
+      <View style={styles.modalRoot}>
+        <View style={styles.modalHeader}>
+          <TouchableOpacity activeOpacity={0.7} onPress={close} hitSlop={8}>
+            <Text style={styles.backText}>‹ 返回</Text>
+          </TouchableOpacity>
+          <Text style={styles.modalTitle} numberOfLines={1}>
+            运行详情
+          </Text>
+          <View style={styles.modalHeaderSpacer} />
+        </View>
+        <View style={styles.modalPaneBody}>
+          <View style={styles.modalPaneCenter}>
+            <CronRunDetailPanel
+              run={run}
+              jobName={detail.name}
+              onOpenChat={() => {
+                // 聊天区只在选中 profile 的分支渲染：先切 profile 再开会话，
+                // 同时收掉 cron 弹层（否则本 Modal 盖在聊天区上）
+                close();
+                setCronRunsOpen(null);
+                selectProfile(profile);
+                openChat({
+                  sessionId: run.id,
+                  profile,
+                  title: run.title ?? '',
+                });
+              }}
+            />
+          </View>
+        </View>
       </View>
     </Modal>
   );
@@ -437,6 +498,10 @@ const styles = StyleSheet.create({
   },
   profilePaneTitle: {fontSize: 17, fontWeight: '600', color: Colors.text},
   modalRoot: {flex: 1, backgroundColor: Colors.bg},
+  /** cron 运行历史/详情弹层的内容区：白底与 header 一致（编辑弹层仍用灰底） */
+  modalPaneBody: {flex: 1, backgroundColor: Colors.card},
+  /** 内容 720 居中（对齐 cronPane / profileListContent） */
+  modalPaneCenter: {flex: 1, maxWidth: 720, width: '100%', alignSelf: 'center'},
   modalHeader: {
     height: 52,
     flexDirection: 'row',

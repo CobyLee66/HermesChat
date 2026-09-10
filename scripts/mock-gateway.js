@@ -11,6 +11,10 @@
  * session.title / session.delete / session.close / model.options /
  * **prompt.submit（流式回包）**。
  *
+ * cron 冒烟 REST：`GET /api/cron/jobs`、`GET /api/cron/jobs/{id}/runs`、
+ * `GET /api/sessions/{id}/messages`（dashboard REST 同构；消息行含 tool 行与
+ * display_kind=hidden 行，供运行详情「只渲染对话文本」的过滤断言）。
+ *
  * 关键保真点（照真实服务端行为，docs/protocol.md §2）：
  * - `slash.exec` 执行 `/title X` **只改标题、不推任何事件**；
  * - `session.title` 不带 title 参数 = 只读形式，返回 `{title, session_key}`。
@@ -54,6 +58,69 @@ const INITIAL_HISTORY = [
   {role: 'user', text: '你好，这是 mock 会话', timestamp: 1700000000},
   {role: 'assistant', text: '收到，我是 mock gateway 的假回复。', timestamp: 1700000001},
 ];
+
+/** cron 冒烟种子：一个任务 + 一次运行会话（运行详情被测数据） */
+const MOCK_CRON_JOB = {
+  id: 'cronjob-smoke-0001',
+  name: '每日站会摘要',
+  prompt: '整理今天的站会要点并生成摘要',
+  enabled: true,
+  state: 'scheduled',
+  schedule: {kind: 'interval', minutes: 1440},
+  repeat: null,
+  deliver: 'local',
+  next_run_at: '2026-09-11T09:30:00',
+  last_run_at: '2026-09-10T09:30:00',
+  last_status: null,
+  profile: 'mock',
+  profile_name: 'mock',
+};
+const MOCK_CRON_RUN_ID = 'cron-run-smoke-0001';
+const MOCK_CRON_RUN = {
+  id: MOCK_CRON_RUN_ID,
+  title: '每日站会摘要 · 09-10',
+  preview: '今日站会要点已生成',
+  started_at: Math.floor(Date.now() / 1000) - 600,
+  last_active: Math.floor(Date.now() / 1000) - 540,
+  message_count: 2,
+  is_active: false,
+  archived: false,
+  profile: 'mock',
+  source: 'cron',
+};
+/** GET /api/sessions/{id}/messages 返回的原始行（含 tool/hidden 行供过滤断言） */
+const MOCK_CRON_MESSAGES = {
+  session_id: MOCK_CRON_RUN_ID,
+  messages: [
+    {
+      id: 1,
+      role: 'user',
+      content: '整理今天的站会要点并生成摘要',
+      timestamp: MOCK_CRON_RUN.started_at,
+    },
+    {
+      id: 2,
+      role: 'tool',
+      content: '{"cmd":"cat standup.md"}',
+      name: 'bash',
+      timestamp: MOCK_CRON_RUN.started_at + 10,
+    },
+    {
+      id: 3,
+      role: 'assistant',
+      content: '**今日站会要点**\n\n1. 冒烟链路已通\n2. 定时任务视图可用',
+      timestamp: MOCK_CRON_RUN.started_at + 20,
+    },
+    {
+      id: 4,
+      role: 'user',
+      content: '（旧内容，应被隐藏）',
+      display_kind: 'hidden',
+      timestamp: MOCK_CRON_RUN.started_at + 30,
+    },
+  ],
+  pagination: {limit: 500, offset: 0, order: 'latest', returned: 4},
+};
 
 function startMockGateway({
   port = 9199,
@@ -305,6 +372,29 @@ function startMockGateway({
       res.end(JSON.stringify({ok: true}));
       return;
     }
+    // ─── dashboard REST（cron 冒烟）──────────────────────────────
+    if (path === '/api/cron/jobs') {
+      res.writeHead(200, {'content-type': 'application/json'});
+      res.end(JSON.stringify([MOCK_CRON_JOB]));
+      return;
+    }
+    const runsMatch = path.match(/^\/api\/cron\/jobs\/([^/]+)\/runs$/);
+    if (runsMatch) {
+      res.writeHead(200, {'content-type': 'application/json'});
+      res.end(JSON.stringify({runs: [MOCK_CRON_RUN], limit: 20}));
+      return;
+    }
+    const msgsMatch = path.match(/^\/api\/sessions\/([^/]+)\/messages$/);
+    if (msgsMatch) {
+      if (decodeURIComponent(msgsMatch[1]) !== MOCK_CRON_RUN_ID) {
+        res.writeHead(404, {'content-type': 'application/json'});
+        res.end(JSON.stringify({detail: 'Session not found'}));
+        return;
+      }
+      res.writeHead(200, {'content-type': 'application/json'});
+      res.end(JSON.stringify(MOCK_CRON_MESSAGES));
+      return;
+    }
     res.writeHead(404, {'content-type': 'application/json'});
     res.end(JSON.stringify({detail: `mock: not found ${path}`}));
   });
@@ -388,4 +478,8 @@ module.exports = {
   PROFILE,
   MOCK_TITLE,
   MOCK_USAGE,
+  MOCK_CRON_JOB,
+  MOCK_CRON_RUN,
+  MOCK_CRON_RUN_ID,
+  MOCK_CRON_MESSAGES,
 };

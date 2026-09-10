@@ -290,7 +290,7 @@ export function CronPanel({
               showProfile={profileFilter === 'all'}
               busy={!!busyJobIds[item.id]}
               triggering={triggeringJobId === item.id}
-              onOpen={() => onOpenRuns(item)}
+              onOpen={() => onEditJob(item)}
               onMenu={() => setMenuJob(item)}
             />
           )}

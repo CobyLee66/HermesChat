@@ -19,6 +19,7 @@ import {ChatScreen} from './src/screens/ChatScreen';
 import {ConnectionEditScreen} from './src/screens/ConnectionEditScreen';
 import {ConnectionHomeScreen} from './src/screens/ConnectionHomeScreen';
 import {CronEditScreen} from './src/screens/CronEditScreen';
+import {CronRunDetailScreen} from './src/screens/CronRunDetailScreen';
 import {CronRunsScreen} from './src/screens/CronRunsScreen';
 import {ProfileEditScreen} from './src/screens/ProfileEditScreen';
 import {ProfileListScreen} from './src/screens/ProfileListScreen';
@@ -109,6 +110,11 @@ function App() {
               name="CronRuns"
               component={CronRunsScreen}
               options={{title: '运行历史'}}
+            />
+            <Stack.Screen
+              name="CronRunDetail"
+              component={CronRunDetailScreen}
+              options={{title: '运行详情'}}
             />
             <Stack.Screen
               name="CronEdit"

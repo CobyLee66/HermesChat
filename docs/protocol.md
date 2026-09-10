@@ -174,6 +174,11 @@
 - 列表刷新：操作成功后重新拉 list 即可（无推送差异）；`cron.changed` 事件（§3）防抖 1s 静默刷新，仅在本会话加载过列表后响应。
 - **trigger 是同步长操作**：UI 行级 busy + 请求超时放宽（App：`rpc/cron.ts` `TRIGGER_TIMEOUT_MS=10min`，D019 的 30s 统一超时不适用于此端点）；409 单独提示「任务正在运行」。
 - `last_status ≠ ok` 不是失败一概而论：`delivery_failed` 的明细在 `last_delivery_error`；漏触发在 `last_fire_error`。错误展示优先级：last_fire_error > last_delivery_error > last_error。
-- 运行历史行的打开 = 普通 `session.resume`（source=cron 会话与普通会话同构）。
+- 运行历史行的打开 = **运行详情只读回放**（2026-09-10 修订，D039）：不再 `session.resume`（会挂起宿主 profile 的 agent，浏览历史不该有副作用）。改走 dashboard REST 只读端点 `GET /api/sessions/{session_id}/messages?profile=`（web_routers/sessions.py:658，`manage_router`，与 `/api/cron/*` 同 9119 同 token 中间件）：
+  - 服务端 `read_only=True` 开库，先 `_resolve_session_id` + `resolve_resume_session_id`（自动解析压缩链到最新后代），会话不存在 404 `{detail}`；
+  - 返回 `{session_id, messages: 原始行[], pagination: {limit, offset, order, returned}}`。**messages 是 messages 表 `SELECT *` 原始行**（role/content/timestamp/display_kind/active/compacted…），不是 gateway WS 侧投影（无 name/args 工具结构）；服务端只对压缩摘要行做 display 投影（有摘要 → 附 `display_content` 且摘掉 display_kind；无摘要 → `display_kind:"hidden"`）；
+  - 分页：**省略 limit = 最新 500 条按时间序返回**（latest page chronological）；显式 limit 钳制 1..500，`order` 可 `oldest`/`latest`；
+  - App 客户端投影（`rpc/restSessions.ts` `projectRunMessages`）：只留 user/assistant/system；`display_kind:"hidden"` 跳过；有 `display_content` 转 system 灰条；content 的 JSON parts 数组经 `coerceContentText`（复用 `ssh/remoteHistory.ts`）拍平；tool 行不渲染（与 foreign 只读视图同口径）。
+  - 同族端点（App 未接）：`GET /api/sessions/{id}`（会话元信息）、`GET /api/sessions/{id}/export`。
 - 对照警示：WS `cron.manage` 的 list 返回 `_format_job` 投影——字段名是 **`job_id`**（非 id）、prompt 只有 100 字符 preview、schedule 是 display 串。与 REST 原始记录不同，勿混用。
 - **写路径验证用 mock gateway**（2026-09-08 新增）：`scripts/mock-gateway.js` 是本地内存态 gateway（HTTP `/` 带 token + `/api/health` + WS JSON-RPC，已实现 profiles.list / session.list / session.resume / session.history / complete.slash / slash.exec(title) / session.title / model.options），照真实服务端行为保真——`/title` 只改内存且**不推事件**。写操作类改动（改名/发送等）的端到端验证一律打它，不打 live 9119（AGENTS.md 禁写）。范例：`scripts/desktop-title-refresh-smoke.js`（真实 Electron + 隔离 userData）。
