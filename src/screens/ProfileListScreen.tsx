@@ -45,7 +45,13 @@ export function ProfileListScreen() {
   // header：左上角「Hermes」标题位换成视图切换控件；右上角退出按钮保留
   useEffect(() => {
     navigation.setOptions({
-      headerTitle: () => <ViewSwitcher value={view} onChange={setView} />,
+      // 包一层 row 容器：原生 header 标题容器默认 stretch 会把胶囊根容器
+      // 横向拉满标题区（右侧多出一段胶囊底色），包一层让它收回内容宽度
+      headerTitle: () => (
+        <View style={styles.headerSwitcher}>
+          <ViewSwitcher value={view} onChange={setView} />
+        </View>
+      ),
       headerTitleAlign: 'left',
       headerRight: () => (
         <TouchableOpacity
@@ -153,6 +159,12 @@ export function ProfileListScreen() {
 
 const styles = StyleSheet.create({
   container: {flex: 1, backgroundColor: Colors.card},
+  // 安卓原生 header 标题容器会把子级横向拉伸，包 row + 收窄到内容宽度
+  headerSwitcher: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+  },
   loading: {marginTop: 48},
   banner: {
     backgroundColor: '#FFF7E8',
