@@ -9,6 +9,7 @@
 
 ### 进行中
 
+- **Android「表格横向拖不动」修复待真机验证**（2026-09-10，D039）：根因 = 竖向 FlatList 原生触摸拦截先于子级判定、垂直位移过 touchSlop 即抢走横向拖动手势（点击后重新起手路径更平所以偶尔能拖）；修复 = 首次引入 react-native-gesture-handler 3.2.1（`GestureHandlerRootView` 挂 index.js 原生根节点 + `MarkdownText.tsx` 新 `TableScroll` 组件：Android 用 `usePanGesture` 方向锁定（activeOffsetX ±10 / failOffsetY ±8）驱动 `scrollEnabled=false` 的表格 ScrollView，惯性 JS 衰减补偿；iOS 保持原生滚动、web 分叉零改动）。tsc 0 错 / eslint 0 error / jest 294 全绿 / web:build 通过且产物零 RNGH 代码；**待办：构建机 出包 → 用户真机复测**（横向拖动稳定生效、表格上竖滑仍滚列表、长按表格仍弹文本选择层）
 - **桌面端 v0.1（Windows/macOS）已实现待验收**（2026-09-06，D023~D025，`docs/desktop.md` §8）：Electron 壳 + ssh2 隧道 + 回环代理 + 三栏响应式布局 + 共享面板抽取 + 桌面能力（附件/语音/粘贴拖拽/失焦通知/自绘确认框）+ electron-builder 打包配置。mac dmg 本机出包验证通过；**待用户验收**：Electron/Windows 包真实 SSH 连接全流程、语音 webm 转写、Windows 安装包（`scripts/build-desktop-remote.sh`）
 - 会话列表顶部信息 / Profile 名称显示 / 网页端气泡尺寸 / Profile 头像加载缓存打磨包（2026-09-05，1a9341a），真机效果待验证
 - **会话标题即时刷新（D032）待真机确认**：mock gateway 端到端已通过（`scripts/desktop-title-refresh-smoke.js`，真实 Electron，不碰 live 数据）；手机上真机 `/title` 复测待做（逻辑三端同源，风险低）
