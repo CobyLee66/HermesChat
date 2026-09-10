@@ -48,7 +48,7 @@ import {
   shouldPinToBottom,
   shouldRestoreAnchor,
 } from '../utils/timelineFollow';
-import type {AssistantMsg, TimelineItem} from '../rpc/types';
+import type {AssistantBlock, AssistantMsg, TimelineItem} from '../rpc/types';
 
 const EMPTY_ITEMS: TimelineItem[] = [];
 
@@ -382,6 +382,12 @@ export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
   },
 );
 
+/** 思考块是否正处流式接收中：delta 只追加到 blocks 末位的同类块，
+ * 故「正在增长的思考块」必然是末位元素（按引用比较，免受过滤影响）。 */
+function isLiveThinking(msg: AssistantMsg, block: AssistantBlock): boolean {
+  return msg.streaming && msg.blocks[msg.blocks.length - 1] === block;
+}
+
 /** 助手消息列：无头像占位，块列整宽（文本气泡/思考/工具/错误）。 */
 const AssistantRow = React.memo(function AssistantRow({
   msg,
@@ -413,9 +419,23 @@ const AssistantRow = React.memo(function AssistantRow({
               />
             );
           case 'thinking':
-            return <ThinkingBlock key={i} text={b.text} variant="thinking" />;
+            return (
+              <ThinkingBlock
+                key={i}
+                text={b.text}
+                variant="thinking"
+                live={isLiveThinking(msg, b)}
+              />
+            );
           case 'reasoning':
-            return <ThinkingBlock key={i} text={b.text} variant="reasoning" />;
+            return (
+              <ThinkingBlock
+                key={i}
+                text={b.text}
+                variant="reasoning"
+                live={isLiveThinking(msg, b)}
+              />
+            );
           case 'tool':
             return <ToolCallCard key={b.tool.toolId} tool={b.tool} />;
           case 'image':
