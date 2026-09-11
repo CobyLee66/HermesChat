@@ -129,6 +129,13 @@ function startMockGateway({
   stream = {},
   /** 额外种子 N 条历史消息（交替 user/assistant），测长历史懒挂载场景 */
   historyCount = 0,
+  /**
+   * 会话挂起的 clarify 快照（真实服务端 `_live_session_payload` 的
+   * `pending_clarify` 是**单个对象**，不是数组）：`session.resume` 带上它，
+   * 客户端须恢复澄清卡而不是抛 TypeError。可运行期改 `gw.state.pendingClarify`
+   * 切换场景（null = 无挂起交互）。
+   */
+  pendingClarify = null,
 } = {}) {
   const {chunks = 24, intervalMs = 400} = stream;
   const seedHistory = [];
@@ -156,6 +163,8 @@ function startMockGateway({
     deltaSent: 0,
     wsClosed: null,
     lastSendError: null,
+    /** 挂起的 clarify 快照（单对象；clarify.respond 后清空，模拟服务端解锁） */
+    pendingClarify,
   };
 
   const ok = (id, value) => JSON.stringify({jsonrpc: '2.0', id, result: value});
@@ -215,9 +224,40 @@ function startMockGateway({
               running: false,
               profile_name: PROFILE,
             },
+            // 真实服务端形态：**单个对象**（不是数组）；无挂起时不带该字段
+            ...(state.pendingClarify
+              ? {pending_clarify: state.pendingClarify}
+              : null),
           }),
         );
         return;
+      case 'clarify.respond': {
+        // 真实网关语义：clarify.respond 查全局 pending 注册表（不需要
+        // session_id）；有 question_id 即批量逐题锁答案，否则整题解锁。
+        const rid = String(params.request_id ?? '');
+        const qid = String(params.question_id ?? '');
+        const pending = state.pendingClarify;
+        if (!pending || pending.request_id !== rid) {
+          send(err(id, 4009, `no pending clarify request`));
+          return;
+        }
+        if (qid && Array.isArray(pending.questions)) {
+          // 逐题锁答案（update-in-place）；qid 全锁定即整批完成、注册表清空
+          pending.answers = pending.answers || {};
+          pending.answers[qid] = String(params.answer ?? '');
+          const remaining = pending.questions
+            .map(q => q.qid)
+            .filter(q => !(q in pending.answers));
+          if (remaining.length === 0) {
+            state.pendingClarify = null;
+          }
+          send(ok(id, {status: 'ok', remaining}));
+          return;
+        }
+        state.pendingClarify = null;
+        send(ok(id, {status: 'ok'}));
+        return;
+      }
       case 'session.history':
         send(ok(id, {count: state.messages.length, messages: state.messages}));
         return;

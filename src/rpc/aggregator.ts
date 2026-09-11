@@ -316,12 +316,21 @@ export class TimelineAggregator {
     const existing = this.items.findIndex(
       it => it.kind === 'clarify' && it.requestId === p.request_id,
     );
+    // resume 快照回放批量澄清时带 answers（服务端已锁定的 qid→答案，见
+    // _pending_clarify_request_payload）：直接播种已答状态，否则重进会话后
+    // 已作答的题目又变成可答（官方 desktop 的 lockedAnswers 恢复同款）。
+    const answeredQids =
+      p.answers && typeof p.answers === 'object'
+        ? Object.keys(p.answers).filter(qid =>
+            questions.some(q => q.qid === qid),
+          )
+        : [];
     const card: ClarifyCardItem = {
       kind: 'clarify',
       id: nextId('cl'),
       requestId: p.request_id,
       questions,
-      answeredQids: [],
+      answeredQids,
     };
     if (existing >= 0) {
       this.replaceAt(existing, card);

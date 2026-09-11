@@ -138,6 +138,8 @@ export interface ClarifyQuestion {
 /**
  * clarify.request payload：单问 {question, choices, multi_select?}；
  * 批量 {questions: [{qid, question, choices, multi_select}]}。
+ * resume 快照额外带 `answers`（批量时已锁定的 qid→答案，见
+ * `_pending_clarify_request_payload`），单问快照没有它。
  */
 export interface ClarifyRequestPayload {
   request_id: string;
@@ -150,7 +152,18 @@ export interface ClarifyRequestPayload {
     choices?: string[];
     multi_select?: boolean;
   }[];
+  /** 批量澄清：服务端已锁定的逐题答案（qid → 答案文本），仅 resume 快照回放 */
+  answers?: Record<string, string>;
 }
+
+/**
+ * 服务端「单个挂起交互」的 wire 形态：`session.resume` 的
+ * `pending_approval` / `pending_clarify` 都是**单个对象**
+ * （server `dict | None`，见 tui_gateway/server.py `_live_session_payload`），
+ * 不是数组。并上数组是客户端的防御性宽容（远端服务器可能是更早的 hermes
+ * 版本，形态未必逐字一致），归一化见 `store/chat.ts` 的 `asPendingList()`。
+ */
+export type OneOrMany<T> = T | T[];
 
 /** *.expire 事件 payload（审批/澄清超时）。 */
 export interface ExpirePayload {
@@ -268,10 +281,10 @@ export interface SessionResumeResult {
   status?: string;
   messages?: ProjectedMessage[];
   info?: SessionInfoPayload;
-  /** 断线期间挂起的审批（事件单播给旧 transport，靠它恢复审批卡） */
-  pending_approval?: ApprovalRequestPayload[];
-  /** 断线期间挂起的澄清提问 */
-  pending_clarify?: ClarifyRequestPayload[];
+  /** 断线期间挂起的审批（事件单播给旧 transport，靠它恢复审批卡）。⚠ 单对象，非数组 */
+  pending_approval?: OneOrMany<ApprovalRequestPayload>;
+  /** 断线期间挂起的澄清提问。⚠ 单对象，非数组 */
+  pending_clarify?: OneOrMany<ClarifyRequestPayload>;
   inflight?: {
     user?: string;
     assistant?: string;

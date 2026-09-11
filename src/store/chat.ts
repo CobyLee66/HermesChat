@@ -15,6 +15,7 @@ import type {
   FileAttachResult,
   ImageAttachResult,
   ModelOptionsResult,
+  OneOrMany,
   ProjectedMessage,
   SessionCreateResult,
   SessionInfoPayload,
@@ -97,16 +98,30 @@ function aggFor(sid: string): TimelineAggregator {
   return agg;
 }
 
+/**
+ * resume 挂起交互归一化为数组：服务端 `pending_approval` / `pending_clarify`
+ * 是**单个对象**（dict）而非列表。直接 `for...of` 一个 plain object 会抛
+ * TypeError——Android Hermes 的报错文案正是
+ * 「iterator method is not callable」（表现为「打开会话失败」），
+ * 2026-09-11 clarify 挂起期间打不开会话即此因。
+ */
+function asPendingList<T>(v: OneOrMany<T> | undefined | null): T[] {
+  if (!v) {
+    return [];
+  }
+  return Array.isArray(v) ? v : [v];
+}
+
 /** resume 挂起的审批/澄清补进时间线（走正常事件路径，自带 request_id 去重）。 */
 function applyPending(
   agg: TimelineAggregator,
-  approvals?: ApprovalRequestPayload[],
-  clarifies?: ClarifyRequestPayload[],
+  approvals?: OneOrMany<ApprovalRequestPayload>,
+  clarifies?: OneOrMany<ClarifyRequestPayload>,
 ) {
-  for (const p of approvals ?? []) {
+  for (const p of asPendingList(approvals)) {
     agg.applyEvent('approval.request', p);
   }
-  for (const p of clarifies ?? []) {
+  for (const p of asPendingList(clarifies)) {
     agg.applyEvent('clarify.request', p);
   }
 }
@@ -140,9 +155,9 @@ interface ChatStore {
       /** 标题种子（会话列表行/新建会话标题）；缺省保留本地已有值 */
       title?: string;
       /** resume 返回的挂起审批（事件单播给旧 transport，靠它补卡） */
-      pendingApprovals?: ApprovalRequestPayload[];
+      pendingApprovals?: OneOrMany<ApprovalRequestPayload>;
       /** resume 返回的挂起澄清提问 */
-      pendingClarifies?: ClarifyRequestPayload[];
+      pendingClarifies?: OneOrMany<ClarifyRequestPayload>;
       /** resume 结果的 running（turn 进行中） */
       running?: boolean;
       /** resume 结果的 turn 进行中快照（部分流出的助手文本等） */
@@ -161,8 +176,8 @@ interface ChatStore {
       info?: SessionInfoPayload;
       running?: boolean;
       inflight?: InflightSnapshot | null;
-      pendingApprovals?: ApprovalRequestPayload[];
-      pendingClarifies?: ClarifyRequestPayload[];
+      pendingApprovals?: OneOrMany<ApprovalRequestPayload>;
+      pendingClarifies?: OneOrMany<ClarifyRequestPayload>;
     },
   ): void;
   /** resume 失败（服务端已回收）：标记，不清数据。 */
@@ -635,8 +650,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
         let storedId: string;
         let messages: ProjectedMessage[];
         let info: SessionInfoPayload | undefined;
-        let pendingApprovals: ApprovalRequestPayload[] | undefined;
-        let pendingClarifies: ClarifyRequestPayload[] | undefined;
+        let pendingApprovals: OneOrMany<ApprovalRequestPayload> | undefined;
+        let pendingClarifies: OneOrMany<ClarifyRequestPayload> | undefined;
         let running: boolean | undefined;
         let inflight: InflightSnapshot | null | undefined;
         const existingFork = await getFork(foreign.originId, profile);
