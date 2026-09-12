@@ -100,3 +100,18 @@ scripts/build-env.sh
 .env
 .env.*
 !.env.example
+
+# 凭据类文件（双保险：即使误放进工程也不会被 git add -A 带走）
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+!android/app/debug.keystore
+id_rsa*
+id_ed25519*
+id_ecdsa*
+known_hosts
+.npmrc
+.netrc
