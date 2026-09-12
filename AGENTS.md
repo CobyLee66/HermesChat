@@ -12,8 +12,19 @@
 ## 构建与验证
 
 - 本机（MacBook）无 Android 工具链：JS 改动用 `npx tsc --noEmit`、`npm run lint`、`npm test`、`npm run web`（浏览器调试）验证。
-- APK 构建在 构建机（Windows，SSH 别名 `构建机`）：Mac 远程驱动用 `scripts/build-android-remote.sh`（推 GitHub → 构建机 拉取 → 远端构建 → 取回 dist/ → 检测到手机则自动安装）；构建机 本机（Git Bash）构建用 `scripts/build-android.sh`（仅 npm ci + gradlew 构建 + adb 安装，不做 git 同步）。不要在这台 Mac 上装 Android/iOS 工具链。
-- 构建机 上的 `C:\HermesChat` 是构建副本，一切修改从 GitHub 拉取，不要在上面手改。
+- APK 构建在构建机（Windows，SSH 别名由 `BUILD_HOST` 指定）：本机远程驱动用 `scripts/build-android-remote.sh`（推 GitHub → 构建机拉取 → 远端构建 → 取回 dist/ → 检测到手机则自动安装）；构建机本机（Git Bash）构建用 `scripts/build-android.sh`（仅 npm ci + gradlew 构建 + adb 安装，不做 git 同步）。不要在这台 Mac 上装 Android/iOS 工具链。
+- 构建机上的工程目录（`BUILD_DIR`）是构建副本，一切修改从 GitHub 拉取，不要在上面手改。
+- 本机私有配置（构建机主机名/路径、adb 路径、设备序列号、内网地址等）统一写在 `scripts/build-env.sh`（已 gitignore，模板 `scripts/build-env.example.sh`），脚本自动 source；**禁止把这类值写进脚本本体或文档**。
+
+## 敏感信息纪律（开源仓库）
+
+本仓库是公开仓库，**任何本机/个人专属信息都不得入库**：
+
+- 禁止提交：真实主机名与 SSH 别名、内网/公网 IP、用户名与绝对家目录路径（一律写 `~` 或占位符）、设备序列号、真实会话标题/聊天正文、API key / token / 密码 / 私钥、个人邮箱。
+- 本机专属值一律走环境变量或 gitignored 配置文件（先例：`scripts/build-env.sh`）。
+- 开发截图（`docs/screenshots/`）含真实会话数据，**只留本地、不入库**（已 gitignore）；需要配图时用 `scripts/mock-gateway.js` 的假数据重拍。
+- 新增文档/脚本/测试夹具时自查：示例值一律用 `example.com`、`192.168.1.10`、`buildhost`、`<设备序列号>` 这类明显的占位符。
+- 提交前自查：`git diff --cached | grep -inE "/Users/|C:\\\\Users\\\\[^P]|@gmail|真实主机名"`（关键词按自己的环境补充，但**别把真实值写进本文件**）。
 
 ## 代码约定
 
@@ -56,3 +67,4 @@
 - [ ] `PROGRESS.md` 已更新（完成 / 进行中 / 待办下一步）
 - [ ] `DECISIONS.md` 已更新（如有架构/选型决策）
 - [ ] 相关 `docs/*.md` 已同步（如有协议/契约/设计变更）
+- [ ] 本次改动无个人/本机专属信息入库（见「敏感信息纪律」）

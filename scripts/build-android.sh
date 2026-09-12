@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # build-android.sh [debug|release] [--no-npm]   —— 在本机（Windows，Git Bash）构建并安装 Android APK
 # 仅做：npm ci -> gradlew 构建 -> 检测到 adb 设备则安装。不含任何 git 同步；
-# 从 Mac 远程驱动 构建机 的完整流程见 scripts/build-android-remote.sh
+# 从本机远程驱动构建机的完整流程见 scripts/build-android-remote.sh
 set -euo pipefail
 
 FLAVOR="release"
@@ -20,11 +20,11 @@ case "$FLAVOR" in
   release) GRADLE_TASK=assembleRelease; APK_PATH='android/app/build/outputs/apk/release/app-release.apk' ;;
 esac
 
-# adb：优先 PATH，否则回退到 构建机 的默认安装位置（Git Bash 风格路径）
+# adb：优先 PATH，否则回退到 BUILD_ADB_POSIX（构建机上的安装位置，见 scripts/build-env.example.sh）
 if command -v adb >/dev/null 2>&1; then
   ADB="adb"
 else
-  ADB='/c/Softwares/Android/platform-tools/adb.exe'
+  ADB="${BUILD_ADB_POSIX:-/c/Softwares/Android/platform-tools/adb.exe}"
 fi
 
 cd "$ROOT"

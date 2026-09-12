@@ -52,7 +52,7 @@ function seedProfile(name = '测试机') {
     ...EMPTY_PROFILE,
     name,
     host: '192.168.1.10',
-    username: 'user',
+    username: 'testuser',
   });
 }
 

@@ -5,7 +5,7 @@
 
 ## 1. 构建约束（重要）
 
-- **经典 NativeModule（ReactContextBaseJavaModule），不要 TurboModule/codegen** —— 首次构建在远端 构建机 进行，本地无法编译验证，必须最大限度降低构建风险。RN 0.87 新架构对经典模块有 interop 支持。
+- **经典 NativeModule（ReactContextBaseJavaModule），不要 TurboModule/codegen** —— 首次构建在远端构建机进行，本地无法编译验证，必须最大限度降低构建风险。RN 0.87 新架构对经典模块有 interop 支持。
 - JSch 用 mwiede 维护分支：`com.github.mwiede:jsch:0.2.18`（或构建时可解析的最新 0.2.x）。在 `android/app/build.gradle` 加依赖。
 - 不引入其他原生依赖。AndroidManifest 已有 INTERNET 权限（RN 模板自带，核实即可）。
 

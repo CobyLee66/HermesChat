@@ -89,3 +89,14 @@ dist/
 /dist-web/
 desktop/dist/
 dist-desktop/
+
+# 开发验证截图（冒烟脚本产物）：含真实会话数据，只留本地、不入库
+docs/screenshots/
+
+# 本机私有构建配置（主机名/路径/设备序列号等），模板见 scripts/build-env.example.sh
+scripts/build-env.sh
+
+# 环境变量文件
+.env
+.env.*
+!.env.example

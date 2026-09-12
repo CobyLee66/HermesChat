@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-windows.sh [--run] —— 在 构建机（Windows，Git Bash）本地构建 Windows 安装包。
+# build-windows.sh [--run] —— 在构建机（Windows，Git Bash）本地构建 Windows 安装包。
 # 仅做：npm ci（依赖未变时跳过）→ vite 构建 dist-web → tsc 编译 desktop 主进程
 # → electron-builder --win（NSIS 安装包 + win-unpacked 免安装版）。
 # 不含任何 git 同步：构建副本的代码更新由 build-desktop-remote.sh 推送或手动 git pull。

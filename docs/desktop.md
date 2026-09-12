@@ -35,7 +35,7 @@
 ### 8.4 打包
 
 - `electron-builder.yml`：appId `com.hermeschat.desktop`；打包内容 = `desktop/dist` + `desktop/resources` + `dist-web` + 生产 node_modules（asarUnpack ssh2）；产物 `dist-desktop/`。**应用图标与移动端同款**：`desktop/resources/icon.png`（512×512 原图），builder 自动转 ico/icns（验证：mac 包内 icon.icns 与 Windows exe 均已生效）；BrowserWindow 另设 icon 供开发模式窗口/任务栏用。未签名（Windows 首次运行 SmartScreen 选「仍要运行」）。
-- `npm run dist:mac`（本机验证通过，arm64 dmg）；**Windows 包**：`scripts/build-desktop-remote.sh`（推 GitHub → 构建机 拉取 → `scripts/build-windows.sh` → 取回 exe），构建机 不手改。Android 构建脚本已加 `ELECTRON_SKIP_BINARY_DOWNLOAD=1`（出 APK 不用下 Electron 二进制）。
+- `npm run dist:mac`（本机验证通过，arm64 dmg）；**Windows 包**：`scripts/build-desktop-remote.sh`（推 GitHub → 构建机拉取 → `scripts/build-windows.sh` → 取回 exe），构建机不手改。Android 构建脚本已加 `ELECTRON_SKIP_BINARY_DOWNLOAD=1`（出 APK 不用下 Electron 二进制）。
 - 端口/窗口状态/known_hosts 均存 `userData`（`~/Library/Application Support/HermesChat` / `%APPDATA%/HermesChat`）。
 
 ### 8.5 已知边界（后续迭代）
@@ -117,7 +117,7 @@
 └─────────────────────────────────────────┘                     └────────┘
 ```
 
-- **壳选 Electron 而非 Tauri**：主进程就是 Node，ssh2 直接可用，和官方 hermes desktop（apps/desktop）同路线；electron-builder 打包 Windows/macOS 都不需要原生编译链（构建机 出 Windows 包，MacBook 本机出 macOS 包，均无需 Xcode/VS）。
+- **壳选 Electron 而非 Tauri**：主进程就是 Node，ssh2 直接可用，和官方 hermes desktop（apps/desktop）同路线；electron-builder 打包 Windows/macOS 都不需要原生编译链（构建机出 Windows 包，MacBook 本机出 macOS 包，均无需 Xcode/VS）。
 - **SSH 用 `ssh2`（纯 JS）而不是系统 ssh**：连接参数（密码/私钥）与手机端同一套存储/表单；不依赖宿主是否装 OpenSSH；`ssh2` 的 `forwardOut` + 本地 `net.createServer` 即实现 `ssh -L`。备选：spawn 系统 `ssh -N -L`（官方 desktop 的做法，实现更简单但进程管理和错误处理更脏）。
 - **DesktopSshTransport**：实现与 Android 版完全相同的 `HermesSsh` 方法面（connect/exec/startCommand/stopCommand/openLocalForward/closeLocalForward/disconnect + onDisconnect/onStdout/onExit 事件），通过 Electron preload 的 contextBridge 暴露为 `window.hermesDesktop`。`Platform.OS==='web'` 且 `window.hermesDesktop` 存在 → 走桌面 SSH；否则 → 现有浏览器直连。SshManager 的 transportFactory 已经预留了这个注入点。
 - **Origin/Host 防护**：桌面渲染层从 `file://` 或本地回环加载。为与浏览器路径行为一致，主进程内嵌一个回环 HTTP/WS 代理（复用 vite.config.ts 里已验证的 Host/Origin 重写策略），渲染层永远连 `127.0.0.1:<代理端口>`。
@@ -150,7 +150,7 @@ vite 构建一次产出 `dist-web/`，Android（Metro）、web 预览（vite dev
 
 1. `desktop/` 壳 + ssh2 传输 + IPC 桥（最大不确定性在 ssh2 转发细节，先打通）。
 2. `src/ssh/desktopBridge.ts` 接入 SshManager 的 transportFactory；web 构建按 `window.hermesDesktop` 探测。
-3. electron-builder 构建机 出 Windows 包验证；MacBook 本机出 macOS 包（`npm run dist:mac`，无需 Xcode）。
+3. Windows 包在构建机上用 electron-builder 出包验证；macOS 包本机出（`npm run dist:mac`，无需 Xcode）。
 4. 桌面专属打磨：窗口尺寸/菜单栏/托盘、附件系统对话框、语音 MediaRecorder 接入。
 5. （更后）iOS：SwiftNIO SSH 模块补齐第四出口。
 

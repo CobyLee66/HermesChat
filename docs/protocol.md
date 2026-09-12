@@ -48,7 +48,7 @@
 - `session.delete` params `{session_id, profile?}`；`session.close` params `{session_id}` → `{"closed":true}`（删除活动会话报 4023，先 close）。**已实测/源码确认（2026-09-08）**：
   - **两者认的 id 不同**：`session.close` 直查网关内存 `_sessions`，**只认 live sid**（传持久化 id 静默 `closed:false` 不报错）；`session.delete` 的活动判定（4023）与查库都用**持久化 id**（传 live sid 一律 4007）。删除当前打开（活动）的会话必须 `close(live sid)` → `delete(持久化 id)` 配合。
   - App 侧 `sessions store remove()` 已按此归一化（接受任一 id，内部经 chat store 反查），列表长按/右键删活动会话的存量 4023 死循环也一并修掉。
-  - **`profile` 参数决定在哪个库删**（2026-09-08 源码+实测）：`_profile_home(params.profile)` 选中该 profile 自己的 state.db 后 `WHERE id = ?` 精确匹配（`hermes_state.py delete_session`），无行即 4007。multiplex 下 namespaced 行物理在宿主库，**必须传宿主 profile**（本机为 main）——传名义 profile（如 finance）必 4007，且客户端删除失败时列表不过滤 → 「报 session not found 但行仍可见、重试恒失败」（某 profile profile 8/30 未命名会话 bug 根因）。App 侧 `remove()` 按行的 `namespaced/hostProfile` 标记路由到宿主库；实测 `20260830_195341_abcdef01`（finance 命名空间、物理在 main 库、finance 库无此行）传 `profile:"main"` 一次删除成功。
+  - **`profile` 参数决定在哪个库删**（2026-09-08 源码+实测）：`_profile_home(params.profile)` 选中该 profile 自己的 state.db 后 `WHERE id = ?` 精确匹配（`hermes_state.py delete_session`），无行即 4007。multiplex 下 namespaced 行物理在宿主库，**必须传宿主 profile**（本机为 main）——传名义 profile（如 finance）必 4007，且客户端删除失败时列表不过滤 → 「报 session not found 但行仍可见、重试恒失败」（某 profile 8/30 未命名会话 bug 根因）。App 侧 `remove()` 按行的 `namespaced/hostProfile` 标记路由到宿主库；实测 `20260830_195341_abcdef01`（finance 命名空间、物理在 main 库、finance 库无此行）传 `profile:"main"` 一次删除成功。
 - `session.title`（改名）params `{session_id, title?}`：**不带 `title` 即只读形式**（已从源码确认，methods_session.py:1425）→ `{title, session_key}`，返回库中 sanitize 后的值；会话行尚未落库时先把 `pending_title` 落库再返回（`_ensure_session_db_row`）。带 `title` 则改名 → `{pending, title}`。
   - ⚠️ **手动 `/title` 斜杠命令不走这个 RPC**：`slash.exec` 把 title 交给 slash worker 子进程（CLI 的 `/title` 处理，`cli.py`）直接写 state.db，**服务端既不推 `session.title` 也不推 `session.info` 事件**（`_mirror_slash_side_effects` 无 title 分支），跨进程唯一信号是 `sessions.changed`（state.db mtime 签名，0.5s 检查 + 2s 合并窗口，见 server.py `_CHANGE_WATCHES`）。→ 客户端要「改完立即刷新」只能命令执行后主动读回本 RPC 只读形式（App 实现：chat store `refreshTitle`，`/title` 命令后调用）。
   - `session.title` **事件**（首轮自动命名时推送，`agent._on_session_title` 钩子）payload `{session_id, title}`——注意 payload 里的 `session_id` 是**持久化 id**（`session_key`），事件帧外层的 `session_id` 才是 live sid（客户端按外层 key 归位，用 payload 的 id 回填列表行）。
@@ -135,7 +135,7 @@
 
 - 本机已有一个 live dashboard：`127.0.0.1:9119`（`hermes dashboard --open-profile main`，qqbot 已连接，**是用户的真实环境，测试动作要克制**）。
 - token：见上文 SPA 提取（当前实测值可复用，但 dashboard 重启会变，脚本应每次重新提取）。
-- 实测 profile 列表：default、main(示例 agent，主助手)、finance(理财顾问)、mental-health(心理管家)、study(学习助手)、work(工作助理)。
+- 实测 profile 列表：`default`、`main`，以及若干用户自定义 profile（如 `finance` / `study` / `work`）——每个 profile 可带自己的昵称与职责描述（`profiles.list` 的 `ui_meta`），命名与数量完全由用户在 dashboard 侧配置，客户端不做任何硬编码假设。
 - **纪律**：harness 全流程只允许一次真实 `prompt.submit`（用最小提示如"回复 pong 两个字即可"），用完 `session.close` 清理；其余测试用 jest mock。
 
 ## 7. Cron 定时任务（2026-09-10 源码确认 + 实测，App 已实现）
