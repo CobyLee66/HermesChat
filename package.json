@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Hermes Agent 桌面/移动客户端（Windows 桌面壳基于 Electron）",
+  "license": "AGPL-3.0-or-later",
   "author": "HermesChat",
   "main": "desktop/dist/main.js",
   "scripts": {
