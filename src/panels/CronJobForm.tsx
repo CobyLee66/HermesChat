@@ -150,6 +150,13 @@ function PickerModal<T extends string>({
   );
 }
 
+/**
+ * 提示词输入区高度边界：默认 ≈8 行，上限 25 行（行高 20 + 上下 padding 20）。
+ * 放模块作用域：与 props/state 无关，且避免作为 useEffect 依赖每次渲染变化。
+ */
+const PROMPT_MIN_HEIGHT = 160;
+const PROMPT_MAX_HEIGHT = 25 * 20 + 20;
+
 export function CronJobForm({
   job,
   profiles,
@@ -174,10 +181,6 @@ export function CronJobForm({
   const [picker, setPicker] = useState<'mode' | 'deliver' | 'profile' | null>(
     null,
   );
-
-  /** 提示词输入区高度边界：默认 ≈8 行，上限 25 行（行高 20 + 上下 padding 20）。 */
-  const PROMPT_MIN_HEIGHT = 160;
-  const PROMPT_MAX_HEIGHT = 25 * 20 + 20;
 
   // web 的 textarea 无原生自动长高（ChatInputBar 同款手动量高）：文本变化时
   // 先收回最小高再量 scrollHeight 设高（不收回会被 clientHeight 托底，删行

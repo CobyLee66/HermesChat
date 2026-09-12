@@ -1,0 +1,39 @@
+name: CI
+
+# 每次推送到 main 与每个 PR 都跑；同分支的旧运行自动取消
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: tsc / lint / test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # CI 只跑静态检查与单测，不需要 Electron 二进制（约 100MB+），跳过下载
+      # （与 scripts/build-android.sh 同款做法）
+      - name: 安装依赖
+        run: npm ci --no-audit --no-fund
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+
+      - name: 类型检查
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: 单元测试
+        run: npm test

@@ -1,0 +1,102 @@
+name: Bug 反馈
+description: 报告一个可复现的问题
+title: '[Bug] '
+labels: ['bug']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！提交前请先确认：
+
+        - 已经搜索过 [已有 Issue](https://github.com/CobyLee66/HermesChat/issues?q=is%3Aissue)，没有重复
+        - **报告里不要包含个人信息**（主机名、内网/公网 IP、家目录绝对路径、密钥或 token、真实会话标题与聊天正文）。日志请先自行打码。
+        - 如果怀疑是**安全问题**，请不要在这里提交，改用 [私密漏洞报告](https://github.com/CobyLee66/HermesChat/security/advisories/new)。
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 平台
+      options:
+        - Android
+        - Windows 桌面端
+        - macOS 桌面端
+        - 浏览器（npm run web）
+    validations:
+      required: true
+
+  - type: dropdown
+    id: connection
+    attributes:
+      label: 连接方式
+      options:
+        - SSH 隧道
+        - 直连
+        - 浏览器直连（本机 127.0.0.1）
+        - 不涉及连接
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本 / 提交号
+      description: Release 版本号，或 `git rev-parse --short HEAD` 的输出
+      placeholder: 例如 v0.1.0 或 80dbe65
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 问题描述
+      description: 发生了什么？影响范围有多大（偶发 / 必现、是否阻塞使用）？
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望行为
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      description: 有报错请贴出**打码后**的原文；有截图更好，但请用 mock 数据或自行打码
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志（可选）
+      description: |
+        桌面端日志：`%APPDATA%\HermesChat\logs\main.log`（Windows）或 `~/Library/Application Support/HermesChat/logs/main.log`（macOS）。
+        手机日志：`scripts/device-log.sh dump`。
+        **贴之前请删掉主机名、IP、路径里的用户名、会话标题等内容。**
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: 确认
+      options:
+        - label: 我已确认本 Issue 中不含任何主机名、IP、凭据、真实会话内容等个人信息
+          required: true
+        - label: 我已确认这不是 Hermes Agent 服务端本身的问题（服务端问题请报给上游）
+          required: true

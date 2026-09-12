@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: 🔒 报告安全漏洞
+    url: https://github.com/CobyLee66/HermesChat/security/advisories/new
+    about: 请勿用公开 Issue 报告安全问题，改用私密漏洞报告通道
+
+  - name: 📖 阅读文档
+    url: https://github.com/CobyLee66/HermesChat/blob/main/docs/plan.md
+    about: 总体设计、协议细节、原生模块契约与桌面端方案
+
+  - name: ❓ 常见踩坑与进度
+    url: https://github.com/CobyLee66/HermesChat/blob/main/PROGRESS.md
+    about: 很多「为什么这样」「能不能那样」的问题在这里已有答案
