@@ -70,6 +70,7 @@ React Native (TS) 手机 App（Android 优先，iOS 后续），通过 **App 内
 - **M3**：图片/文件/语音。代码完成（2026-09-02）：聊天"＋"附件面板（相册图片多选→压缩上传→待发横条、文件→@file: 引用入输入框、语音录音→/api/audio/transcribe→文本入输入框）；图片/文件消息渲染（`@image:`/`@file:` 指令 + data URL 还原，走 /api/files/download?token=）；profile 昵称/头像编辑页。本地 tsc/lint/jest（69 测试）全绿；真机验证交构建机。
 - **M4**：multiplex 会话 profile 归属分组。代码完成（2026-09-02）：SSH exec 只读 sqlite 构建 sessionId→归属映射（`src/ssh/namespaceMap.ts`），会话列表按归属分组（own+大库 foreign 合并、宿主排除他者）；foreign 会话不 resume（避免错人格 agent），只读 sqlite 直读历史展示 + 顶部提示条，首次发送经 `session.create {parent_session_id, messages}` 派生到当前 profile（forkMap 持久化，之后正常 resume）。关键协议限制（session.history 只认 live sid、持久化 id 4001）已实测并写入 `docs/protocol.md` §5。本地 tsc/lint/jest（93 测试）全绿；真机验证交构建机。
 - **M5**：定时任务管理三端实现（2026-09-10，§1 v3）。代码完成：`rpc/cron.ts`（REST 封装）+ `store/cron.ts`（cron.changed 自接线）+ `utils/cronSchedule.ts`（六模式构建/回显/中文描述）+ ViewSwitcher/CronPanel/CronRunsPanel/CronJobForm（手机/桌面共用面板）+ 手机 CronRuns/CronEdit 路由 + 桌面壳首屏切换与 Modal。jest 294 全绿（新增 cronSchedule 14 + cronStore 7）、tsc 0 错；web 冒烟（vite 代理真连 live dashboard，只读）：视图切换/列表徽章/行菜单/运行历史/新建表单/模式切换全部 PASS。真机验证交构建机出包。
+- **M6**：界面多语言（i18n）—— **计划中，未开始**（2026-09-11 列入路线图，D046）。当前 UI 文案为硬编码中文（`src/` 内联字符串），需先做文案抽取（建 `src/i18n/` 词典 + `t()` 取用层），再接语言切换与持久化；优先英文。文档侧已完成中英双 README（`README.md` 英文为默认、`README.zh-CN.md` 中文），`docs/` 设计文档暂只有中文。
 
 ## 7. 风险
 
