@@ -125,7 +125,11 @@ const MOCK_CRON_MESSAGES = {
 function startMockGateway({
   port = 9199,
   title = MOCK_TITLE,
-  /** prompt.submit 流式回包节奏（冒烟断言窗口要留足操作时间） */
+  /** prompt.submit 流式回包节奏（冒烟断言窗口要留足操作时间）；
+   *  rich=true 时在正文流前加推理/工具事件序列（展开卡片冒烟用，见
+   *  web-expand-cards-smoke.js）：reasoning.delta（首行入 head 预览、
+   *  中部标记 RICH_REASONING_MID 仅展开全文可见、长尾入 tail 预览）→
+   *  tool.start/progress/complete（result 尾部标记 RICH_TOOL_RESULT_END） */
   stream = {},
   /** 额外种子 N 条历史消息（交替 user/assistant），测长历史懒挂载场景 */
   historyCount = 0,
@@ -137,7 +141,7 @@ function startMockGateway({
    */
   pendingClarify = null,
 } = {}) {
-  const {chunks = 24, intervalMs = 400} = stream;
+  const {chunks = 24, intervalMs = 400, rich = false} = stream;
   const seedHistory = [];
   for (let i = 1; i <= historyCount; i++) {
     seedHistory.push({
@@ -356,6 +360,59 @@ function startMockGateway({
           state.timers.add(t);
         };
         emit('message.start', {});
+        // 首个事件 120ms 即到（客户端尽快看到内容）；rich 前序事件推后正文起点
+        let at = 120;
+        if (rich) {
+          timer(
+            () =>
+              emit('reasoning.delta', {
+                text: '推理首行内容（折叠态预览只显示这一行）。\n',
+              }),
+            at,
+          );
+          timer(
+            () =>
+              emit('reasoning.delta', {
+                text:
+                  `${'甲'.repeat(150)}\n中部 RICH_REASONING_MID 仅此一处。\n` +
+                  `${'乙'.repeat(150)}\n`,
+              }),
+            (at += 250),
+          );
+          for (let i = 0; i < 4; i++) {
+            const line = `推理尾段第 ${i + 1} 行。${'丙'.repeat(50)}\n`;
+            timer(() => emit('reasoning.delta', {text: line}), (at += 250));
+          }
+          timer(
+            () =>
+              emit('tool.start', {
+                tool_id: 'mock-rich-tool',
+                name: 'read_file',
+                context: '/tmp/rich.txt',
+                args: {path: '/tmp/rich.txt'},
+              }),
+            (at += 250),
+          );
+          timer(
+            () =>
+              emit('tool.progress', {
+                tool_id: 'mock-rich-tool',
+                preview: '读取中…',
+              }),
+            (at += 200),
+          );
+          timer(
+            () =>
+              emit('tool.complete', {
+                tool_id: 'mock-rich-tool',
+                name: 'read_file',
+                args: {path: '/tmp/rich.txt'},
+                result_text: '文件内容若干行\nRICH_TOOL_RESULT_END',
+                duration_s: 0.4,
+              }),
+            (at += 300),
+          );
+        }
         const parts = [];
         for (let i = 0; i < chunks; i++) {
           const n = i + 1;
@@ -363,9 +420,9 @@ function startMockGateway({
             `【第 ${n}/${chunks} 段】流式滚动跟随冒烟测试文本：这一段刻意写得更长，` +
               `让气泡高度尽早超过视口，供上滑暂停与锚定补偿断言使用。\n\n`,
           );
-          // 首段 120ms 即到（客户端尽快看到内容），之后按 intervalMs 节奏吐出
           const text = parts[i];
-          timer(() => emit('message.delta', {text}), 120 + i * intervalMs);
+          // 首段即到，之后按 intervalMs 节奏吐出
+          timer(() => emit('message.delta', {text}), at + i * intervalMs);
         }
         timer(() => {
           const fullText = parts.join('');
@@ -383,7 +440,7 @@ function startMockGateway({
             text: fullText,
             timestamp: Math.floor(Date.now() / 1000),
           });
-        }, 120 + chunks * intervalMs + 150);
+        }, at + chunks * intervalMs + 150);
         return;
       }
       default:

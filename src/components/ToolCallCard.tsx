@@ -8,6 +8,7 @@ import {
   type DiffLine,
 } from '../rpc/diffText';
 import {useT} from '../i18n';
+import {expandToggleProps} from '../utils/expandPress';
 import type {ToolCallBlock} from '../rpc/types';
 import {Colors} from './theme';
 
@@ -101,7 +102,7 @@ export function ToolCallCard({tool}: Props) {
   return (
     <View style={styles.card}>
       <TouchableOpacity
-        onPress={() => setExpanded(v => !v)}
+        {...expandToggleProps(() => setExpanded(v => !v))}
         activeOpacity={0.7}
         style={styles.headerRow}>
         <Text style={styles.icon}>{running ? '⏳' : diff ? '📝' : '🔧'}</Text>

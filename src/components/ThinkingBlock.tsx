@@ -2,6 +2,7 @@ import React, {useEffect, useRef, useState} from 'react';
 import {Animated, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 
 import {useT} from '../i18n';
+import {expandToggleProps} from '../utils/expandPress';
 import {thinkingHead, thinkingTail} from '../utils/thinkingPreview';
 import {Colors} from './theme';
 
@@ -22,7 +23,7 @@ export function ThinkingBlock({text, variant, live}: Props) {
   return (
     <View style={styles.wrap}>
       <TouchableOpacity
-        onPress={() => setExpanded(v => !v)}
+        {...expandToggleProps(() => setExpanded(v => !v))}
         activeOpacity={0.7}
         style={styles.headerRow}>
         <View style={styles.headerTextWrap}>
