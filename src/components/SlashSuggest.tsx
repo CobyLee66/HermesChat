@@ -1,6 +1,7 @@
 import React from 'react';
 import {ScrollView, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 
+import {t} from '../i18n';
 import {Colors} from './theme';
 import type {SlashCompletionItem} from '../rpc/slash';
 
@@ -30,7 +31,7 @@ export function SlashSuggest({items, selected, onPick}: Props) {
               activeOpacity={0.7}
               onPress={() => onPick(i)}
               accessibilityRole="button"
-              accessibilityLabel={`补全 ${it.display}`}>
+              accessibilityLabel={t('slash.completeLabel', {name: it.display})}>
               <Text
                 style={[styles.display, active ? styles.displayActive : null]}
                 numberOfLines={1}>

@@ -40,6 +40,7 @@ import {FileRefCard} from '../components/FileRefCard';
 import {Colors} from '../components/theme';
 import {StreamCursor, ThinkingBlock} from '../components/ThinkingBlock';
 import {ToolCallCard} from '../components/ToolCallCard';
+import {useT} from '../i18n';
 import {useChatStore} from '../store/chat';
 import {
   isAtBottom,
@@ -89,6 +90,7 @@ export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
     const chat = useChatStore(s => s.bySession[sessionId]);
     const respondApproval = useChatStore(s => s.respondApproval);
     const respondClarify = useChatStore(s => s.respondClarify);
+    const t = useT();
 
     const items = useMemo(() => chat?.items ?? EMPTY_ITEMS, [chat?.items]);
     const invertedItems = useMemo(() => [...items].reverse(), [items]);
@@ -372,7 +374,7 @@ export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
             followRef.current = true;
             scrollTo(0, true);
           }}>
-          <Text style={styles.jumpText}>↓ 回到底部</Text>
+          <Text style={styles.jumpText}>{t('chat.jumpToBottom')}</Text>
         </TouchableOpacity>
       ) : null}
       {/* 斜杠补全浮层挂点：贴列表容器底部（即输入框正上方） */}

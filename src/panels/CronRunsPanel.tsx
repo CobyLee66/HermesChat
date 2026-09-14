@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 
 import {Colors} from '../components/theme';
+import {useT} from '../i18n';
 import {getCronJobRuns} from '../rpc/cron';
 import type {CronRunRow} from '../rpc/types';
 import {useConnectionStore} from '../store/connection';
@@ -33,6 +34,7 @@ export function CronRunsPanel({
   profile?: string;
   onOpenRun: (run: CronRunRow) => void;
 }) {
+  const t = useT();
   const [runs, setRuns] = useState<CronRunRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +45,7 @@ export function CronRunsPanel({
     try {
       const {httpUrl, token} = useConnectionStore.getState();
       if (!httpUrl) {
-        throw new Error('未连接到 gateway');
+        throw new Error(t('cron.notConnected'));
       }
       const result = await getCronJobRuns(httpUrl, token, jobId, 20, profile);
       setRuns(result.runs ?? []);
@@ -52,7 +54,7 @@ export function CronRunsPanel({
       setError(e instanceof Error ? e.message : String(e));
       setLoading(false);
     }
-  }, [jobId, profile]);
+  }, [jobId, profile, t]);
 
   useEffect(() => {
     void load();
@@ -64,9 +66,9 @@ export function CronRunsPanel({
   if (error && runs.length === 0) {
     return (
       <View style={styles.centerWrap}>
-        <Text style={styles.error}>加载失败：{error}</Text>
+        <Text style={styles.error}>{t('cron.loadFailed', {error})}</Text>
         <TouchableOpacity onPress={() => void load()} style={styles.retryBtn}>
-          <Text style={styles.retryText}>重试</Text>
+          <Text style={styles.retryText}>{t('cron.retry')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -78,7 +80,7 @@ export function CronRunsPanel({
       refreshing={loading}
       onRefresh={() => void load()}
       ItemSeparatorComponent={RowSeparator}
-      ListEmptyComponent={<Text style={styles.empty}>暂无运行记录</Text>}
+      ListEmptyComponent={<Text style={styles.empty}>{t('cron.runsEmpty')}</Text>}
       renderItem={({item}) => (
         <TouchableOpacity
           style={styles.row}
@@ -90,14 +92,14 @@ export function CronRunsPanel({
                 {item.title || item.id}
               </Text>
               {item.is_active ? (
-                <Text style={styles.activeBadge}>进行中</Text>
+                <Text style={styles.activeBadge}>{t('cron.runActive')}</Text>
               ) : null}
               <Text style={styles.time}>
                 {formatEpoch(item.last_active || item.started_at)}
               </Text>
             </View>
             <Text style={styles.preview} numberOfLines={1}>
-              {item.preview || '查看运行详情'}
+              {item.preview || t('cron.viewRunDetail')}
             </Text>
           </View>
         </TouchableOpacity>

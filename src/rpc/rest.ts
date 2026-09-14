@@ -8,6 +8,8 @@
  * 只放行音视频扩展名（.m4a/.mp3/.mp4/…），图片会 415。
  */
 
+import {t} from '../i18n';
+
 export interface TranscribeResult {
   ok: boolean;
   /** 识别文本（未检测到语音时为空串，不是错误） */
@@ -51,7 +53,9 @@ export async function transcribeAudio(
     if (!resp.ok) {
       const detail = (body as {detail?: unknown} | null)?.detail;
       throw new Error(
-        typeof detail === 'string' ? detail : `语音转文字失败（HTTP ${resp.status}）`,
+        typeof detail === 'string'
+          ? detail
+          : t('rpc.transcribeFailedHttp', {status: resp.status}),
       );
     }
     const result = body as Partial<TranscribeResult> | null;
@@ -62,7 +66,9 @@ export async function transcribeAudio(
     };
   } catch (e) {
     if (e instanceof Error && e.name === 'AbortError') {
-      throw new Error(`语音识别超时（${REQUEST_TIMEOUT_MS / 1000} 秒），请检查连接后重试`);
+      throw new Error(
+        t('rpc.transcribeTimeout', {seconds: REQUEST_TIMEOUT_MS / 1000}),
+      );
     }
     throw e;
   } finally {

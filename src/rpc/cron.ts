@@ -6,6 +6,7 @@
  * httpUrl/token 由调用方从 useConnectionStore 取（rest.ts 同款纯函数风格）。
  */
 
+import {t} from '../i18n';
 import type {
   CronDeliveryTarget,
   CronJob,
@@ -68,13 +69,18 @@ export async function cronFetch<T>(
     });
     const body: unknown = await resp.json().catch(() => null);
     if (!resp.ok) {
-      const fallback = `请求失败（HTTP ${resp.status}）`;
+      const fallback = t('rpc.requestFailedHttp', {status: resp.status});
       throw new CronHttpError(resp.status, detailText(body) ?? fallback);
     }
     return body as T;
   } catch (e) {
     if (e instanceof Error && e.name === 'AbortError') {
-      throw new CronHttpError(0, `请求超时（${Math.round(timeoutMs / 1000)} 秒），请检查连接后重试`);
+      throw new CronHttpError(
+        0,
+        t('rpc.requestTimeout', {
+          seconds: Math.round(timeoutMs / 1000),
+        }),
+      );
     }
     throw e;
   } finally {

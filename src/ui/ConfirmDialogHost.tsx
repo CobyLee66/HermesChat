@@ -7,9 +7,11 @@ import React from 'react';
 import {Modal, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 
 import {Colors} from '../components/theme';
+import {useT} from '../i18n';
 import {useDialogStore} from './dialogStore';
 
 export function ConfirmDialogHost() {
+  const t = useT();
   const current = useDialogStore(s => s.current);
   const settle = useDialogStore(s => s.settle);
   if (!current) {
@@ -30,7 +32,7 @@ export function ConfirmDialogHost() {
                 style={[styles.btn, styles.btnGhost]}
                 activeOpacity={0.8}
                 onPress={() => settle(false)}>
-                <Text style={styles.btnGhostText}>取消</Text>
+                <Text style={styles.btnGhostText}>{t('common.cancel')}</Text>
               </TouchableOpacity>
             ) : null}
             <TouchableOpacity
@@ -38,7 +40,7 @@ export function ConfirmDialogHost() {
               activeOpacity={0.8}
               onPress={() => settle(true)}>
               <Text style={styles.btnPrimaryText}>
-                {current.kind === 'alert' ? '知道了' : '确定'}
+                {current.kind === 'alert' ? t('common.gotIt') : t('common.ok')}
               </Text>
             </TouchableOpacity>
           </View>

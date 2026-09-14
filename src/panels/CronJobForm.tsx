@@ -19,6 +19,8 @@ import {
 } from 'react-native';
 
 import {Colors} from '../components/theme';
+import {useT} from '../i18n';
+import type {MessageKey} from '../i18n/locales/en';
 import {createCronJob, getCronJob, getDeliveryTargets, updateCronJob} from '../rpc/cron';
 import type {CronDeliveryTarget, CronJob} from '../rpc/types';
 import {useConnectionStore} from '../store/connection';
@@ -33,14 +35,14 @@ import {
   type ScheduleMode,
 } from '../utils/cronSchedule';
 
-const WEEKDAY_CHIPS: {key: number; label: string}[] = [
-  {key: 1, label: '一'},
-  {key: 2, label: '二'},
-  {key: 3, label: '三'},
-  {key: 4, label: '四'},
-  {key: 5, label: '五'},
-  {key: 6, label: '六'},
-  {key: 0, label: '日'},
+const WEEKDAY_CHIPS: {key: number; labelKey: MessageKey}[] = [
+  {key: 1, labelKey: 'cron.weekday1'},
+  {key: 2, labelKey: 'cron.weekday2'},
+  {key: 3, labelKey: 'cron.weekday3'},
+  {key: 4, labelKey: 'cron.weekday4'},
+  {key: 5, labelKey: 'cron.weekday5'},
+  {key: 6, labelKey: 'cron.weekday6'},
+  {key: 0, labelKey: 'cron.weekday0'},
 ];
 
 /** 'HH:mm' → {hour, minute}；非法返回 null。 */
@@ -169,6 +171,7 @@ export function CronJobForm({
   defaultProfile?: string;
   onSaved: (saved: CronJob) => void;
 }) {
+  const t = useT();
   const [name, setName] = useState(job?.name ?? '');
   const [prompt, setPrompt] = useState(job?.prompt ?? '');
   const [mode, setMode] = useState<ScheduleMode>('interval');
@@ -231,20 +234,21 @@ export function CronJobForm({
   const patchFields = (over: Partial<ScheduleFields>) =>
     setFields(f => ({...f, ...over}));
 
-  const modeLabel =
-    SCHEDULE_MODE_LABELS.find(m => m.key === mode)?.label ?? mode;
-  const deliverLabel = deliver === 'local' && targets.length === 0
-    ? 'local'
-    : targets.find(t => t.id === deliver)?.name ?? deliver;
+  const modeEntry = SCHEDULE_MODE_LABELS.find(m => m.key === mode);
+  const modeLabel = modeEntry ? t(modeEntry.labelKey) : mode;
+  const deliverLabel =
+    deliver === 'local' && targets.length === 0
+      ? 'local'
+      : targets.find(tg => tg.id === deliver)?.name ?? deliver;
 
   const buildSchedule = (): string | null => {
     const schedule = buildScheduleString(mode, fields);
     if (!schedule) {
       alertError(
-        '计划未填写完整',
+        t('cron.scheduleIncomplete'),
         mode === 'once'
-          ? '请填写一次性运行时间（YYYY-MM-DD HH:mm）'
-          : '请完整填写计划参数',
+          ? t('cron.onceTimeRequired')
+          : t('cron.scheduleFieldsRequired'),
       );
       return null;
     }
@@ -256,7 +260,7 @@ export function CronJobForm({
       return;
     }
     if (!prompt.trim()) {
-      alertError('提示词必填', '定时运行时 agent 收到的自包含指令');
+      alertError(t('cron.promptRequired'), t('cron.promptRequiredHint'));
       return;
     }
     const schedule = buildSchedule();
@@ -267,7 +271,7 @@ export function CronJobForm({
     try {
       const {httpUrl, token} = useConnectionStore.getState();
       if (!httpUrl) {
-        throw new Error('未连接到 gateway');
+        throw new Error(t('cron.notConnected'));
       }
       const trimmedName = name.trim();
       if (job) {
@@ -302,7 +306,7 @@ export function CronJobForm({
         onSaved(saved);
       }
     } catch (e) {
-      alertError('保存失败', e instanceof Error ? e.message : String(e));
+      alertError(t('cron.saveFailed'), e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -317,36 +321,38 @@ export function CronJobForm({
     <ScrollView
       keyboardShouldPersistTaps="handled"
       contentContainerStyle={styles.container}>
-      <Text style={styles.label}>名称（可选）</Text>
+      <Text style={styles.label}>{t('cron.nameOptional')}</Text>
       <TextInput
         style={styles.input}
         value={name}
         onChangeText={setName}
-        placeholder="留空自动取提示词前缀"
+        placeholder={t('cron.namePlaceholder')}
         placeholderTextColor={Colors.textSecondary}
         maxLength={200}
       />
 
-      <Text style={styles.label}>提示词</Text>
+      <Text style={styles.label}>{t('cron.prompt')}</Text>
       <TextInput
         ref={promptInputRef}
         style={[styles.input, styles.promptInput]}
         value={prompt}
         onChangeText={setPrompt}
-        placeholder="每次定时运行时 agent 收到的指令"
+        placeholder={t('cron.promptPlaceholder')}
         placeholderTextColor={Colors.textSecondary}
         multiline
       />
 
-      <Text style={styles.label}>计划</Text>
+      <Text style={styles.label}>{t('cron.schedule')}</Text>
       {mode === 'interval' ? (
         <View style={styles.inlineRow}>
-          <Text style={styles.inlineLabel}>每</Text>
+          <Text style={styles.inlineLabel}>{t('cron.everyPrefix')}</Text>
           <TextInput
             style={[styles.input, styles.smallInput]}
             value={String(fields.intervalCount)}
-            onChangeText={t =>
-              patchFields({intervalCount: Number(t.replace(/[^\d]/g, '')) || 0})
+            onChangeText={text =>
+              patchFields({
+                intervalCount: Number(text.replace(/[^\d]/g, '')) || 0,
+              })
             }
             keyboardType="number-pad"
           />
@@ -360,7 +366,11 @@ export function CronJobForm({
                   styles.chipText,
                   fields.intervalUnit === u && styles.chipTextActive,
                 ]}>
-                {u === 'm' ? '分钟' : u === 'h' ? '小时' : '天'}
+                {u === 'm'
+                  ? t('cron.unitMinute')
+                  : u === 'h'
+                    ? t('cron.unitHour')
+                    : t('cron.unitDay')}
               </Text>
             </TouchableOpacity>
           ))}
@@ -370,8 +380,8 @@ export function CronJobForm({
         <TextInput
           style={[styles.input, styles.timeInput]}
           value={fieldsToTimeText(fields)}
-          onChangeText={t => {
-            const parsed = parseTimeText(t);
+          onChangeText={text => {
+            const parsed = parseTimeText(text);
             if (parsed) {
               patchFields({hour: parsed.hour, minute: parsed.minute});
             }
@@ -396,7 +406,7 @@ export function CronJobForm({
                   })
                 }>
                 <Text style={[styles.chipText, active && styles.chipTextActive]}>
-                  {`周${chip.label}`}
+                  {t(chip.labelKey)}
                 </Text>
               </TouchableOpacity>
             );
@@ -405,23 +415,25 @@ export function CronJobForm({
       ) : null}
       {mode === 'monthly' ? (
         <View style={styles.inlineRow}>
-          <Text style={styles.inlineLabel}>每月</Text>
+          <Text style={styles.inlineLabel}>{t('cron.monthlyDayPrefix')}</Text>
           <TextInput
             style={[styles.input, styles.smallInput]}
             value={String(fields.monthDay)}
-            onChangeText={t =>
-              patchFields({monthDay: Number(t.replace(/[^\d]/g, '')) || 1})
+            onChangeText={text =>
+              patchFields({monthDay: Number(text.replace(/[^\d]/g, '')) || 1})
             }
             keyboardType="number-pad"
           />
-          <Text style={styles.inlineLabel}>日</Text>
+          <Text style={styles.inlineLabel}>{t('cron.monthlyDaySuffix')}</Text>
         </View>
       ) : null}
       {mode === 'once' ? (
         <TextInput
           style={styles.input}
           value={fields.onceIso.replace('T', ' ')}
-          onChangeText={t => patchFields({onceIso: t.trim().replace(' ', 'T')})}
+          onChangeText={text =>
+            patchFields({onceIso: text.trim().replace(' ', 'T')})
+          }
           placeholder="2026-02-03 14:00"
           placeholderTextColor={Colors.textSecondary}
         />
@@ -430,8 +442,8 @@ export function CronJobForm({
         <TextInput
           style={styles.input}
           value={fields.customExpr}
-          onChangeText={t => patchFields({customExpr: t})}
-          placeholder="cron 表达式，如 0 9 * * 1-5"
+          onChangeText={text => patchFields({customExpr: text})}
+          placeholder={t('cron.customPlaceholder')}
           placeholderTextColor={Colors.textSecondary}
         />
       ) : null}
@@ -439,12 +451,12 @@ export function CronJobForm({
         style={styles.pickerBtn}
         activeOpacity={0.7}
         onPress={() => setPicker('mode')}>
-        <Text style={styles.pickerBtnLabel}>模式</Text>
+        <Text style={styles.pickerBtnLabel}>{t('cron.modeLabel')}</Text>
         <Text style={styles.pickerBtnValue}>{modeLabel}</Text>
         <Text style={styles.pickerBtnCaret}>▾</Text>
       </TouchableOpacity>
 
-      <Text style={styles.label}>投递目标</Text>
+      <Text style={styles.label}>{t('cron.deliveryTarget')}</Text>
       <TouchableOpacity
         style={styles.pickerBtn}
         activeOpacity={0.7}
@@ -455,12 +467,14 @@ export function CronJobForm({
 
       {!job && profiles.length > 0 ? (
         <>
-          <Text style={styles.label}>归属 profile</Text>
+          <Text style={styles.label}>{t('cron.ownerProfile')}</Text>
           <TouchableOpacity
             style={styles.pickerBtn}
             activeOpacity={0.7}
             onPress={() => setPicker('profile')}>
-            <Text style={styles.pickerBtnValue}>{profile || '选择 profile'}</Text>
+            <Text style={styles.pickerBtnValue}>
+              {profile || t('cron.pickProfile')}
+            </Text>
             <Text style={styles.pickerBtnCaret}>▾</Text>
           </TouchableOpacity>
         </>
@@ -473,7 +487,7 @@ export function CronJobForm({
         <View style={[styles.checkbox, continuity && styles.checkboxActive]}>
           {continuity ? <Text style={styles.checkboxMark}>✓</Text> : null}
         </View>
-        <Text style={styles.checkText}>跟随上次输出（注入该任务上次的结果）</Text>
+        <Text style={styles.checkText}>{t('cron.continuity')}</Text>
       </TouchableOpacity>
 
       <TouchableOpacity
@@ -481,14 +495,19 @@ export function CronJobForm({
         onPress={() => void onSave()}
         disabled={busy}
         activeOpacity={0.8}>
-        <Text style={styles.saveText}>{busy ? '保存中…' : '保存'}</Text>
+        <Text style={styles.saveText}>
+          {busy ? t('cron.saving') : t('cron.save')}
+        </Text>
       </TouchableOpacity>
 
       <PickerModal
         visible={picker === 'mode'}
-        title="计划模式"
+        title={t('cron.modePickerTitle')}
         value={mode}
-        options={SCHEDULE_MODE_LABELS.map(m => ({key: m.key, label: m.label}))}
+        options={SCHEDULE_MODE_LABELS.map(m => ({
+          key: m.key,
+          label: t(m.labelKey),
+        }))}
         onPick={key => {
           setMode(key);
           setPicker(null);
@@ -497,14 +516,14 @@ export function CronJobForm({
       />
       <PickerModal
         visible={picker === 'deliver'}
-        title="投递目标"
+        title={t('cron.deliveryTarget')}
         value={deliver}
         options={
           targets.length > 0
-            ? targets.map(t => ({
-                key: t.id,
-                label: t.name || t.id,
-                hint: t.home_target_set ? undefined : '未配置 home 渠道',
+            ? targets.map(tg => ({
+                key: tg.id,
+                label: tg.name || tg.id,
+                hint: tg.home_target_set ? undefined : t('cron.homeChannelMissing'),
               }))
             : [{key: 'local', label: 'local'}]
         }
@@ -516,7 +535,7 @@ export function CronJobForm({
       />
       <PickerModal
         visible={picker === 'profile'}
-        title="归属 profile"
+        title={t('cron.ownerProfile')}
         value={profile || null}
         options={profileOptions}
         onPick={key => {

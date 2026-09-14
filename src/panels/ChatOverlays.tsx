@@ -15,6 +15,7 @@ import {
 
 import {ModelPicker} from '../components/ModelPicker';
 import {Colors} from '../components/theme';
+import {useT} from '../i18n';
 import {useChatStore} from '../store/chat';
 import {alertError} from '../utils/alert';
 import {deleteSessionFlow} from './sessionFlows';
@@ -47,6 +48,7 @@ export function ChatOverlays({
   /** 打开顶部聊天记录搜索栏（foreign 只读会话历史完整，同样可用） */
   onOpenSearch?: () => void;
 }) {
+  const t = useT();
   const info = useChatStore(s => s.bySession[sessionId]?.info ?? null);
   // foreign 只读会话（未 resume 的 multiplex 大库行）：改名/删除 RPC 都够不到，
   // 菜单里隐藏这两项
@@ -80,9 +82,9 @@ export function ChatOverlays({
       .getState()
       .renameSession(sessionId, next)
       .catch(e =>
-        alertError('重命名失败', e instanceof Error ? e.message : String(e)),
+        alertError(t('session.renameFailed'), e instanceof Error ? e.message : String(e)),
       );
-  }, [rename.text, sessionId]);
+  }, [rename.text, sessionId, t]);
 
   const onDelete = useCallback(() => {
     setState({menuVisible: false});
@@ -103,7 +105,7 @@ export function ChatOverlays({
     typeof usage?.context_max === 'number' && usage.context_max > 0
       ? `${usage?.context_used ?? 0} / ${usage.context_max}${
           typeof usage?.context_percent === 'number'
-            ? `（${usage.context_percent}%）`
+            ? t('chat.contextPercent', {percent: usage.context_percent})
             : ''
         }`
       : null;
@@ -126,14 +128,14 @@ export function ChatOverlays({
               onPress={() => {
                 setState({menuVisible: false, modelPickerVisible: true});
               }}>
-              <Text style={styles.menuText}>切换模型</Text>
+              <Text style={styles.menuText}>{t('model.switchTitle')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.menuItem}
               onPress={() => {
                 setState({menuVisible: false, infoVisible: true});
               }}>
-              <Text style={styles.menuText}>会话信息</Text>
+              <Text style={styles.menuText}>{t('chat.infoTitle')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.menuItem}
@@ -141,7 +143,7 @@ export function ChatOverlays({
                 setState({menuVisible: false});
                 onOpenSearch?.();
               }}>
-              <Text style={styles.menuText}>查找聊天记录</Text>
+              <Text style={styles.menuText}>{t('chat.menuSearch')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.menuItem}
@@ -150,16 +152,16 @@ export function ChatOverlays({
                 onToggleShowDetail();
               }}>
               <Text style={styles.menuText}>
-                {showDetail ? '隐藏工具与思考' : '显示工具与思考'}
+                {showDetail ? t('chat.toggleDetailHide') : t('chat.toggleDetailShow')}
               </Text>
             </TouchableOpacity>
             {foreign ? null : (
               <>
                 <TouchableOpacity style={styles.menuItem} onPress={openRename}>
-                  <Text style={styles.menuText}>重命名会话</Text>
+                  <Text style={styles.menuText}>{t('chat.rename')}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.menuItem} onPress={onDelete}>
-                  <Text style={styles.menuTextDanger}>删除会话</Text>
+                  <Text style={styles.menuTextDanger}>{t('session.deleteTitle')}</Text>
                 </TouchableOpacity>
               </>
             )}
@@ -173,7 +175,7 @@ export function ChatOverlays({
         load={() => fetchModelOptions(sessionId)}
         onPick={(model, provider) => {
           switchModel(sessionId, model, provider).catch(e =>
-            alertError('切换失败', e instanceof Error ? e.message : String(e)),
+            alertError(t('chat.switchFailed'), e instanceof Error ? e.message : String(e)),
           );
         }}
       />
@@ -189,22 +191,28 @@ export function ChatOverlays({
           activeOpacity={1}
           onPress={() => setState({infoVisible: false})}>
           <View style={styles.infoCard}>
-            <Text style={styles.infoTitle}>会话信息</Text>
-            <InfoRow label="模型" value={info?.model || '未知'} />
-            <InfoRow label="供应商" value={info?.provider || '未知'} />
+            <Text style={styles.infoTitle}>{t('chat.infoTitle')}</Text>
+            <InfoRow label={t('chat.infoModel')} value={info?.model || t('chat.unknown')} />
             <InfoRow
-              label="Token 用量"
+              label={t('chat.infoProvider')}
+              value={info?.provider || t('chat.unknown')}
+            />
+            <InfoRow
+              label={t('chat.infoTokenUsage')}
               value={
                 totalTokens !== undefined
-                  ? `${totalTokens}（本次连接累计）`
-                  : '未知'
+                  ? t('chat.tokenSessionTotal', {count: totalTokens})
+                  : t('chat.unknown')
               }
             />
             {contextText ? (
-              <InfoRow label="上下文窗口" value={contextText} />
+              <InfoRow label={t('chat.infoContextWindow')} value={contextText} />
             ) : null}
-            <InfoRow label="工作目录" value={info?.cwd || '未知'} />
-            <InfoRow label="分支" value={info?.branch || '—'} />
+            <InfoRow
+              label={t('chat.infoWorkdir')}
+              value={info?.cwd || t('chat.unknown')}
+            />
+            <InfoRow label={t('chat.infoBranch')} value={info?.branch || '—'} />
             <InfoRow label="Profile" value={info?.profile_name || profile} />
           </View>
         </TouchableOpacity>
@@ -221,12 +229,12 @@ export function ChatOverlays({
           activeOpacity={1}
           onPress={closeRename}>
           <View style={styles.infoCard}>
-            <Text style={styles.infoTitle}>重命名会话</Text>
+            <Text style={styles.infoTitle}>{t('chat.rename')}</Text>
             <TextInput
               style={styles.renameInput}
               value={rename.text}
-              onChangeText={t => setRename(r => ({...r, text: t}))}
-              placeholder="输入新的会话标题"
+              onChangeText={text => setRename(r => ({...r, text}))}
+              placeholder={t('chat.renamePlaceholder')}
               placeholderTextColor={Colors.textSecondary}
               autoFocus
               selectTextOnFocus
@@ -238,13 +246,15 @@ export function ChatOverlays({
                 style={styles.renameBtn}
                 activeOpacity={0.8}
                 onPress={closeRename}>
-                <Text style={styles.renameBtnText}>取消</Text>
+                <Text style={styles.renameBtnText}>{t('common.cancel')}</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.renameBtnPrimary}
                 activeOpacity={0.8}
                 onPress={submitRename}>
-                <Text style={styles.renameBtnPrimaryText}>重命名</Text>
+                <Text style={styles.renameBtnPrimaryText}>
+                  {t('common.rename')}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>

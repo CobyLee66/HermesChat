@@ -15,6 +15,7 @@ import {enableScreens} from 'react-native-screens';
 
 import {Colors} from './src/components/theme';
 import {DesktopApp} from './src/desktop/DesktopApp';
+import {loadLocalePreference, t, useT} from './src/i18n';
 import {ChatScreen} from './src/screens/ChatScreen';
 import {ConnectionEditScreen} from './src/screens/ConnectionEditScreen';
 import {ConnectionHomeScreen} from './src/screens/ConnectionHomeScreen';
@@ -44,12 +45,16 @@ const screenOptions: NativeStackNavigationOptions = {
 
 function App() {
   const state = useConnectionStore(s => s.state);
+  // 订阅语言：切换语言时整树重渲染，导航标题等非 hook 取词点一并刷新
+  useT();
   // web 构建连接就绪后用响应式桌面壳（三栏/两栏/单列按窗口宽度自适应）；
   // 原生构建始终走导航栈；连接期（未就绪/断开）所有平台都是导航栈连接页。
   const desktopShell =
     Platform.OS === 'web' && (state === 'ready' || state === 'reconnecting');
 
   useEffect(() => {
+    // 语言偏好恢复（首帧前尽量完成，避免已设语言闪回系统语言）
+    loadLocalePreference();
     // 排序档位持久化恢复（进会话列表前完成，避免首帧闪默认档）
     useSessionsStore.getState().loadSortModePreference();
     // web 构建按环境装配：Electron 桌面桥（ssh2 隧道）或浏览器直连引擎
@@ -84,13 +89,15 @@ function App() {
             <Stack.Screen
               name="ConnectionHome"
               component={ConnectionHomeScreen}
-              options={{title: '连接', headerShown: false}}
+              options={{title: t('nav.home'), headerShown: false}}
             />
             <Stack.Screen
               name="ConnectionEdit"
               component={ConnectionEditScreen}
               options={({route}) => ({
-                title: route.params?.profileId ? '编辑配置' : '添加配置',
+                title: route.params?.profileId
+                  ? t('nav.editConnection')
+                  : t('nav.addConnection'),
               })}
             />
             <Stack.Screen
@@ -102,24 +109,24 @@ function App() {
             <Stack.Screen
               name="ProfileEdit"
               component={ProfileEditScreen}
-              options={{title: '编辑资料'}}
+              options={{title: t('nav.profileEdit')}}
             />
             <Stack.Screen name="SessionList" component={SessionListScreen} />
             <Stack.Screen name="Chat" component={ChatScreen} />
             <Stack.Screen
               name="CronRuns"
               component={CronRunsScreen}
-              options={{title: '运行历史'}}
+              options={{title: t('nav.runs')}}
             />
             <Stack.Screen
               name="CronRunDetail"
               component={CronRunDetailScreen}
-              options={{title: '运行详情'}}
+              options={{title: t('nav.runDetail')}}
             />
             <Stack.Screen
               name="CronEdit"
               component={CronEditScreen}
-              options={{title: '定时任务'}}
+              options={{title: t('nav.cronEdit')}}
             />
           </Stack.Navigator>
         </NavigationContainer>

@@ -3,9 +3,12 @@
  *
  * 六种构建模式 ↔ schedule 字符串（服务端 parse_schedule 语法，
  * 见 hermes-agent/cron/jobs.py）：interval/daily/weekly/monthly/once/custom。
- * 另含人性化中文描述与时间格式化（项目无 dayjs，手写）。
+ * 另含人性化描述（经 src/i18n t() 取词，jest 直测时为当前语言）与时间格式化
+ * （项目无 dayjs，手写）。
  */
 
+import {t} from '../i18n';
+import type {MessageKey} from '../i18n/locales/en';
 import type {CronJobRepeat, CronSchedule} from '../rpc/types';
 
 export type ScheduleMode =
@@ -16,13 +19,16 @@ export type ScheduleMode =
   | 'once'
   | 'custom';
 
-export const SCHEDULE_MODE_LABELS: {key: ScheduleMode; label: string}[] = [
-  {key: 'interval', label: '间隔'},
-  {key: 'daily', label: '每天'},
-  {key: 'weekly', label: '每周'},
-  {key: 'monthly', label: '每月'},
-  {key: 'once', label: '一次性'},
-  {key: 'custom', label: '自定义'},
+export const SCHEDULE_MODE_LABELS: {
+  key: ScheduleMode;
+  labelKey: MessageKey;
+}[] = [
+  {key: 'interval', labelKey: 'cron.modeInterval'},
+  {key: 'daily', labelKey: 'cron.modeDaily'},
+  {key: 'weekly', labelKey: 'cron.modeWeekly'},
+  {key: 'monthly', labelKey: 'cron.modeMonthly'},
+  {key: 'once', labelKey: 'cron.modeOnce'},
+  {key: 'custom', labelKey: 'cron.modeCustom'},
 ];
 
 /** 表单各模式的全部字段（只读当前模式相关的，其余保持默认值即可）。 */
@@ -177,7 +183,18 @@ function expandDow(dow: string): number[] {
   return [...new Set(out)].sort((a, b) => a - b);
 }
 
-/** cron 表达式 → 人性化中文（如 `每周一、三 09:30`）；识别不了返回原文。 */
+/** cron 星期域 → 词典键（0=周日；cron 允许 7=周日，取模归一）。 */
+const WEEKDAY_KEYS: MessageKey[] = [
+  'cron.weekday0',
+  'cron.weekday1',
+  'cron.weekday2',
+  'cron.weekday3',
+  'cron.weekday4',
+  'cron.weekday5',
+  'cron.weekday6',
+];
+
+/** cron 表达式 → 人性化描述（如 `每周一、三 09:30`）；识别不了返回原文。 */
 function describeCronExpr(raw: string): string {
   const parts = raw.trim().split(/\s+/);
   if (parts.length === 6) {
@@ -191,23 +208,22 @@ function describeCronExpr(raw: string): string {
     return raw;
   }
   const time = `${h.padStart(2, '0')}:${m.padStart(2, '0')}`;
-  const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
   if (dom === '*' && dowMatches(dow)) {
     const names = expandDow(dow)
-      .map(d => WEEKDAYS[d] ?? `周${d}`)
-      .join('、');
-    return `每周${names} ${time}`;
+      .map(d => t(WEEKDAY_KEYS[d % 7]))
+      .join(t('cron.listSep'));
+    return t('cron.everyWeekday', {days: names, time});
   }
   if (dow === '*' && /^\d{1,2}(,\d{1,2})*$/.test(dom)) {
     const days = dom
       .split(',')
       .map(Number)
       .sort((a, b) => a - b)
-      .join('、');
-    return `每月${days}日 ${time}`;
+      .join(t('cron.listSep'));
+    return t('cron.monthDays', {days, time});
   }
   if (dom === '*' && dow === '*') {
-    return `每天 ${time}`;
+    return t('cron.dailyTime', {time});
   }
   return raw;
 }
@@ -220,15 +236,15 @@ export function describeSchedule(job: {
   const s = job.schedule;
   if (s && s.kind === 'interval' && typeof s.minutes === 'number') {
     if (s.minutes % 1440 === 0) {
-      return `每 ${s.minutes / 1440} 天`;
+      return t('cron.everyDays', {n: s.minutes / 1440});
     }
     if (s.minutes % 60 === 0) {
-      return `每 ${s.minutes / 60} 小时`;
+      return t('cron.everyHours', {n: s.minutes / 60});
     }
-    return `每 ${s.minutes} 分钟`;
+    return t('cron.everyMinutes', {n: s.minutes});
   }
   if (s && s.kind === 'once' && typeof s.run_at === 'string') {
-    return `一次性 · ${formatDateTime(s.run_at)}`;
+    return t('cron.onceAt', {time: formatDateTime(s.run_at)});
   }
   const raw =
     (s && s.kind === 'cron' && typeof s.expr === 'string' ? s.expr : '') ||
@@ -237,17 +253,17 @@ export function describeSchedule(job: {
   return raw ? describeCronExpr(raw) : '—';
 }
 
-/** repeat → 中文展示：永久 / 一次性 / N 次 / 已完成 x/N。 */
+/** repeat → 展示文案：永久 / 一次性 / N 次 / 已完成 x/N。 */
 export function describeRepeat(repeat?: CronJobRepeat): string {
   if (!repeat || repeat.times == null) {
-    return '永久';
+    return t('cron.repeatForever');
   }
   if (repeat.times <= 1) {
-    return '一次性';
+    return t('cron.once');
   }
   return repeat.completed >= repeat.times
-    ? `已完成 ${repeat.completed}/${repeat.times}`
-    : `${repeat.times} 次`;
+    ? t('cron.repeatDone', {done: repeat.completed, total: repeat.times})
+    : t('cron.repeatTimes', {count: repeat.times});
 }
 
 /** ISO 时间 → 本地 'M/D HH:mm'（跨年补年份）；空/无效返回 '—'。 */

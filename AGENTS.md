@@ -13,7 +13,7 @@
 
 - 本机（MacBook）无 Android 工具链：JS 改动用 `npx tsc --noEmit`、`npm run lint`、`npm test`、`npm run web`（浏览器调试）验证。
 - **`npm run lint` 现为 0 error**：根因是 eslint **不读 `.gitignore`**，此前把 `dist-web/`、`web/dist/` 等构建产物也扫了（368 errors 假基线）。修复 = `.eslintrc.js` 的 `ignorePatterns` 显式排除产物目录，**新增产物目录必须同步加进去**。历史文档里「全量 lint 有 180 errors 基线、只看单文件」的说法**已作废**。
-- `.github/workflows/ci.yml` 在每次 PR 强制跑 `tsc` / `lint` / `test` 三条，本地必须同样全绿再提交。
+- `.github/workflows/ci.yml` 在每次 PR 强制跑 `tsc` / `lint` / `test` / `i18n-check` 四条，本地必须同样全绿再提交。
 - APK 构建在构建机（Windows，SSH 别名由 `BUILD_HOST` 指定）：本机远程驱动用 `scripts/build-android-remote.sh`（推 GitHub → 构建机拉取 → 远端构建 → 取回 dist/ → 检测到手机则自动安装）；构建机本机（Git Bash）构建用 `scripts/build-android.sh`（仅 npm ci + gradlew 构建 + adb 安装，不做 git 同步）。不要在这台 Mac 上装 Android/iOS 工具链。
 - 构建机上的工程目录（`BUILD_DIR`）是构建副本，一切修改从 GitHub 拉取，不要在上面手改。
 - 本机私有配置（构建机主机名/路径、adb 路径、设备序列号、内网地址等）统一写在 `scripts/build-env.sh`（已 gitignore，模板 `scripts/build-env.example.sh`），脚本自动 source；**禁止把这类值写进脚本本体或文档**。
@@ -30,7 +30,9 @@
 
 ## 代码约定
 
-- UI 文案与代码注释用中文；zustand 选择器必须返回稳定引用（禁止 `?? []` 内联新对象）；原生能力差异收敛在 `src/ssh/`（HermesSsh 契约 + 各平台实现），UI/协议层保持平台无关。
+- **代码注释用中文；UI 文案一律经 i18n 词典取词，禁止硬编码**（2026-09-13 i18n 落地，D047 修订本条）：新增/修改用户可见文案 → `src/i18n/locales/en.ts` 登记键 + `zh-CN.ts` 补中文（漏键 tsc 报错），代码里 `t('域.名称')` 取词；组件渲染路径用 `useT()`。框架契约与完整工作流见 `docs/i18n.md`。
+- **提交信息默认用英文**（2026-09-14 起用户指定，CONTRIBUTING.md 同步修订）：格式 `<type>: <one-line summary>`（type 用 feat/fix/docs/refactor/perf/test/chore/build），可选正文说明动机与副作用。
+- zustand 选择器必须返回稳定引用（禁止 `?? []` 内联新对象）；原生能力差异收敛在 `src/ssh/`（HermesSsh 契约 + 各平台实现），UI/协议层保持平台无关。
 
 ## 进度与决策文档
 
@@ -61,8 +63,9 @@
 | `docs/protocol.md` | WS JSON-RPC + REST 协议细节与实测结论 | 改协议层/RPC 客户端时必读 |
 | `docs/ssh-module.md` | SSH 原生模块契约 | 改 `src/ssh/` 原生能力时必读 |
 | `docs/desktop.md` | 桌面端(Win/macOS)与 Web 版统一方案（未实现） | 做桌面端/Web 版时必读 |
+| `docs/i18n.md` | 界面多语言框架契约（词典/t()/新语言接入/翻译工作流） | 新增或修改用户可见文案时必读 |
 
-**【强制】完成功能/协议/契约变更后同步更新文档**：改协议理解 → `docs/protocol.md`；改 SSH 原生模块 → `docs/ssh-module.md`；改总体设计 → `docs/plan.md`。
+**【强制】完成功能/协议/契约变更后同步更新文档**：改协议理解 → `docs/protocol.md`；改 SSH 原生模块 → `docs/ssh-module.md`；改 i18n 层 → `docs/i18n.md`；改总体设计 → `docs/plan.md`。
 
 ## 会话收尾检查清单
 

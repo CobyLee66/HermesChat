@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 
 import {transcribeAudio} from '../rpc/rest';
+import {t, useT} from '../i18n';
 import {getDesktopBridge} from '../ssh/desktopHermesSsh';
 import {useConnectionStore} from '../store/connection';
 import {alertError} from '../utils/alert';
@@ -62,7 +63,12 @@ function pickRecorderMime(): string | undefined {
 function timeoutReject(ms: number): Promise<never> {
   return new Promise((_, reject) => {
     setTimeout(
-      () => reject(new Error(`语音识别超时（${Math.round(ms / 1000)} 秒），请重试`)),
+      () =>
+        reject(
+          new Error(
+            t('voice.recognizeTimeout', {seconds: Math.round(ms / 1000)}),
+          ),
+        ),
       ms,
     );
   });
@@ -72,12 +78,13 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(new Error('读取录音数据失败'));
+    reader.onerror = () => reject(new Error(t('voice.readFailed')));
     reader.readAsDataURL(blob);
   });
 }
 
 export function VoiceButton({profile, onText}: Props) {
+  const t = useT();
   const desktop = getDesktopBridge() != null;
   const [phase, setPhase] = useState<Phase>('idle');
   const [secs, setSecs] = useState(0);
@@ -115,7 +122,7 @@ export function VoiceButton({profile, onText}: Props) {
     }).navigator;
     const Ctor = (globalThis as {MediaRecorder?: WebRecorderCtor}).MediaRecorder;
     if (!nav?.mediaDevices?.getUserMedia || !Ctor) {
-      throw new Error('当前环境不支持麦克风采集');
+      throw new Error(t('voice.micUnsupported'));
     }
     const stream = await nav.mediaDevices.getUserMedia({audio: true});
     const mimeType = pickRecorderMime();
@@ -152,7 +159,7 @@ export function VoiceButton({profile, onText}: Props) {
           (async () => {
             const blob = await new Promise<Blob>((resolve, reject) => {
               if (!recorder) {
-                reject(new Error('录音器不存在'));
+                reject(new Error(t('voice.recorderMissing')));
                 return;
               }
               recorder.onstop = () => {
@@ -177,10 +184,13 @@ export function VoiceButton({profile, onText}: Props) {
         if (text) {
           onText(text);
         } else {
-          alertError('语音输入', '未识别到语音内容');
+          alertError(t('voice.title'), t('voice.noSpeech'));
         }
       } catch (e) {
-        alertError('语音识别失败', e instanceof Error ? e.message : String(e));
+        alertError(
+          t('voice.recognizeFailed'),
+          e instanceof Error ? e.message : String(e),
+        );
       } finally {
         setPhase('idle');
       }
@@ -200,7 +210,10 @@ export function VoiceButton({profile, onText}: Props) {
     if (phase === 'idle') {
       start().catch(e => {
         setPhase('idle');
-        alertError('录音失败', e instanceof Error ? e.message : String(e));
+        alertError(
+          t('voice.recordFailed'),
+          e instanceof Error ? e.message : String(e),
+        );
       });
     } else if (phase === 'recording') {
       stopAndTranscribe();
@@ -214,7 +227,7 @@ export function VoiceButton({profile, onText}: Props) {
       onPress={onPress}
       disabled={phase === 'busy'}
       activeOpacity={0.7}
-      accessibilityLabel="语音输入">
+      accessibilityLabel={t('voice.title')}>
       {phase === 'idle' ? (
         <IconImage name="microphone" size={26} />
       ) : phase === 'recording' ? (
@@ -225,7 +238,9 @@ export function VoiceButton({profile, onText}: Props) {
       ) : (
         <>
           <ActivityIndicator size="small" color={Colors.textSecondary} />
-          <Text style={[styles.subLabel, styles.subLabelMuted]}>识别中…</Text>
+          <Text style={[styles.subLabel, styles.subLabelMuted]}>
+            {t('voice.busy')}
+          </Text>
         </>
       )}
     </TouchableOpacity>

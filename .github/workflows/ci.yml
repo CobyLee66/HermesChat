@@ -37,3 +37,7 @@ jobs:
 
       - name: 单元测试
         run: npm test
+
+      # 界面多语言守护：词典键对齐 + 硬编码中文文案扫描（零依赖，无需 npm 之外的环境）
+      - name: i18n 检查
+        run: node scripts/i18n-check.js

@@ -14,7 +14,10 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {Avatar} from '../components/Avatar';
 import {Colors} from '../components/theme';
+import {LanguageToggle} from '../components/LanguageToggle';
 import {ViewSwitcher, type HomeView} from '../components/ViewSwitcher';
+import {useT} from '../i18n';
+import {useLocaleStore} from '../i18n/localeStore';
 import {CronPanel} from '../panels/CronPanel';
 import {useConnectionStore} from '../store/connection';
 import {useProfilesStore} from '../store/profiles';
@@ -32,6 +35,9 @@ function nickname(p: ProfileInfo): string {
 export function ProfileListScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
+  const t = useT();
+  // 订阅生效语言：语言切换时重跑 setOptions，刷新 header 里的文案
+  const locale = useLocaleStore(s => s.locale);
   const {list, avatars, loading, error, refresh} = useProfilesStore();
   const connState = useConnectionStore(s => s.state);
   const reconnecting = connState === 'reconnecting';
@@ -54,25 +60,32 @@ export function ProfileListScreen() {
       ),
       headerTitleAlign: 'left',
       headerRight: () => (
-        <TouchableOpacity
-          activeOpacity={0.7}
-          onPress={() =>
-            Alert.alert('退出连接', '确定断开与主机的连接吗？', [
-              {text: '取消', style: 'cancel'},
-              {
-                text: '退出',
-                style: 'destructive',
-                onPress: () => {
-                  useConnectionStore.getState().disconnect();
-                },
-              },
-            ])
-          }>
-          <Text style={styles.exitText}>退出</Text>
-        </TouchableOpacity>
+        <View style={styles.headerRight}>
+          <LanguageToggle style={styles.langText} />
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() =>
+              Alert.alert(
+                t('profile.disconnectTitle'),
+                t('profile.disconnectConfirm'),
+                [
+                  {text: t('common.cancel'), style: 'cancel'},
+                  {
+                    text: t('profile.disconnect'),
+                    style: 'destructive',
+                    onPress: () => {
+                      useConnectionStore.getState().disconnect();
+                    },
+                  },
+                ],
+              )
+            }>
+            <Text style={styles.exitText}>{t('profile.disconnect')}</Text>
+          </TouchableOpacity>
+        </View>
       ),
     });
-  }, [navigation, view]);
+  }, [navigation, view, locale, t]);
 
   useEffect(() => {
     if (connState === 'disconnected') {
@@ -84,7 +97,7 @@ export function ProfileListScreen() {
     <View style={[styles.container, {paddingBottom: insets.bottom}]}>
       {reconnecting ? (
         <View style={styles.banner}>
-          <Text style={styles.bannerText}>连接已断开，正在重连…</Text>
+          <Text style={styles.bannerText}>{t('profile.reconnecting')}</Text>
         </View>
       ) : null}
       {view === 'cron' ? (
@@ -108,9 +121,9 @@ export function ProfileListScreen() {
         <ActivityIndicator style={styles.loading} color={Colors.accent} />
       ) : error && list.length === 0 ? (
         <View style={styles.emptyWrap}>
-          <Text style={styles.error}>加载失败：{error}</Text>
+          <Text style={styles.error}>{t('profile.loadFailed', {error})}</Text>
           <TouchableOpacity onPress={() => refresh()} style={styles.retryBtn}>
-            <Text style={styles.retryText}>重试</Text>
+            <Text style={styles.retryText}>{t('profile.retry')}</Text>
           </TouchableOpacity>
         </View>
       ) : (
@@ -138,7 +151,7 @@ export function ProfileListScreen() {
                 <Text style={styles.preview} numberOfLines={1}>
                   {item.last_session?.preview ||
                     item.description ||
-                    `${item.skill_count ?? 0} 个技能`}
+                    t('profile.skillCount', {count: item.skill_count ?? 0})}
                 </Text>
               </View>
               <TouchableOpacity
@@ -147,7 +160,7 @@ export function ProfileListScreen() {
                 onPress={() =>
                   navigation.navigate('ProfileEdit', {profile: item.name})
                 }>
-                <Text style={styles.editText}>编辑</Text>
+                <Text style={styles.editText}>{t('common.edit')}</Text>
               </TouchableOpacity>
             </TouchableOpacity>
           )}
@@ -165,6 +178,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     alignSelf: 'flex-start',
   },
+  headerRight: {flexDirection: 'row', alignItems: 'center'},
+  langText: {fontSize: 15, color: Colors.text, marginRight: 16},
   loading: {marginTop: 48},
   banner: {
     backgroundColor: '#FFF7E8',

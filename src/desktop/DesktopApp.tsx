@@ -26,7 +26,9 @@ import {createNativeStackNavigator} from '@react-navigation/native-stack';
 
 import {Avatar} from '../components/Avatar';
 import {Colors} from '../components/theme';
+import {LanguageToggle} from '../components/LanguageToggle';
 import {ViewSwitcher} from '../components/ViewSwitcher';
+import {useT} from '../i18n';
 import {CronJobForm, useCronJobDraft} from '../panels/CronJobForm';
 import {CronPanel} from '../panels/CronPanel';
 import {CronRunDetailPanel} from '../panels/CronRunDetailPanel';
@@ -70,9 +72,40 @@ function DesktopAppShell() {
   const cronEditOpen = useDesktopUiStore(s => s.cronEditOpen);
   const cronRunsOpen = useDesktopUiStore(s => s.cronRunsOpen);
   const cronRunDetailOpen = useDesktopUiStore(s => s.cronRunDetailOpen);
+  const homeView = useDesktopUiStore(s => s.homeView);
   const reset = useDesktopUiStore(s => s.reset);
 
   const refreshProfiles = useProfilesStore(s => s.refresh);
+
+  // 窗口标题跟随当前视图（ProfileEditModal 的嵌套 NavigationContainer 已禁
+  // documentTitle，不再把 document.title 劫持在「编辑资料」上不恢复）
+  const t = useT();
+  const nicknameText = useProfileNickname(selectedProfile ?? '');
+  const windowTitle = profileEditOpen
+    ? t('nav.profileEdit')
+    : cronRunDetailOpen
+      ? t('nav.runDetail')
+      : cronRunsOpen
+        ? t('desktop.runsTitle', {name: cronRunsOpen.name})
+        : cronEditOpen
+          ? cronEditOpen.jobId
+            ? t('nav.cronEditJob')
+            : t('nav.cronNewJob')
+          : chat
+            ? chat.title || t('chat.defaultTitle')
+            : selectedProfile
+              ? nicknameText
+              : homeView === 'cron'
+                ? t('view.cron')
+                : t('view.sessions');
+
+  useEffect(() => {
+    const doc = (globalThis as {document?: {title?: string}}).document;
+    if (!doc) {
+      return;
+    }
+    doc.title = windowTitle;
+  }, [windowTitle]);
 
   useEffect(() => {
     // 壳挂载即清残留选中态并拉取 profile 列表（原 ProfileListScreen 行为）
@@ -107,7 +140,7 @@ function DesktopAppShell() {
           }),
         )
         .catch(e =>
-          alertError('新建会话失败', e instanceof Error ? e.message : String(e)),
+          alertError(t('desktop.newSessionFailed'), e instanceof Error ? e.message : String(e)),
         );
     };
     const win = (globalThis as {
@@ -117,7 +150,7 @@ function DesktopAppShell() {
     return () => {
       win?.removeEventListener?.('keydown', onKey);
     };
-  }, [selectedProfile]);
+  }, [selectedProfile, t]);
 
   const reconnecting = connState === 'reconnecting';
 
@@ -183,25 +216,28 @@ function DesktopAppShell() {
 }
 
 function ReconnectingBanner() {
+  const t = useT();
   return (
     <View style={styles.banner}>
-      <Text style={styles.bannerText}>连接已断开，正在重连…</Text>
+      <Text style={styles.bannerText}>{t('profile.reconnecting')}</Text>
     </View>
   );
 }
 
 /** 未选会话时的聊天区空态。 */
 function EmptyChatPane() {
+  const t = useT();
   return (
     <View style={styles.emptyWrap}>
-      <Text style={styles.emptyText}>从会话列表选择一个会话</Text>
-      <Text style={styles.emptyHint}>或点左上角「新会话」开始新对话</Text>
+      <Text style={styles.emptyText}>{t('desktop.emptyChat')}</Text>
+      <Text style={styles.emptyHint}>{t('desktop.emptyChatHint')}</Text>
     </View>
   );
 }
 
 /** Profile 全宽首屏（未选 profile 时）：会话（profile 列表）/ 定时任务双视图。 */
 function ProfileListPane() {
+  const t = useT();
   const list = useProfilesStore(s => s.list);
   const homeView = useDesktopUiStore(s => s.homeView);
   const setHomeView = useDesktopUiStore(s => s.setHomeView);
@@ -214,13 +250,16 @@ function ProfileListPane() {
     <View style={styles.profilePane}>
       <View style={styles.profilePaneHeader}>
         <ViewSwitcher value={homeView} onChange={setHomeView} />
-        <TouchableOpacity
-          activeOpacity={0.7}
-          onPress={() => {
-            useConnectionStore.getState().disconnect();
-          }}>
-          <Text style={styles.exitText}>退出连接</Text>
-        </TouchableOpacity>
+        <View style={styles.profilePaneHeaderRight}>
+          <LanguageToggle style={styles.langText} />
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => {
+              useConnectionStore.getState().disconnect();
+            }}>
+            <Text style={styles.exitText}>{t('profile.disconnectTitle')}</Text>
+          </TouchableOpacity>
+        </View>
       </View>
       {homeView === 'cron' ? (
         <View style={styles.cronPane}>
@@ -247,7 +286,7 @@ function ProfileListPane() {
               preview={
                 item.last_session?.preview ||
                 item.description ||
-                `${item.skill_count ?? 0} 个技能`
+                t('profile.skillCount', {count: item.skill_count ?? 0})
               }
               onOpen={() => selectProfile(item.name)}
               onEdit={() => setProfileEditOpen(item.name)}
@@ -273,12 +312,13 @@ function ProfilePaneRow({
 }) {
   const nickname = useProfileNickname(name);
   const avatarUri = useProfilesStore(s => s.avatars[name]);
+  const t = useT();
   return (
     <TouchableOpacity
       style={styles.profileRow}
       activeOpacity={0.7}
       onPress={onOpen}
-      accessibilityLabel={`打开 profile ${nickname}`}>
+      accessibilityLabel={t('desktop.openProfileLabel', {name: nickname})}>
       <Avatar name={nickname} uri={avatarUri} size={46} />
       <View style={styles.profileRowBody}>
         <Text style={styles.profileName} numberOfLines={1}>
@@ -289,7 +329,7 @@ function ProfilePaneRow({
         </Text>
       </View>
       <TouchableOpacity style={styles.editBtn} hitSlop={8} onPress={onEdit}>
-        <Text style={styles.editText}>编辑</Text>
+        <Text style={styles.editText}>{t('common.edit')}</Text>
       </TouchableOpacity>
     </TouchableOpacity>
   );
@@ -300,22 +340,25 @@ function ProfilePaneRow({
  * 用嵌套 NavigationContainer 提供 useRoute 上下文。
  */
 function ProfileEditModal({profile}: {profile: string}) {
+  const t = useT();
   const setProfileEditOpen = useDesktopUiStore(s => s.setProfileEditOpen);
   const close = () => setProfileEditOpen(null);
   return (
     <Modal visible animationType="slide" onRequestClose={close}>
-      {/* 本容器与外层导航栈互斥挂载（App 层二选一），是当前唯一的容器 */}
-      <NavigationContainer>
+      {/* 本容器与外层导航栈互斥挂载（App 层二选一），是当前唯一的容器。
+          documentTitle 必须关掉：嵌套容器会把 document.title 改成「编辑资料」
+          且弹层关闭后无人恢复（窗口标题由 DesktopAppShell 统一驱动） */}
+      <NavigationContainer documentTitle={{enabled: false}}>
         <EditStack.Navigator>
           <EditStack.Screen
             name="ProfileEdit"
             component={ProfileEditScreen}
             initialParams={{profile}}
             options={{
-              title: '编辑资料',
+              title: t('nav.profileEdit'),
               headerLeft: () => (
                 <TouchableOpacity activeOpacity={0.7} onPress={close} hitSlop={8}>
-                  <Text style={styles.backText}>‹ 返回</Text>
+                  <Text style={styles.backText}>{t('common.back')}</Text>
                 </TouchableOpacity>
               ),
             }}
@@ -336,6 +379,7 @@ function CronEditModal({
 }) {
   const setCronEditOpen = useDesktopUiStore(s => s.setCronEditOpen);
   const close = () => setCronEditOpen(null);
+  const t = useT();
   const {job, error} = useCronJobDraft(jobId, profile);
   const profileList = useProfilesStore(s => s.list);
 
@@ -344,17 +388,19 @@ function CronEditModal({
       <View style={styles.modalRoot}>
         <View style={styles.modalHeader}>
           <TouchableOpacity activeOpacity={0.7} onPress={close} hitSlop={8}>
-            <Text style={styles.backText}>‹ 返回</Text>
+            <Text style={styles.backText}>{t('common.back')}</Text>
           </TouchableOpacity>
           <Text style={styles.modalTitle}>
-            {jobId ? '编辑定时任务' : '新建定时任务'}
+            {jobId ? t('nav.cronEditJob') : t('nav.cronNewJob')}
           </Text>
           <View style={styles.modalHeaderSpacer} />
         </View>
         {jobId && !job && !error ? (
           <ActivityIndicator style={styles.modalLoading} color={Colors.accent} />
         ) : jobId && !job ? (
-          <Text style={styles.modalError}>任务不存在或已被删除：{error}</Text>
+          <Text style={styles.modalError}>
+            {t('cron.jobMissing', {error: error ?? ''})}
+          </Text>
         ) : (
           <CronJobForm
             job={job}
@@ -380,15 +426,16 @@ function CronRunsModal({
   const setCronRunsOpen = useDesktopUiStore(s => s.setCronRunsOpen);
   const setCronRunDetailOpen = useDesktopUiStore(s => s.setCronRunDetailOpen);
   const close = () => setCronRunsOpen(null);
+  const t = useT();
   return (
     <Modal visible animationType="slide" onRequestClose={close}>
       <View style={styles.modalRoot}>
         <View style={styles.modalHeader}>
           <TouchableOpacity activeOpacity={0.7} onPress={close} hitSlop={8}>
-            <Text style={styles.backText}>‹ 返回</Text>
+            <Text style={styles.backText}>{t('common.back')}</Text>
           </TouchableOpacity>
           <Text style={styles.modalTitle} numberOfLines={1}>
-            {`运行历史 · ${runs.name}`}
+            {t('desktop.runsTitle', {name: runs.name})}
           </Text>
           <View style={styles.modalHeaderSpacer} />
         </View>
@@ -423,6 +470,7 @@ function CronRunDetailModal({
   const setCronRunsOpen = useDesktopUiStore(s => s.setCronRunsOpen);
   const selectProfile = useDesktopUiStore(s => s.selectProfile);
   const close = () => setCronRunDetailOpen(null);
+  const t = useT();
   const {run} = detail;
   const profile = run.profile ?? detail.profile ?? 'default';
   return (
@@ -430,10 +478,10 @@ function CronRunDetailModal({
       <View style={styles.modalRoot}>
         <View style={styles.modalHeader}>
           <TouchableOpacity activeOpacity={0.7} onPress={close} hitSlop={8}>
-            <Text style={styles.backText}>‹ 返回</Text>
+            <Text style={styles.backText}>{t('common.back')}</Text>
           </TouchableOpacity>
           <Text style={styles.modalTitle} numberOfLines={1}>
-            运行详情
+            {t('nav.runDetail')}
           </Text>
           <View style={styles.modalHeaderSpacer} />
         </View>
@@ -528,6 +576,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   exitText: {fontSize: 14, color: Colors.danger},
+  profilePaneHeaderRight: {flexDirection: 'row', alignItems: 'center', gap: 14},
+  langText: {fontSize: 14, color: Colors.text},
   profileListContent: {maxWidth: 720, width: '100%', alignSelf: 'center'},
   profileRow: {
     flexDirection: 'row',

@@ -212,7 +212,7 @@ node scripts/web-scroll-follow-smoke.js    # starts the mock, builds, previews �
 ## Language Support
 
 - **Documentation**: this README is available in **English** and [**简体中文**](README.zh-CN.md). The design documents under `docs/` are currently Chinese-only.
-- **App UI**: currently Chinese-only. **Internationalization is on the roadmap** — once the UI strings are extracted, additional languages (English first) will follow.
+- **App UI**: English and Simplified Chinese are supported. The interface **follows your system language automatically** (unsupported languages fall back to English), and a small in-app toggle (System / 中文 / EN) lets you override it. Adding a new language only requires one dictionary file — see `docs/i18n.md` (Chinese) for the framework contract.
 
 ---
 

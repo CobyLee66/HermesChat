@@ -13,6 +13,7 @@ import {
   View,
 } from 'react-native';
 
+import {useT} from '../i18n';
 import {Colors} from './theme';
 
 type Props = {
@@ -33,13 +34,15 @@ export function SearchBar({
   value,
   onChangeText,
   onClose,
-  placeholder = '搜索',
+  placeholder,
   autoFocus = true,
   total,
   activeIndex = 0,
   onPrev,
   onNext,
 }: Props) {
+  const t = useT();
+  const resolvedPlaceholder = placeholder ?? t('search.placeholder');
   const hasNav =
     typeof total === 'number' && !!onPrev && !!onNext;
   const noHit = hasNav && total === 0;
@@ -50,7 +53,7 @@ export function SearchBar({
         style={styles.input}
         value={value}
         onChangeText={onChangeText}
-        placeholder={placeholder}
+        placeholder={resolvedPlaceholder}
         placeholderTextColor={Colors.textSecondary}
         autoFocus={autoFocus}
         autoCorrect={false}
@@ -59,7 +62,9 @@ export function SearchBar({
       />
       {hasNav ? (
         <Text style={[styles.count, noHit && styles.countEmpty]}>
-          {noHit ? '无结果' : `${Math.min(activeIndex + 1, total ?? 0)}/${total}`}
+          {noHit
+            ? t('search.noHit')
+            : `${Math.min(activeIndex + 1, total ?? 0)}/${total}`}
         </Text>
       ) : null}
       {hasNav ? (

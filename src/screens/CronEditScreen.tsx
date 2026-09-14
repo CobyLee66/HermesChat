@@ -5,6 +5,7 @@ import type {NativeStackNavigationProp} from '@react-navigation/native-stack';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {Colors} from '../components/theme';
+import {useT} from '../i18n';
 import {CronJobForm, useCronJobDraft} from '../panels/CronJobForm';
 import {useCronStore} from '../store/cron';
 import {useProfilesStore} from '../store/profiles';
@@ -18,6 +19,7 @@ type Rt = RouteProp<RootStackParamList, 'CronEdit'>;
 export function CronEditScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Rt>();
+  const t = useT();
   const {jobId, profile} = route.params;
   const insets = useSafeAreaInsets();
   const {bottomPad} = useKeyboardHeight();
@@ -25,8 +27,10 @@ export function CronEditScreen() {
   const profileList = useProfilesStore(s => s.list);
 
   useEffect(() => {
-    navigation.setOptions({title: jobId ? '编辑定时任务' : '新建定时任务'});
-  }, [navigation, jobId]);
+    navigation.setOptions({
+      title: jobId ? t('nav.cronEditJob') : t('nav.cronNewJob'),
+    });
+  }, [navigation, jobId, t]);
 
   if (jobId && !job && !error) {
     return (
@@ -38,7 +42,9 @@ export function CronEditScreen() {
   if (jobId && !job) {
     return (
       <View style={styles.centerWrap}>
-        <Text style={styles.error}>任务不存在或已被删除：{error}</Text>
+          <Text style={styles.error}>
+            {t('cron.jobMissing', {error: error ?? ''})}
+          </Text>
       </View>
     );
   }

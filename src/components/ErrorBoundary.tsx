@@ -9,6 +9,7 @@
 import React from 'react';
 import {Platform, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 
+import {t} from '../i18n';
 import {dlog} from '../utils/desktopLog';
 
 interface Props {
@@ -35,9 +36,19 @@ export class ErrorBoundary extends React.Component<Props, State> {
     if (!error) {
       return this.props.children;
     }
+    // 头注释约定：兜底 UI 刻意不依赖 theme/store。t() 内部读 zustand——
+    // 若崩溃源恰是它，回退英文兜底文案，保证错误界面本身可渲染
+    let titleText = 'Something went wrong';
+    let reloadText = 'Reload';
+    try {
+      titleText = t('errorBoundary.title');
+      reloadText = t('errorBoundary.reload');
+    } catch {
+      // ignore
+    }
     return (
       <View style={styles.container}>
-        <Text style={styles.title}>界面出现问题</Text>
+        <Text style={styles.title}>{titleText}</Text>
         <Text style={styles.message} numberOfLines={8}>
           {error.message}
         </Text>
@@ -50,7 +61,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
               this.setState({error: null});
             }
           }}>
-          <Text style={styles.buttonText}>重新加载</Text>
+          <Text style={styles.buttonText}>{reloadText}</Text>
         </TouchableOpacity>
       </View>
     );

@@ -24,6 +24,7 @@ import {
 
 import {Avatar} from '../components/Avatar';
 import {Colors} from '../components/theme';
+import {useT} from '../i18n';
 import {useKeyboardHeight} from '../utils/useKeyboardHeight';
 import {useConnectionStore} from '../store/connection';
 import {useProfilesStore} from '../store/profiles';
@@ -37,6 +38,7 @@ type Rt = RouteProp<RootStackParamList, 'ProfileEdit'>;
 
 export function ProfileEditScreen() {
   const route = useRoute<Rt>();
+  const t = useT();
   const profileName = route.params.profile;
   const {bottomPad} = useKeyboardHeight();
 
@@ -96,7 +98,7 @@ export function ProfileEditScreen() {
       if (!hasDesktopBridge() && isErrorWithCode(e) && e.code === errorCodes.OPERATION_CANCELED) {
         return;
       }
-      alertError('更换头像失败', e instanceof Error ? e.message : String(e));
+      alertError(t('profile.avatarChangeFailed'), e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
     }
@@ -104,8 +106,8 @@ export function ProfileEditScreen() {
 
   const onClearAvatar = () => {
     void confirmDialog(
-      '恢复默认头像',
-      '将删除自定义头像，使用昵称首字符色块。',
+      t('profile.resetAvatarTitle'),
+      t('profile.resetAvatarMessage'),
     ).then(ok => {
       if (!ok) {
         return;
@@ -116,7 +118,7 @@ export function ProfileEditScreen() {
           await clearAvatar(profileName);
           setPreviewUri(null);
         } catch (e) {
-          alertError('操作失败', e instanceof Error ? e.message : String(e));
+          alertError(t('common.opFailed'), e instanceof Error ? e.message : String(e));
         } finally {
           setBusy(null);
         }
@@ -128,9 +130,9 @@ export function ProfileEditScreen() {
     try {
       setBusy('nickname');
       await updateNickname(profileName, nickname);
-      alertInfo('已保存', '昵称已更新');
+      alertInfo(t('profile.saved'), t('profile.nicknameUpdated'));
     } catch (e) {
-      alertError('保存失败', e instanceof Error ? e.message : String(e));
+      alertError(t('profile.saveFailed'), e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(null);
     }
@@ -160,18 +162,20 @@ export function ProfileEditScreen() {
             onPress={onPickAvatar}
             disabled={busy !== null}
             activeOpacity={0.8}>
-            <Text style={styles.btnText}>更换头像</Text>
+            <Text style={styles.btnText}>{t('profile.changeAvatar')}</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.btn, styles.btnGhost]}
             onPress={onClearAvatar}
             disabled={busy !== null}
             activeOpacity={0.8}>
-            <Text style={[styles.btnText, styles.btnGhostText]}>恢复默认</Text>
+            <Text style={[styles.btnText, styles.btnGhostText]}>
+              {t('profile.resetAvatar')}
+            </Text>
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.label}>昵称</Text>
+        <Text style={styles.label}>{t('profile.nickname')}</Text>
         <TextInput
           style={styles.input}
           value={nickname}
@@ -180,7 +184,9 @@ export function ProfileEditScreen() {
           placeholderTextColor={Colors.textSecondary}
           maxLength={40}
         />
-        <Text style={styles.hint}>留空则使用默认显示名（{fallbackName}）</Text>
+        <Text style={styles.hint}>
+          {t('profile.nicknameHint', {name: fallbackName})}
+        </Text>
 
         <TouchableOpacity
           style={[
@@ -194,7 +200,7 @@ export function ProfileEditScreen() {
           {busy === 'nickname' ? (
             <ActivityIndicator color="#FFF" />
           ) : (
-            <Text style={styles.btnText}>保存</Text>
+            <Text style={styles.btnText}>{t('common.save')}</Text>
           )}
         </TouchableOpacity>
       </ScrollView>

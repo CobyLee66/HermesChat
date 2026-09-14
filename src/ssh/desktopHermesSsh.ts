@@ -10,6 +10,7 @@
  */
 
 import type {ExecResult, SshConfig} from './hermesSshTypes';
+import {t} from '../i18n';
 
 export type {ExecResult, SshConfig} from './hermesSshTypes';
 
@@ -74,9 +75,7 @@ export const isAvailable = hasDesktopBridge();
 export const DEFAULT_EXEC_TIMEOUT_MS = 20_000;
 
 function unavailableError(method: string): Error {
-  return new Error(
-    `SSH 桥在当前环境不可用（${method}）。桌面版需 Electron 壳；浏览器请使用「浏览器直连」。`,
-  );
+  return new Error(t('ssh.bridgeUnavailableEnv', {method}));
 }
 
 export function connect(

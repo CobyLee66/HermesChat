@@ -14,6 +14,7 @@
 
 import type {ConnectionProfile} from '../store/connection';
 import {useConnectionStore} from '../store/connection';
+import {t} from '../i18n';
 import {SshManager} from './SshManager';
 import {getDesktopBridge, hasDesktopBridge} from './desktopHermesSsh';
 import {SshTunnelTransport, type SshConfig, type Transport, type TransportResult} from './transport';
@@ -32,14 +33,14 @@ export class DesktopSshTransport implements Transport {
 
   async connect(): Promise<TransportResult> {
     if (!hasDesktopBridge()) {
-      throw new Error('桌面 SSH 桥不可用（需 Electron 壳）');
+      throw new Error(t('ssh.desktopBridgeUnavailable'));
     }
     this.inner.onDrop = () => this.onDrop?.();
     const result = await this.inner.connect();
     const loc = (globalThis as {location?: {protocol: string; host: string; origin: string}})
       .location;
     if (!loc) {
-      throw new Error('桌面环境缺少 window.location');
+      throw new Error(t('ssh.noWindowLocation'));
     }
     const wsScheme = loc.protocol === 'https:' ? 'wss' : 'ws';
     return {
@@ -68,7 +69,7 @@ export class DesktopDirectTransport implements Transport {
   async connect(): Promise<TransportResult> {
     const bridge = getDesktopBridge();
     if (!bridge) {
-      throw new Error('桌面桥不可用（需 Electron 壳）');
+      throw new Error(t('ssh.bridgeUnavailableShort'));
     }
     // 主进程记录代理上游 + 提取 token（渲染层与 gateway 跨源，fetch 不可靠）
     const {token} = await bridge.directConnect({
@@ -80,7 +81,7 @@ export class DesktopDirectTransport implements Transport {
       globalThis as {location?: {protocol: string; host: string; origin: string}}
     ).location;
     if (!loc) {
-      throw new Error('桌面环境缺少 window.location');
+      throw new Error(t('ssh.noWindowLocation'));
     }
     const wsScheme = loc.protocol === 'https:' ? 'wss' : 'ws';
     return {

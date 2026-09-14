@@ -20,6 +20,8 @@ import {
 import {hasDesktopBridge} from '../ssh/desktopBridge';
 import {connectWebDirect} from '../ssh/webDirect';
 import {Colors} from '../components/theme';
+import {LanguageToggle} from '../components/LanguageToggle';
+import {useT} from '../i18n';
 import type {RootStackParamList} from '../navigation/types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'ConnectionHome'>;
@@ -33,6 +35,7 @@ let autoConnectAttempted = false;
 export function ConnectionHomeScreen() {
   const navigation = useNavigation<Nav>();
   const insets = useSafeAreaInsets();
+  const t = useT();
   const {
     profiles,
     currentProfileId,
@@ -76,10 +79,10 @@ export function ConnectionHomeScreen() {
   const connecting = state === 'connecting' || state === 'bootstrapping';
 
   const confirmRemove = (p: ConnectionProfile) => {
-    Alert.alert('删除配置', `确定删除「${p.name}」吗？`, [
-      {text: '取消', style: 'cancel'},
+    Alert.alert(t('conn.deleteTitle'), t('conn.deleteConfirm', {name: p.name}), [
+      {text: t('common.cancel'), style: 'cancel'},
       {
-        text: '删除',
+        text: t('common.delete'),
         style: 'destructive',
         onPress: () => removeProfile(p.id),
       },
@@ -88,16 +91,20 @@ export function ConnectionHomeScreen() {
 
   return (
     <View style={styles.flex}>
+      {/* 语言切换挂在页面右上角（连接主页没有 header，绝对定位 + 安全区下移） */}
+      <View style={[styles.langWrap, {top: insets.top + 10}]}>
+        <LanguageToggle style={styles.langText} />
+      </View>
       <ScrollView
         contentContainerStyle={[
           styles.container,
           {paddingBottom: insets.bottom},
         ]}>
         <Text style={styles.logo}>Hermes</Text>
-        <Text style={styles.subtitle}>选择配置，连接到你的 Hermes Agent</Text>
+        <Text style={styles.subtitle}>{t('conn.subtitle')}</Text>
 
         {profiles.length === 0 ? (
-          <Text style={styles.empty}>暂无连接配置，点击下方按钮添加</Text>
+          <Text style={styles.empty}>{t('conn.empty')}</Text>
         ) : (
           profiles.map(p => (
             <TouchableOpacity
@@ -115,10 +122,10 @@ export function ConnectionHomeScreen() {
                     style={
                       p.type === 'direct' ? styles.directTag : styles.sshTag
                     }>
-                    {p.type === 'direct' ? '直连' : 'SSH'}
+                    {p.type === 'direct' ? t('conn.typeDirect') : 'SSH'}
                   </Text>
                   {p.id === autoProfileId ? (
-                    <Text style={styles.defaultTag}>默认</Text>
+                    <Text style={styles.defaultTag}>{t('conn.tagDefault')}</Text>
                   ) : null}
                 </View>
                 <Text style={styles.cardAddr}>
@@ -152,7 +159,7 @@ export function ConnectionHomeScreen() {
                         styles.autoBtnText,
                         p.id === autoProfileId && styles.autoBtnTextOn,
                       ]}>
-                      自动连接
+                      {t('conn.autoConnect')}
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
@@ -160,7 +167,7 @@ export function ConnectionHomeScreen() {
                     onPress={() =>
                       navigation.navigate('ConnectionEdit', {profileId: p.id})
                     }>
-                    <Text style={styles.editText}>编辑</Text>
+                    <Text style={styles.editText}>{t('common.edit')}</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={styles.actionBtn}
@@ -176,7 +183,7 @@ export function ConnectionHomeScreen() {
         {error ? <Text style={styles.error}>⚠ {error}</Text> : null}
 
         {state === 'reconnecting' ? (
-          <Text style={styles.reconnecting}>连接已断开，正在重连…</Text>
+          <Text style={styles.reconnecting}>{t('profile.reconnecting')}</Text>
         ) : null}
 
         {Platform.OS === 'web' && !hasDesktopBridge() ? (
@@ -188,7 +195,7 @@ export function ConnectionHomeScreen() {
               connectWebDirect();
             }}>
             <Text style={styles.directButtonText}>
-              ⚡ 浏览器直连（本机 127.0.0.1:9119）
+              {t('conn.webDirectButton')}
             </Text>
           </TouchableOpacity>
         ) : null}
@@ -197,7 +204,7 @@ export function ConnectionHomeScreen() {
           style={styles.addButton}
           activeOpacity={0.8}
           onPress={() => navigation.navigate('ConnectionEdit', {})}>
-          <Text style={styles.addButtonText}>＋ 添加配置</Text>
+          <Text style={styles.addButtonText}>{t('conn.addProfile')}</Text>
         </TouchableOpacity>
       </ScrollView>
     </View>
@@ -206,6 +213,8 @@ export function ConnectionHomeScreen() {
 
 const styles = StyleSheet.create({
   flex: {flex: 1, backgroundColor: Colors.bg},
+  langWrap: {position: 'absolute', right: 16, zIndex: 10},
+  langText: {fontSize: 15, color: Colors.text},
   container: {padding: 24, paddingTop: 60},
   logo: {
     fontSize: 34,

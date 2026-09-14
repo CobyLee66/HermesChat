@@ -9,6 +9,7 @@
 
 import {create} from 'zustand';
 
+import {t} from '../i18n';
 import {getRpc} from '../rpc/runtime';
 import type {
   ProfileAsset,
@@ -167,7 +168,7 @@ export const useProfilesStore = create<ProfilesStore>((set, get) => {
         {name, ui_meta: {nickname: value}},
       );
       if (result && result.applied && result.applied.ui_meta === false) {
-        throw new Error('昵称写入失败（服务端 ui_meta 未应用）');
+        throw new Error(t('profiles.nicknameWriteFailed'));
       }
       await get().refresh();
     },

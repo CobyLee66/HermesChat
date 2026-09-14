@@ -29,6 +29,7 @@ import {
   type ConnectionType,
 } from '../store/connection';
 import {Colors} from '../components/theme';
+import {useT} from '../i18n';
 import {hasDesktopBridge} from '../ssh/desktopHermesSsh';
 import {desktopPickTextFile} from '../desktop/desktopMedia';
 import {alertError} from '../utils/alert';
@@ -47,6 +48,7 @@ type EditRoute = RouteProp<RootStackParamList, 'ConnectionEdit'>;
 export function ConnectionEditScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<EditRoute>();
+  const t = useT();
   const {bottomPad} = useKeyboardHeight();
   const profileId = route.params?.profileId;
   const {
@@ -93,12 +95,12 @@ export function ConnectionEditScreen() {
     err ? <Text style={styles.errorText}>{err}</Text> : null;
 
   /** 切换连接类型：直连模式下 host/port 代填 gateway 默认值，SSH 亦然 */
-  const switchType = (t: ConnectionType) => {
-    if (t === form.type) {
+  const switchType = (next: ConnectionType) => {
+    if (next === form.type) {
       return;
     }
     setErrors({});
-    if (t === 'direct') {
+    if (next === 'direct') {
       patch({
         type: 'direct',
         host: form.host.trim() ? form.host : '127.0.0.1',
@@ -138,9 +140,10 @@ export function ConnectionEditScreen() {
         throw new Error(copy.copyError);
       }
       const content = await RNFS.readFile(copy.localUri, 'utf8');
-      patchClearing({privateKey: content, keyFileName: res.name ?? '已选择'}, [
-        'auth',
-      ]);
+      patchClearing(
+        {privateKey: content, keyFileName: res.name ?? t('conn.keyFileChosen')},
+        ['auth'],
+      );
     } catch (e) {
       if (
         !hasDesktopBridge() &&
@@ -150,7 +153,7 @@ export function ConnectionEditScreen() {
         return;
       }
       alertError(
-        '读取密钥文件失败',
+        t('conn.keyFileReadFailed'),
         e instanceof Error ? e.message : String(e),
       );
     }
@@ -159,14 +162,14 @@ export function ConnectionEditScreen() {
   const save = () => {
     const data: ProfileForm = {
       ...form,
-      name: form.name.trim() || form.host.trim() || '未命名配置',
+      name: form.name.trim() || form.host.trim() || t('conn.unnamedProfile'),
       host: form.host.trim(),
       username: form.username.trim(),
     };
     const errs = validateProfileForm(data);
     if (Object.keys(errs).length > 0) {
       setErrors(errs);
-      alertError('无法保存', formatProfileErrors(errs));
+      alertError(t('conn.cannotSave'), formatProfileErrors(errs));
       return;
     }
     let id = profileId ?? null;
@@ -186,17 +189,21 @@ export function ConnectionEditScreen() {
           styles.container,
           {paddingBottom: bottomPad},
         ]}>
-        <Text style={styles.label}>配置名称</Text>
+        <Text style={styles.label}>{t('conn.nameLabel')}</Text>
         <TextInput
           style={styles.input}
           value={form.name}
           onChangeText={v => patch({name: v})}
-          placeholder={form.type === 'direct' ? '例如：本机 gateway' : '例如：公司服务器'}
+          placeholder={
+            form.type === 'direct'
+              ? t('conn.namePlaceholderDirect')
+              : t('conn.namePlaceholderSsh')
+          }
           placeholderTextColor={Colors.textSecondary}
           autoCorrect={false}
         />
 
-        <Text style={styles.label}>连接类型</Text>
+        <Text style={styles.label}>{t('conn.typeLabel')}</Text>
         <View style={styles.typeRow}>
           <TouchableOpacity
             style={[styles.typeBtn, form.type === 'ssh' && styles.typeBtnActive]}
@@ -207,7 +214,7 @@ export function ConnectionEditScreen() {
                 styles.typeBtnText,
                 form.type === 'ssh' && styles.typeBtnTextActive,
               ]}>
-              SSH 隧道
+              {t('conn.typeSsh')}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -222,14 +229,14 @@ export function ConnectionEditScreen() {
                 styles.typeBtnText,
                 form.type === 'direct' && styles.typeBtnTextActive,
               ]}>
-              直连
+              {t('conn.typeDirect')}
             </Text>
           </TouchableOpacity>
         </View>
 
         {form.type === 'direct' ? (
           <>
-            <Text style={styles.label}>Gateway 主机</Text>
+            <Text style={styles.label}>{t('conn.gatewayHost')}</Text>
             <TextInput
               style={inputStyle(errors.host)}
               value={form.host}
@@ -240,7 +247,7 @@ export function ConnectionEditScreen() {
               autoCorrect={false}
             />
             {fieldError(errors.host)}
-            <Text style={styles.label}>端口</Text>
+            <Text style={styles.label}>{t('conn.port')}</Text>
             <TextInput
               style={inputStyle(errors.port)}
               value={form.port}
@@ -250,34 +257,29 @@ export function ConnectionEditScreen() {
               keyboardType="number-pad"
             />
             {fieldError(errors.port)}
-            <Text style={styles.label}>Session Token（可选）</Text>
+            <Text style={styles.label}>{t('conn.tokenLabel')}</Text>
             <TextInput
               style={styles.input}
               value={form.token}
               onChangeText={v => patch({token: v})}
-              placeholder="留空则自动从 gateway 首页提取"
+              placeholder={t('conn.tokenPlaceholder')}
               placeholderTextColor={Colors.textSecondary}
               secureTextEntry
               autoCapitalize="none"
             />
-            <Text style={styles.hint}>
-              需 gateway 已在该地址监听；局域网设备直连需 hermes serve 监听
-              0.0.0.0
-            </Text>
+            <Text style={styles.hint}>{t('conn.directHint')}</Text>
             {Platform.OS === 'web' && !hasDesktopBridge() ? (
-              <Text style={styles.hint}>
-                浏览器环境受跨源限制，仅支持本机 127.0.0.1:9119（经开发服务器代理）
-              </Text>
+              <Text style={styles.hint}>{t('conn.webDirectHint')}</Text>
             ) : null}
           </>
         ) : (
           <>
-            <Text style={styles.label}>SSH 主机</Text>
+            <Text style={styles.label}>{t('conn.sshHost')}</Text>
             <TextInput
               style={inputStyle(errors.host)}
               value={form.host}
               onChangeText={v => patchClearing({host: v}, ['host'])}
-              placeholder="例如 192.168.1.10"
+              placeholder={t('conn.hostPlaceholderSsh')}
               placeholderTextColor={Colors.textSecondary}
               autoCapitalize="none"
               autoCorrect={false}
@@ -285,7 +287,7 @@ export function ConnectionEditScreen() {
             {fieldError(errors.host)}
             <View style={styles.row}>
               <View style={styles.flex2}>
-                <Text style={styles.label}>端口</Text>
+                <Text style={styles.label}>{t('conn.port')}</Text>
                 <TextInput
                   style={inputStyle(errors.port)}
                   value={form.port}
@@ -297,12 +299,12 @@ export function ConnectionEditScreen() {
                 {fieldError(errors.port)}
               </View>
               <View style={styles.flex3}>
-                <Text style={styles.label}>用户名</Text>
+                <Text style={styles.label}>{t('conn.username')}</Text>
                 <TextInput
                   style={inputStyle(errors.username)}
                   value={form.username}
                   onChangeText={v => patchClearing({username: v}, ['username'])}
-                  placeholder="例如 root"
+                  placeholder={t('conn.usernamePlaceholder')}
                   placeholderTextColor={Colors.textSecondary}
                   autoCapitalize="none"
                   autoCorrect={false}
@@ -310,24 +312,26 @@ export function ConnectionEditScreen() {
                 {fieldError(errors.username)}
               </View>
             </View>
-            <Text style={styles.label}>密码</Text>
+            <Text style={styles.label}>{t('conn.password')}</Text>
             <TextInput
               style={inputStyle(errors.auth)}
               value={form.password}
               onChangeText={v => patchClearing({password: v}, ['auth'])}
-              placeholder="使用私钥时可留空"
+              placeholder={t('conn.passwordPlaceholder')}
               placeholderTextColor={Colors.textSecondary}
               secureTextEntry
               autoCapitalize="none"
             />
             <View style={styles.rowBetween}>
-              <Text style={styles.label}>私钥（可选，优先于密码）</Text>
+              <Text style={styles.label}>{t('conn.privateKeyLabel')}</Text>
               <TouchableOpacity
                 style={styles.smallButton}
                 onPress={pickKeyFile}
                 activeOpacity={0.8}>
                 <Text style={styles.smallButtonText} numberOfLines={1}>
-                  {form.keyFileName ? `已选: ${form.keyFileName}` : '选择密钥文件'}
+                  {form.keyFileName
+                    ? t('conn.keySelected', {name: form.keyFileName})
+                    : t('conn.pickKeyFile')}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -344,7 +348,7 @@ export function ConnectionEditScreen() {
                   ['auth'],
                 );
               }}
-              placeholder="粘贴 PEM 内容，或点上方按钮选择文件"
+              placeholder={t('conn.privateKeyPlaceholder')}
               placeholderTextColor={Colors.textSecondary}
               multiline
               autoCapitalize="none"
@@ -353,12 +357,12 @@ export function ConnectionEditScreen() {
             {fieldError(errors.auth)}
             {form.privateKey ? (
               <>
-                <Text style={styles.label}>私钥口令（可选）</Text>
+                <Text style={styles.label}>{t('conn.passphraseLabel')}</Text>
                 <TextInput
                   style={styles.input}
                   value={form.passphrase}
                   onChangeText={v => patch({passphrase: v})}
-                  placeholder="密钥有口令时填写"
+                  placeholder={t('conn.passphrasePlaceholder')}
                   placeholderTextColor={Colors.textSecondary}
                   secureTextEntry
                   autoCapitalize="none"
@@ -372,7 +376,7 @@ export function ConnectionEditScreen() {
           style={styles.button}
           onPress={save}
           activeOpacity={0.8}>
-          <Text style={styles.buttonText}>保存</Text>
+          <Text style={styles.buttonText}>{t('common.save')}</Text>
         </TouchableOpacity>
       </ScrollView>
     </View>

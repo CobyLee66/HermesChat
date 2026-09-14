@@ -33,6 +33,8 @@ import * as net from 'node:net';
 import * as path from 'node:path';
 import {Client, type ClientChannel, type ConnectConfig} from 'ssh2';
 
+import {dt} from './i18n';
+
 // ─── 窗口状态记忆 ───────────────────────────────────────────────
 
 const DEFAULT_WIDTH = 1440;
@@ -336,9 +338,11 @@ function sshConnect(cfg: ConnectRequest): Promise<{serverFingerprint: string}> {
         const stored = known[knownKey];
         if (stored && stored !== fp) {
           ssh.hostKey = fp;
-          ssh.hostKeyMismatch =
-            `HostKey has been changed（远端 ${knownKey} 指纹 ${fp}，` +
-            `本地记录 ${stored}）`;
+          ssh.hostKeyMismatch = dt('ssh.hostKeyChanged', {
+            key: knownKey,
+            fp,
+            stored,
+          });
           verify(false);
           return;
         }
@@ -369,7 +373,7 @@ function sshConnect(cfg: ConnectRequest): Promise<{serverFingerprint: string}> {
 
 function requireReadyClient(): Client {
   if (!ssh.client || !ssh.ready) {
-    throw sshError('E_NOT_CONNECTED', 'SSH 未连接');
+    throw sshError('E_NOT_CONNECTED', dt('ssh.notConnected'));
   }
   return ssh.client;
 }
@@ -410,7 +414,10 @@ function sshExec(command: string, timeoutMs: number): Promise<{
         reject(
           sshError(
             'E_EXEC_TIMEOUT',
-            `exec 超时（${timeoutMs}ms）：${command.slice(0, 80)}`,
+            dt('ssh.execTimeout', {
+              ms: timeoutMs,
+              cmd: command.slice(0, 80),
+            }),
           ),
         );
       }, timeoutMs);
@@ -435,7 +442,8 @@ function sshExec(command: string, timeoutMs: number): Promise<{
         }
         settled = true;
         clearTimeout(timer);
-        const truncated = stdoutFull && stderrFull ? '' : '（输出超过 8MiB 已截断）';
+        const truncated =
+          stdoutFull && stderrFull ? '' : dt('ssh.outputTruncated');
         resolve({
           stdout: stdout + (stdoutFull ? '' : truncated),
           stderr,
@@ -651,7 +659,7 @@ function serveStatic(req: http.IncomingMessage, res: http.ServerResponse): void 
       fs.readFile(path.join(STATIC_ROOT, 'index.html'), (err2, html) => {
         if (err2) {
           res.writeHead(404);
-          res.end('Not Found（dist-web 未构建？先运行 npm run web:build）');
+          res.end(dt('static.notFound'));
           return;
         }
         res.writeHead(200, {'content-type': CONTENT_TYPES['.html']});
@@ -673,7 +681,7 @@ function proxyApi(req: http.IncomingMessage, res: http.ServerResponse): void {
   if (!upstreamAddr) {
     appendLog('WARN', `API 503（代理上游未建立）：${req.method} ${req.url}`);
     res.writeHead(503, {'content-type': 'application/json; charset=utf-8'});
-    res.end(JSON.stringify({error: '连接未建立（SSH 隧道未建立或直连未配置）'}));
+    res.end(JSON.stringify({error: dt('proxy.notReady')}));
     return;
   }
   const headers: Record<string, string | string[] | undefined> = {...req.headers};
@@ -703,7 +711,7 @@ function proxyApi(req: http.IncomingMessage, res: http.ServerResponse): void {
     if (!res.headersSent) {
       res.writeHead(502, {'content-type': 'application/json; charset=utf-8'});
     }
-    res.end(JSON.stringify({error: '上游连接失败'}));
+    res.end(JSON.stringify({error: dt('proxy.upstreamFailed')}));
   });
   req.pipe(upstream);
 }
@@ -834,7 +842,9 @@ async function startProxyServer(): Promise<number> {
       // 端口被占，试下一个
     }
   }
-  throw new Error(`回环代理端口 ${BASE}~${BASE + RANGE - 1} 全部被占用`);
+  throw new Error(
+    dt('proxy.portsExhausted', {from: BASE, to: BASE + RANGE - 1}),
+  );
 }
 
 // ─── IPC 装配 ───────────────────────────────────────────────────
@@ -901,7 +911,7 @@ function registerIpc(): void {
           ? cfg.port
           : 0;
       if (!host || port < 1 || port > 65535) {
-        return Promise.reject(new Error('直连地址无效（host:port）'));
+        return Promise.reject(new Error(dt('direct.addrInvalid')));
       }
       const manualToken = typeof cfg?.token === 'string' ? cfg.token.trim() : '';
       appendLog('INFO', `直连请求：${host}:${port}（token：${manualToken ? '手动' : '自动提取'}）`);
@@ -910,7 +920,7 @@ function registerIpc(): void {
         try {
           const token = manualToken || (await fetchGatewayToken(host, port));
           if (!token) {
-            throw new Error('未能从 gateway 首页提取 session token，可在配置中手动填写');
+            throw new Error(dt('direct.tokenExtractFail'));
           }
           appendLog('INFO', `直连就绪：${host}:${port}`);
           return {token};
@@ -954,7 +964,7 @@ function fetchGatewayToken(
       },
     );
     req.setTimeout(timeoutMs, () =>
-      req.destroy(new Error(`连接 gateway 超时（${timeoutMs}ms）`)),
+      req.destroy(new Error(dt('direct.gatewayTimeout', {ms: timeoutMs}))),
     );
     req.on('error', err => reject(err));
   });
@@ -1018,7 +1028,7 @@ function registerDesktopIpc(): void {
         properties.push('multiSelections');
       }
       const filters = opts.images
-        ? [{name: '图片', extensions: IMAGE_EXTENSIONS}]
+        ? [{name: dt('dialog.images'), extensions: IMAGE_EXTENSIONS}]
         : undefined;
       const result = await dialog.showOpenDialog(win, {
         properties,
@@ -1043,7 +1053,7 @@ function registerDesktopIpc(): void {
     return new Promise<string>((resolve, reject) => {
       fs.readFile(resolved, (err, data) => {
         if (err) {
-          reject(new Error(`读取文件失败：${err.message}`));
+          reject(new Error(dt('desktop.readFileFailedMsg', {message: err.message})));
           return;
         }
         resolve(`data:${mime};base64,${data.toString('base64')}`);
@@ -1057,7 +1067,7 @@ function registerDesktopIpc(): void {
     return new Promise<string>((resolve, reject) => {
       fs.readFile(resolved, 'utf8', (err, data) => {
         if (err) {
-          reject(new Error(`读取文件失败：${err.message}`));
+          reject(new Error(dt('desktop.readFileFailedMsg', {message: err.message})));
           return;
         }
         resolve(data);
@@ -1109,41 +1119,41 @@ function setupMenu(): void {
     {
       label: 'HermesChat',
       submenu: [
-        {role: 'about', label: '关于 HermesChat'},
+        {role: 'about', label: dt('menu.about')},
         {type: 'separator'},
-        {role: 'hide', label: '隐藏 HermesChat'},
-        {role: 'hideOthers', label: '隐藏其他'},
-        {role: 'unhide', label: '全部显示'},
+        {role: 'hide', label: dt('menu.hide')},
+        {role: 'hideOthers', label: dt('menu.hideOthers')},
+        {role: 'unhide', label: dt('menu.unhide')},
         {type: 'separator'},
-        {role: 'quit', label: '退出 HermesChat'},
+        {role: 'quit', label: dt('menu.quit')},
       ],
     },
     {
-      label: '编辑',
+      label: dt('menu.edit'),
       submenu: [
-        {role: 'undo', label: '撤销'},
-        {role: 'redo', label: '重做'},
+        {role: 'undo', label: dt('menu.undo')},
+        {role: 'redo', label: dt('menu.redo')},
         {type: 'separator'},
-        {role: 'cut', label: '剪切'},
-        {role: 'copy', label: '拷贝'},
-        {role: 'paste', label: '粘贴'},
-        {role: 'selectAll', label: '全选'},
+        {role: 'cut', label: dt('menu.cut')},
+        {role: 'copy', label: dt('menu.copy')},
+        {role: 'paste', label: dt('menu.paste')},
+        {role: 'selectAll', label: dt('menu.selectAll')},
       ],
     },
     {
-      label: '视图',
+      label: dt('menu.view'),
       submenu: [
-        {role: 'reload', label: '重新加载'},
-        {role: 'forceReload', label: '强制重新加载'},
-        {role: 'toggleDevTools', label: '开发者工具'},
+        {role: 'reload', label: dt('menu.reload')},
+        {role: 'forceReload', label: dt('menu.forceReload')},
+        {role: 'toggleDevTools', label: dt('menu.devTools')},
       ],
     },
     {
-      label: '窗口',
+      label: dt('menu.window'),
       submenu: [
-        {role: 'minimize', label: '最小化'},
-        {role: 'zoom', label: '缩放'},
-        {role: 'close', label: '关闭窗口'},
+        {role: 'minimize', label: dt('menu.minimize')},
+        {role: 'zoom', label: dt('menu.zoom')},
+        {role: 'close', label: dt('menu.close')},
       ],
     },
   ];

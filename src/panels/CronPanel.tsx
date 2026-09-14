@@ -19,6 +19,8 @@ import {
 } from 'react-native';
 
 import {Colors} from '../components/theme';
+import {t, useT} from '../i18n';
+import type {MessageKey} from '../i18n/locales/en';
 import {alertError, confirmDialog} from '../utils/alert';
 import {
   describeRepeat,
@@ -28,31 +30,48 @@ import {
 import {isCronConflict, useCronStore} from '../store/cron';
 import type {CronJob} from '../rpc/types';
 
-/** 状态徽章配色（state 为服务端读侧派生值）。 */
-function stateBadge(state: string): {label: string; color: string; bg: string} {
+/** 状态徽章配色（state 为服务端读侧派生值；未知 state 原样展示）。 */
+function stateBadge(state: string): {
+  labelKey: MessageKey | null;
+  raw: string;
+  color: string;
+  bg: string;
+} {
   switch (state) {
     case 'scheduled':
-      return {label: '已调度', color: Colors.success, bg: '#E8F7EE'};
+      return {labelKey: 'cron.stateScheduled', raw: state, color: Colors.success, bg: '#E8F7EE'};
     case 'paused':
-      return {label: '已暂停', color: '#FF7D00', bg: '#FFF7E8'};
+      return {labelKey: 'cron.statePaused', raw: state, color: '#FF7D00', bg: '#FFF7E8'};
     case 'completed':
-      return {label: '已完成', color: Colors.textSecondary, bg: Colors.thinkingBg};
+      return {
+        labelKey: 'cron.stateCompleted',
+        raw: state,
+        color: Colors.textSecondary,
+        bg: Colors.thinkingBg,
+      };
     case 'error':
-      return {label: '出错', color: Colors.danger, bg: Colors.dangerBg};
+      return {labelKey: 'cron.stateError', raw: state, color: Colors.danger, bg: Colors.dangerBg};
     default:
-      return {label: state, color: Colors.textSecondary, bg: Colors.thinkingBg};
+      return {
+        labelKey: null,
+        raw: state,
+        color: Colors.textSecondary,
+        bg: Colors.thinkingBg,
+      };
   }
 }
 
-/** last_status 异常徽章文案（ok 不显示）。 */
-function lastStatusBadge(status: string): {label: string; color: string} | null {
+/** last_status 异常徽章（ok 不显示）。 */
+function lastStatusBadge(
+  status: string,
+): {labelKey: MessageKey; color: string} | null {
   switch (status) {
     case 'error':
-      return {label: '运行出错', color: Colors.danger};
+      return {labelKey: 'cron.statusRunError', color: Colors.danger};
     case 'delivery_failed':
-      return {label: '投递失败', color: '#FF7D00'};
+      return {labelKey: 'cron.statusDeliveryFailed', color: '#FF7D00'};
     case 'blocked_config':
-      return {label: '配置受限', color: '#FF7D00'};
+      return {labelKey: 'cron.statusBlockedConfig', color: '#FF7D00'};
     default:
       return null;
   }
@@ -61,10 +80,13 @@ function lastStatusBadge(status: string): {label: string; color: string} | null 
 /** 错误明细（优先级：漏触发 > 投递失败 > 运行错误）。 */
 function errorDetail(job: CronJob): string | null {
   if (job.last_fire_error?.detail) {
-    return `漏触发（${formatDateTime(job.last_fire_error.at)}）：${job.last_fire_error.detail}`;
+    return t('cron.missedFire', {
+      at: formatDateTime(job.last_fire_error.at),
+      detail: job.last_fire_error.detail,
+    });
   }
   if (job.last_delivery_error) {
-    return `投递失败：${job.last_delivery_error}`;
+    return t('cron.deliveryFailedDetail', {detail: job.last_delivery_error});
   }
   if (job.last_error) {
     return job.last_error;
@@ -142,6 +164,7 @@ export function CronPanel({
   onEditJob: (job: CronJob) => void;
   onOpenRuns: (job: CronJob) => void;
 }) {
+  const t = useT();
   const jobs = useCronStore(s => s.jobs);
   const loading = useCronStore(s => s.loading);
   const error = useCronStore(s => s.error);
@@ -203,14 +226,14 @@ export function CronPanel({
 
   const filterLabel =
     profileFilter === 'all'
-      ? '全部 profile'
+      ? t('cron.allProfiles')
       : profileOptions.find(o => o.key === profileFilter)?.label ?? profileFilter;
 
   const doPauseResume = (job: CronJob) => {
     setMenuJob(null);
     const action = job.state === 'paused' ? resume(job) : pause(job);
     action.catch(e =>
-      alertError('操作失败', e instanceof Error ? e.message : String(e)),
+      alertError(t('cron.opFailed'), e instanceof Error ? e.message : String(e)),
     );
   };
 
@@ -218,10 +241,10 @@ export function CronPanel({
     setMenuJob(null);
     trigger(job).catch(e => {
       if (isCronConflict(e)) {
-        alertError('任务正在运行', '上一次运行尚未结束，请稍后再试');
+        alertError(t('cron.jobRunning'), t('cron.jobRunningHint'));
       } else {
         alertError(
-          '触发失败',
+          t('cron.triggerFailed'),
           e instanceof Error ? e.message : String(e),
         );
       }
@@ -231,14 +254,14 @@ export function CronPanel({
   const doRemove = (job: CronJob) => {
     setMenuJob(null);
     void confirmDialog(
-      '删除定时任务',
-      `确定删除「${job.name}」吗？该操作不可恢复。`,
+      t('cron.deleteTitle'),
+      t('cron.deleteConfirm', {name: job.name}),
     ).then(ok => {
       if (!ok) {
         return;
       }
       remove(job).catch(e =>
-        alertError('删除失败', e instanceof Error ? e.message : String(e)),
+        alertError(t('cron.deleteFailed'), e instanceof Error ? e.message : String(e)),
       );
     });
   };
@@ -261,17 +284,17 @@ export function CronPanel({
           style={styles.pill}
           activeOpacity={0.7}
           onPress={onCreate}>
-          <Text style={styles.pillText}>＋ 新建</Text>
+          <Text style={styles.pillText}>{t('cron.new')}</Text>
         </TouchableOpacity>
       </View>
-      <Text style={styles.count}>{`定时任务（${filteredJobs.length}）`}</Text>
+      <Text style={styles.count}>{t('cron.count', {count: filteredJobs.length})}</Text>
       {loading && filteredJobs.length === 0 ? (
         <ActivityIndicator style={styles.loading} color={Colors.accent} />
       ) : error && filteredJobs.length === 0 ? (
         <View style={styles.emptyWrap}>
-          <Text style={styles.error}>加载失败：{error}</Text>
+          <Text style={styles.error}>{t('cron.loadFailed', {error})}</Text>
           <TouchableOpacity onPress={() => refresh()} style={styles.retryBtn}>
-            <Text style={styles.retryText}>重试</Text>
+            <Text style={styles.retryText}>{t('cron.retry')}</Text>
           </TouchableOpacity>
         </View>
       ) : (
@@ -282,7 +305,7 @@ export function CronPanel({
           onRefresh={() => refresh()}
           ItemSeparatorComponent={RowSeparator}
           ListEmptyComponent={
-            <Text style={styles.empty}>暂无定时任务</Text>
+            <Text style={styles.empty}>{t('cron.empty')}</Text>
           }
           renderItem={({item}) => (
             <CronJobRow
@@ -304,7 +327,7 @@ export function CronPanel({
           </TouchableWithoutFeedback>
           <View style={[styles.menu, {top: menuTop}]}>
             <MenuOption
-              label="全部 profile"
+              label={t('cron.allProfiles')}
               selected={profileFilter === 'all'}
               onPick={() => {
                 setProfileFilter('all');
@@ -369,6 +392,7 @@ function MenuJobModal({
   onRuns: (job: CronJob) => void;
   onRemove: (job: CronJob) => void;
 }) {
+  const t = useT();
   return (
     <Modal
       visible={job != null}
@@ -384,18 +408,26 @@ function MenuJobModal({
             {job ? (
               <>
                 <MenuOption
-                  label={job.state === 'paused' ? '恢复调度' : '暂停调度'}
+                  label={
+                    job.state === 'paused'
+                      ? t('cron.resumeSchedule')
+                      : t('cron.pauseSchedule')
+                  }
                   disabled={busy}
                   onPick={() => onPauseResume(job)}
                 />
                 <MenuOption
-                  label={triggering ? '正在运行…' : '立即运行'}
+                  label={triggering ? t('cron.runningNow') : t('cron.runNow')}
                   disabled={triggering || busy}
                   onPick={() => onTrigger(job)}
                 />
-                <MenuOption label="运行历史" onPick={() => onRuns(job)} />
-                <MenuOption label="编辑" onPick={() => onEdit(job)} />
-                <MenuOption label="删除" danger onPick={() => onRemove(job)} />
+                <MenuOption label={t('cron.runs')} onPick={() => onRuns(job)} />
+                <MenuOption label={t('common.edit')} onPick={() => onEdit(job)} />
+                <MenuOption
+                  label={t('common.delete')}
+                  danger
+                  onPick={() => onRemove(job)}
+                />
               </>
             ) : null}
           </View>
@@ -420,6 +452,7 @@ function CronJobRow({
   onOpen: () => void;
   onMenu: () => void;
 }) {
+  const t = useT();
   const badge = stateBadge(job.state);
   const status = job.last_status ? lastStatusBadge(job.last_status) : null;
   const detail = errorDetail(job);
@@ -435,7 +468,7 @@ function CronJobRow({
             <ActivityIndicator size="small" color={Colors.accent} style={styles.rowSpinner} />
           ) : (
             <Text style={[styles.stateBadge, {color: badge.color, backgroundColor: badge.bg}]}>
-              {badge.label}
+              {badge.labelKey ? t(badge.labelKey) : badge.raw}
             </Text>
           )}
           {showProfile && job.profile ? (
@@ -457,14 +490,17 @@ function CronJobRow({
         </View>
         {status ? (
           <Text style={[styles.statusLine, {color: status.color}]}>
-            {status.label}
+            {t(status.labelKey)}
           </Text>
         ) : null}
         <Text style={styles.schedule} numberOfLines={1}>
           {`${scheduleText} · ${describeRepeat(job.repeat)}`}
         </Text>
         <Text style={styles.times} numberOfLines={1}>
-          {`下次 ${formatDateTime(job.next_run_at)}    上次 ${formatDateTime(job.last_run_at)}`}
+          {t('cron.nextLastRun', {
+            next: formatDateTime(job.next_run_at),
+            last: formatDateTime(job.last_run_at),
+          })}
         </Text>
         {job.prompt ? (
           <Text style={styles.preview} numberOfLines={1}>

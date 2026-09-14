@@ -14,6 +14,7 @@ import {ChatHeaderTitle} from '../components/ChatHeaderTitle';
 import {SearchBar} from '../components/SearchBar';
 import {SlashSuggest} from '../components/SlashSuggest';
 import {Colors} from '../components/theme';
+import {useT} from '../i18n';
 import {ChatInputBar} from '../panels/ChatInputBar';
 import {ChatOverlays, type ChatOverlaysState} from '../panels/ChatOverlays';
 import {
@@ -33,6 +34,7 @@ type Rt = RouteProp<RootStackParamList, 'Chat'>;
 export function ChatScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Rt>();
+  const t = useT();
   const {sessionId, profile, title} = route.params;
 
   const chat = useChatStore(s => s.bySession[sessionId]);
@@ -145,7 +147,10 @@ export function ChatScreen() {
       title: '',
       headerTitleAlign: 'center',
       headerTitle: () => (
-        <ChatHeaderTitle sessionId={sessionId} title={title || '会话'} />
+          <ChatHeaderTitle
+            sessionId={sessionId}
+            title={title || t('chat.defaultTitle')}
+          />
       ),
       headerRight: () => (
         <TouchableOpacity
@@ -155,7 +160,7 @@ export function ChatScreen() {
         </TouchableOpacity>
       ),
     });
-  }, [navigation, sessionId, title]);
+  }, [navigation, sessionId, title, t]);
 
   // foreign 会话首次发送完成派生：切到派生出的 own 会话（事件流都走新 sid）
   useEffect(() => {
@@ -168,24 +173,22 @@ export function ChatScreen() {
     <View style={styles.container}>
       {connState === 'reconnecting' ? (
         <View style={styles.banner}>
-          <Text style={styles.bannerText}>连接已断开，正在重连…</Text>
+          <Text style={styles.bannerText}>{t('profile.reconnecting')}</Text>
         </View>
       ) : null}
       {chat?.resumeFailed ? (
         <View style={styles.banner}>
-          <Text style={styles.bannerText}>会话已被服务端回收，请返回重新进入</Text>
+          <Text style={styles.bannerText}>{t('chat.sessionRecycledBack')}</Text>
         </View>
       ) : null}
       {foreign ? (
         <View style={styles.bannerGray}>
-          <Text style={styles.bannerGrayText}>
-            QQ 来源会话 · 发送消息将派生到当前 profile 继续
-          </Text>
+          <Text style={styles.bannerGrayText}>{t('chat.foreignBanner')}</Text>
         </View>
       ) : null}
       {forking ? (
         <View style={styles.bannerGray}>
-          <Text style={styles.bannerGrayText}>正在派生到当前 profile…</Text>
+          <Text style={styles.bannerGrayText}>{t('chat.forkingBanner')}</Text>
         </View>
       ) : null}
       {search.visible ? (
@@ -193,7 +196,7 @@ export function ChatScreen() {
           value={search.query}
           onChangeText={search.setQuery}
           onClose={search.hide}
-          placeholder="查找聊天记录"
+          placeholder={t('desktop.searchPlaceholder')}
           total={search.total}
           activeIndex={search.activeIndex}
           onPrev={search.onPrev}
@@ -254,14 +257,14 @@ export function ChatScreen() {
                 activeOpacity={0.8}
                 onPress={onCopyAll}>
                 <Text style={styles.selectCopyText}>
-                  {copied ? '已复制 ✓' : '复制全部'}
+                  {copied ? t('chat.copied') : t('chat.copyAll')}
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.selectClose}
                 activeOpacity={0.8}
                 onPress={closeTextSelect}>
-                <Text style={styles.selectCloseText}>关闭</Text>
+                <Text style={styles.selectCloseText}>{t('chat.close')}</Text>
               </TouchableOpacity>
             </View>
           </View>

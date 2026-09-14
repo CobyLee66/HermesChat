@@ -20,6 +20,7 @@ import {
 
 import {Bubble} from '../components/Bubble';
 import {Colors} from '../components/theme';
+import {useT} from '../i18n';
 import {getSessionMessages, projectRunMessages} from '../rpc/restSessions';
 import type {CronRunRow, ProjectedMessage} from '../rpc/types';
 import {useConnectionStore} from '../store/connection';
@@ -43,6 +44,7 @@ export function CronRunDetailPanel({
   /** 提供则显示「在聊天中打开」入口 */
   onOpenChat?: () => void;
 }) {
+  const t = useT();
   const [messages, setMessages] = useState<ProjectedMessage[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +55,7 @@ export function CronRunDetailPanel({
     try {
       const {httpUrl, token} = useConnectionStore.getState();
       if (!httpUrl) {
-        throw new Error('未连接到 gateway');
+        throw new Error(t('cron.notConnected'));
       }
       const result = await getSessionMessages(
         httpUrl,
@@ -67,7 +69,7 @@ export function CronRunDetailPanel({
       setError(e instanceof Error ? e.message : String(e));
       setLoading(false);
     }
-  }, [run.id, run.profile]);
+  }, [run.id, run.profile, t]);
 
   useEffect(() => {
     void load();
@@ -79,9 +81,9 @@ export function CronRunDetailPanel({
   if (error && messages === null) {
     return (
       <View style={styles.centerWrap}>
-        <Text style={styles.error}>加载失败：{error}</Text>
+        <Text style={styles.error}>{t('cron.loadFailed', {error})}</Text>
         <TouchableOpacity onPress={() => void load()} style={styles.retryBtn}>
-          <Text style={styles.retryText}>重试</Text>
+          <Text style={styles.retryText}>{t('cron.retry')}</Text>
         </TouchableOpacity>
       </View>
     );
@@ -96,31 +98,32 @@ export function CronRunDetailPanel({
         <View style={styles.metaCard}>
           <View style={styles.metaTop}>
             <Text style={styles.metaName} numberOfLines={1}>
-              {jobName || run.title || '运行记录'}
+              {jobName || run.title || t('cron.runRecord')}
             </Text>
             {run.is_active ? (
-              <Text style={styles.activeBadge}>进行中</Text>
+              <Text style={styles.activeBadge}>{t('cron.runActive')}</Text>
             ) : (
-              <Text style={styles.doneBadge}>已结束</Text>
+              <Text style={styles.doneBadge}>{t('cron.runDone')}</Text>
             )}
           </View>
           <Text style={styles.metaLine}>
-            {`开始 ${formatEpoch(run.started_at)}    最近活动 ${formatEpoch(
-              run.last_active || run.started_at,
-            )}`}
+            {t('cron.runTimespan', {
+              start: formatEpoch(run.started_at),
+              last: formatEpoch(run.last_active || run.started_at),
+            })}
           </Text>
           {onOpenChat ? (
             <TouchableOpacity
               style={styles.chatBtn}
               activeOpacity={0.7}
               onPress={onOpenChat}>
-              <Text style={styles.chatBtnText}>在聊天中打开</Text>
+              <Text style={styles.chatBtnText}>{t('cron.openInChat')}</Text>
             </TouchableOpacity>
           ) : null}
         </View>
       }
       ListEmptyComponent={
-        <Text style={styles.empty}>该次运行没有产生对话内容</Text>
+        <Text style={styles.empty}>{t('cron.runEmpty')}</Text>
       }
       renderItem={({item}) => <TranscriptItem msg={item} />}
     />

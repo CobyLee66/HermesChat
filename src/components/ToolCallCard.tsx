@@ -7,6 +7,7 @@ import {
   parseDiffLines,
   type DiffLine,
 } from '../rpc/diffText';
+import {useT} from '../i18n';
 import type {ToolCallBlock} from '../rpc/types';
 import {Colors} from './theme';
 
@@ -34,12 +35,19 @@ const MAX_DIFF_LINES = 300;
  * dashboard 的展示口径——+/- 行着色、@@ 与文件头弱化、行首保留 +/- 标记）。
  */
 function DiffPanel({diff}: {diff: string}) {
+  const t = useT();
   const lines = useMemo(() => {
     const parsed = parseDiffLines(diff);
     return parsed.length > MAX_DIFF_LINES
-      ? [...parsed.slice(0, MAX_DIFF_LINES), {kind: 'context' as const, text: `… 已截断（共 ${parsed.length} 行）`}]
+      ? [
+          ...parsed.slice(0, MAX_DIFF_LINES),
+          {
+            kind: 'context' as const,
+            text: t('chat.diffTruncated', {count: parsed.length}),
+          },
+        ]
       : parsed;
-  }, [diff]);
+  }, [diff, t]);
   return (
     <View style={styles.diffWrap}>
       {lines.map((line, i) => (
@@ -77,6 +85,7 @@ function DiffRow({line}: {line: DiffLine}) {
 /** 工具调用卡片：名称 + 参数预览 + 状态；点击展开 args / result / diff。 */
 export function ToolCallCard({tool}: Props) {
   const [expanded, setExpanded] = useState(false);
+  const t = useT();
   const running = tool.status === 'running';
   const title = tool.context || argsPreview(tool.args);
   const diff = tool.inlineDiff;
@@ -133,16 +142,16 @@ export function ToolCallCard({tool}: Props) {
           {diff ? <DiffPanel diff={diff} /> : null}
           {tool.args && Object.keys(tool.args).length > 0 ? (
             <>
-              <Text style={styles.sectionTitle}>参数</Text>
+              <Text style={styles.sectionTitle}>{t('tool.args')}</Text>
               <Text style={styles.mono}>{JSON.stringify(tool.args, null, 2)}</Text>
             </>
           ) : null}
           {!diff && tool.result ? (
             <>
-              <Text style={styles.sectionTitle}>结果</Text>
+              <Text style={styles.sectionTitle}>{t('tool.result')}</Text>
               <Text style={styles.mono} numberOfLines={60}>
                 {tool.result.length > 4000
-                  ? tool.result.slice(0, 4000) + '\n…（截断）'
+                  ? tool.result.slice(0, 4000) + t('chat.outputTruncated')
                   : tool.result}
               </Text>
             </>

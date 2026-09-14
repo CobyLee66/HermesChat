@@ -5,6 +5,7 @@
 
 import {useEffect, useRef} from 'react';
 
+import {t} from '../i18n';
 import {useChatStore} from '../store/chat';
 import {desktopNotify} from './desktopMedia';
 
@@ -24,7 +25,7 @@ export function useCompleteNotifications(enabled: boolean): void {
         const prev = prevMap.get(sid) ?? false;
         const now = st.busy ?? false;
         if (prev && !now && hidden) {
-          desktopNotify('Hermes', '会话回复已完成');
+          desktopNotify('Hermes', t('notify.replyDone'));
         }
         prevMap.set(sid, now);
       }

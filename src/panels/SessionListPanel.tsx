@@ -19,6 +19,8 @@ import {
 import {Avatar} from '../components/Avatar';
 import {Colors} from '../components/theme';
 import {SearchBar} from '../components/SearchBar';
+import {useT} from '../i18n';
+import type {MessageKey} from '../i18n/locales/en';
 import {useProfilesStore} from '../store/profiles';
 import {useSessionsStore} from '../store/sessions';
 import {alertError} from '../utils/alert';
@@ -54,15 +56,18 @@ interface ContextMenuEventLike {
   preventDefault?: () => void;
 }
 
-const FILTER_OPTIONS: {key: SessionFilterCategory; label: string}[] = [
-  {key: 'chats', label: '聊天'},
-  {key: 'automation', label: '自动化'},
-  {key: 'all', label: '全部'},
+const FILTER_OPTIONS: {
+  key: SessionFilterCategory;
+  labelKey: MessageKey;
+}[] = [
+  {key: 'chats', labelKey: 'session.filterChats'},
+  {key: 'automation', labelKey: 'session.filterAutomation'},
+  {key: 'all', labelKey: 'session.filterAll'},
 ];
 
-const SORT_OPTIONS: {key: SessionSortMode; label: string}[] = [
-  {key: 'recent', label: '最近消息'},
-  {key: 'created', label: '创建时间'},
+const SORT_OPTIONS: {key: SessionSortMode; labelKey: MessageKey}[] = [
+  {key: 'recent', labelKey: 'session.sortRecent'},
+  {key: 'created', labelKey: 'session.sortCreated'},
 ];
 
 /** 顶部打开中的下拉（同时只开一个） */
@@ -148,6 +153,7 @@ export function SessionListPanel({
   /** 桌面右键会话行（web 专用；手机不传，长按删除行为不变） */
   onRowContextMenu?: (row: SessionListRow, pos: RowContextMenuPos) => void;
 }) {
+  const t = useT();
   const nicknameText = useProfileNickname(profile);
   const avatarUri = useProfilesStore(s => s.avatars[profile]);
   const sessions = useSessionsStore(s => s.byProfile[profile] ?? EMPTY_SESSIONS);
@@ -199,9 +205,10 @@ export function SessionListPanel({
     return () => sub.remove();
   }, [menuOpen, searchOpen, closeSearch]);
 
-  const filterLabel =
-    FILTER_OPTIONS.find(f => f.key === filter)?.label ?? filter;
-  const sortLabel = SORT_OPTIONS.find(o => o.key === sortMode)?.label ?? sortMode;
+  const filterEntry = FILTER_OPTIONS.find(f => f.key === filter);
+  const filterLabel = filterEntry ? t(filterEntry.labelKey) : filter;
+  const sortEntry = SORT_OPTIONS.find(o => o.key === sortMode);
+  const sortLabel = sortEntry ? t(sortEntry.labelKey) : sortMode;
 
   const filteredSessions = useMemo(
     () =>
@@ -223,10 +230,10 @@ export function SessionListPanel({
         const opened = await openSessionFlow(profile, row);
         onOpenSession(opened);
       } catch (e) {
-        alertError('打开会话失败', e instanceof Error ? e.message : String(e));
+        alertError(t('session.openFailed'), e instanceof Error ? e.message : String(e));
       }
     },
-    [onOpenSession, profile],
+    [onOpenSession, profile, t],
   );
 
   const onDelete = useCallback(
@@ -263,7 +270,7 @@ export function SessionListPanel({
             style={[styles.pill, searchOpen && styles.searchPillActive]}
             activeOpacity={0.7}
             onPress={searchOpen ? closeSearch : openSearch}>
-            <Text style={styles.pillText}>搜索</Text>
+            <Text style={styles.pillText}>{t('search.placeholder')}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -273,7 +280,7 @@ export function SessionListPanel({
             value={searchQuery}
             onChangeText={setSearchQuery}
             onClose={closeSearch}
-            placeholder="搜索会话标题 / 摘要"
+            placeholder={t('session.searchPlaceholder')}
           />
         </View>
       ) : null}
@@ -286,10 +293,10 @@ export function SessionListPanel({
         ListEmptyComponent={
           <Text style={styles.empty}>
             {sessions.length === 0
-              ? '还没有会话，点「新会话」开始'
+              ? t('session.emptyAll')
               : searchNoHit
-                ? '未找到匹配的会话'
-                : '该分类下暂无会话'}
+                ? t('session.emptySearch')
+                : t('session.emptyFilter')}
           </Text>
         }
         renderItem={({item}) => (
@@ -321,7 +328,7 @@ export function SessionListPanel({
               ? FILTER_OPTIONS.map(f => (
                   <MenuOption
                     key={f.key}
-                    label={f.label}
+                    label={t(f.labelKey)}
                     selected={filter === f.key}
                     onPick={() => {
                       setFilter(f.key);
@@ -332,7 +339,7 @@ export function SessionListPanel({
               : SORT_OPTIONS.map(o => (
                   <MenuOption
                     key={o.key}
-                    label={o.label}
+                    label={t(o.labelKey)}
                     selected={sortMode === o.key}
                     onPick={() => {
                       setSortMode(o.key);
@@ -366,6 +373,7 @@ function SessionRow({
   onDelete: (sessionId: string, title: string) => void;
   onRowContextMenu?: (row: SessionListRow, pos: RowContextMenuPos) => void;
 }) {
+  const t = useT();
   // web 右键：直接在宿主节点挂原生监听（React 的 onContextMenu 委托在
   // 本项目 web 环境实测不派发）；原生端无该能力，effect 内自然跳过
   const hostRef = useRef<RowHostNode | null>(null);
@@ -401,7 +409,7 @@ function SessionRow({
       <View style={styles.rowBody}>
         <View style={styles.rowTop}>
           <Text style={styles.title} numberOfLines={1}>
-            {item.title || '未命名会话'}
+            {item.title || t('session.untitled')}
           </Text>
           {item.namespaced ? <Text style={styles.nsBadge}>QQ</Text> : null}
           {isAutomationSource(item.source) ? (
@@ -416,7 +424,8 @@ function SessionRow({
           </Text>
         </View>
         <Text style={styles.preview} numberOfLines={1}>
-          {item.preview || `${item.message_count} 条消息`}
+          {item.preview ||
+            t('session.messageCount', {count: item.message_count})}
         </Text>
       </View>
     </TouchableOpacity>

@@ -9,6 +9,7 @@
 
 import React from 'react';
 
+import {useT} from '../i18n';
 import {HeaderTitleView} from './HeaderTitle';
 import {useChatStore} from '../store/chat';
 
@@ -31,7 +32,8 @@ export const ChatHeaderTitle = React.memo(function ChatHeaderTitle({
 }) {
   const info = useChatStore(s => s.bySession[sessionId]?.info);
   const storeTitle = useChatStore(s => s.bySession[sessionId]?.title);
-  const shownTitle = storeTitle || title || '会话';
+  const t = useT();
+  const shownTitle = storeTitle || title || t('chat.defaultTitle');
   const used = info?.usage?.context_used;
   const max = info?.usage?.context_max;
   const parts: string[] = [];

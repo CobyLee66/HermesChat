@@ -6,6 +6,7 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {Colors} from '../components/theme';
 import {HeaderTitleView} from '../components/HeaderTitle';
+import {useT} from '../i18n';
 import {SessionListPanel, useProfileNickname} from '../panels/SessionListPanel';
 import {createSessionFlow, type OpenedSession} from '../panels/sessionFlows';
 import {alertError} from '../utils/alert';
@@ -17,6 +18,7 @@ type Rt = RouteProp<RootStackParamList, 'SessionList'>;
 export function SessionListScreen() {
   const navigation = useNavigation<Nav>();
   const route = useRoute<Rt>();
+  const t = useT();
   const {profile} = route.params;
   const insets = useSafeAreaInsets();
   const nicknameText = useProfileNickname(profile);
@@ -30,9 +32,9 @@ export function SessionListScreen() {
         title: opened.title,
       });
     } catch (e) {
-      alertError('新建会话失败', e instanceof Error ? e.message : String(e));
+      alertError(t('desktop.newSessionFailed'), e instanceof Error ? e.message : String(e));
     }
-  }, [navigation, profile]);
+  }, [navigation, profile, t]);
 
   useEffect(() => {
     // title 置空 + 自定义 headerTitle：清零安卓原生 toolbar 的 72dp 标题缩进
@@ -42,11 +44,11 @@ export function SessionListScreen() {
       headerTitle: () => <HeaderTitleView title={nicknameText} />,
       headerRight: () => (
         <TouchableOpacity activeOpacity={0.7} onPress={onNewSession}>
-          <Text style={styles.newSessionText}>新会话</Text>
+          <Text style={styles.newSessionText}>{t('session.newTitle')}</Text>
         </TouchableOpacity>
       ),
     });
-  }, [navigation, nicknameText, onNewSession]);
+  }, [navigation, nicknameText, onNewSession, t]);
 
   const onOpenSession = useCallback(
     (opened: OpenedSession) => {

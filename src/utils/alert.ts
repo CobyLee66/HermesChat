@@ -8,6 +8,7 @@
 
 import {Alert, Platform} from 'react-native';
 
+import {t} from '../i18n';
 import {hasDesktopBridge} from '../ssh/desktopHermesSsh';
 import {enqueueAlert, enqueueConfirm} from '../ui/dialogStore';
 
@@ -45,8 +46,16 @@ export function confirmDialog(title: string, message: string): Promise<boolean> 
   }
   return new Promise(resolve => {
     Alert.alert(title, message, [
-      {text: '取消', style: 'cancel', onPress: () => resolve(false)},
-      {text: '确定', style: 'destructive', onPress: () => resolve(true)},
+      {
+        text: t('common.cancel'),
+        style: 'cancel',
+        onPress: () => resolve(false),
+      },
+      {
+        text: t('common.ok'),
+        style: 'destructive',
+        onPress: () => resolve(true),
+      },
     ]);
   });
 }

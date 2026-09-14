@@ -27,6 +27,7 @@ import {BusyTicker} from '../components/BusyTicker';
 import {IconImage} from '../components/icons';
 import {Colors} from '../components/theme';
 import {VoiceButton} from '../components/VoiceButton';
+import {useT} from '../i18n';
 import {useChatStore} from '../store/chat';
 import {useConnectionStore} from '../store/connection';
 import {alertError} from '../utils/alert';
@@ -67,6 +68,7 @@ export function ChatInputBar({
   /** 桌面：Enter 发送 / Shift+Enter 换行（手机不传，保持换行语义） */
   enterToSend?: boolean;
 }) {
+  const t = useT();
   const chat = useChatStore(s => s.bySession[sessionId]);
   const {interrupt, attachImages, removeAttachment, attachFile} = useChatStore();
   const connState = useConnectionStore(s => s.state);
@@ -142,11 +144,11 @@ export function ChatInputBar({
       if (!pickers && isErrorWithCode(e) && e.code === errorCodes.OPERATION_CANCELED) {
         return;
       }
-      alertError('选择图片失败', e instanceof Error ? e.message : String(e));
+      alertError(t('input.pickImageFailed'), e instanceof Error ? e.message : String(e));
     } finally {
       setAttaching(false);
     }
-  }, [attachImages, onAttachPanelChange, pickers, sessionId]);
+  }, [attachImages, onAttachPanelChange, pickers, sessionId, t]);
 
   /** 附件面板：文件（单选 → file.attach → @file: 引用追加到输入框）。 */
   const onPickFile = useCallback(async () => {
@@ -169,11 +171,11 @@ export function ChatInputBar({
       if (!pickers && isErrorWithCode(e) && e.code === errorCodes.OPERATION_CANCELED) {
         return;
       }
-      alertError('添加文件失败', e instanceof Error ? e.message : String(e));
+      alertError(t('input.addFileFailed'), e instanceof Error ? e.message : String(e));
     } finally {
       setAttaching(false);
     }
-  }, [attachFile, input, onAttachPanelChange, onInputChange, pickers, sessionId]);
+  }, [attachFile, input, onAttachPanelChange, onInputChange, pickers, sessionId, t]);
 
   /** 语音识别文本：追加到输入框末尾（可再编辑）。 */
   const onVoiceText = useCallback(
@@ -231,7 +233,11 @@ export function ChatInputBar({
           disabled={connState !== 'ready'}
           activeOpacity={0.7}
           hitSlop={6}
-          accessibilityLabel={attachPanelOpen ? '收起附件面板' : '打开附件面板'}>
+          accessibilityLabel={
+            attachPanelOpen
+              ? t('input.attachPanelCollapse')
+              : t('input.attachPanelOpen')
+          }>
           <IconImage
             name={attachPanelOpen ? 'minus' : 'plus'}
             size={20}
@@ -244,7 +250,7 @@ export function ChatInputBar({
           value={input}
           onChangeText={onInputChange}
           onKeyPress={handleKeyPress}
-          placeholder="发消息…"
+          placeholder={t('input.placeholder')}
           placeholderTextColor={Colors.textSecondary}
           multiline
           editable={connState === 'ready'}
@@ -254,7 +260,7 @@ export function ChatInputBar({
             style={styles.interruptBtn}
             onPress={() => interrupt(sessionId)}
             activeOpacity={0.8}>
-            <Text style={styles.interruptText}>中断</Text>
+            <Text style={styles.interruptText}>{t('input.interrupt')}</Text>
           </TouchableOpacity>
         ) : (
           <TouchableOpacity
@@ -269,7 +275,7 @@ export function ChatInputBar({
             }
             onPress={onSend}
             activeOpacity={0.8}>
-            <Text style={styles.sendText}>发送</Text>
+            <Text style={styles.sendText}>{t('input.send')}</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -280,7 +286,7 @@ export function ChatInputBar({
             onPress={onPickImages}
             disabled={attaching}
             activeOpacity={0.7}
-            accessibilityLabel="发送图片">
+            accessibilityLabel={t('input.sendImage')}>
             <IconImage name="photo" size={26} />
           </TouchableOpacity>
           <TouchableOpacity
@@ -288,7 +294,7 @@ export function ChatInputBar({
             onPress={onPickFile}
             disabled={attaching}
             activeOpacity={0.7}
-            accessibilityLabel="发送文件">
+            accessibilityLabel={t('input.sendFile')}>
             <IconImage name="paperclip" size={26} />
           </TouchableOpacity>
           <VoiceButton profile={profile} onText={onVoiceText} />
@@ -296,7 +302,7 @@ export function ChatInputBar({
       ) : null}
       {attaching ? (
         <View style={styles.attachingBar}>
-          <Text style={styles.attachingText}>附件上传中…</Text>
+          <Text style={styles.attachingText}>{t('input.attaching')}</Text>
         </View>
       ) : null}
     </View>

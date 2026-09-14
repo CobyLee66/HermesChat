@@ -20,6 +20,7 @@ import {
 import {getRpc} from '../rpc/runtime';
 import type {RpcClient} from '../rpc/client';
 import type {CronJob} from '../rpc/types';
+import {t} from '../i18n';
 import {useConnectionStore} from './connection';
 
 const CHANGE_DEBOUNCE_MS = 1000;
@@ -53,7 +54,7 @@ interface CronStore {
 function connArgs(): {httpUrl: string; token: string} {
   const {httpUrl, token} = useConnectionStore.getState();
   if (!httpUrl) {
-    throw new Error('未连接到 gateway');
+    throw new Error(t('cron.notConnected'));
   }
   return {httpUrl, token};
 }

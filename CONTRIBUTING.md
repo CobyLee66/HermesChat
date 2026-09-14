@@ -38,15 +38,15 @@ npm run web           # 浏览器调试（http://localhost:5188，可直连本�
 - 通过 PR 合并，合并后分支自动删除
 - 只有需要同时维护旧版本时才会出现 `release/x.y` 长期分支
 
-提交信息用**中文**，格式：
+Commit messages are written in **English** (since 2026-09-14; previously Chinese), in the form:
 
 ```
-<类型>：<一句话说清做了什么>
+<type>: <one-line summary of what changed>
 
-（可选）正文：为什么这么做、有什么副作用
+(optional) body: why the change was made, side effects to watch
 ```
 
-类型用 `feat` / `fix` / `docs` / `refactor` / `perf` / `test` / `chore` / `build`。
+Use one of these types: `feat` / `fix` / `docs` / `refactor` / `perf` / `test` / `chore` / `build`.
 
 ## 贡献者声明（DCO）
 

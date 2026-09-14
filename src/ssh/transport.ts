@@ -6,6 +6,7 @@
 
 import * as HermesSsh from './HermesSsh';
 import type {SshConfig} from './HermesSsh';
+import {t} from '../i18n';
 
 export type {SshConfig} from './HermesSsh';
 
@@ -54,7 +55,7 @@ export class SshTunnelTransport implements Transport {
 
   async connect(): Promise<TransportResult> {
     if (!HermesSsh.isAvailable) {
-      throw new Error('SSH 原生模块不可用（需 Android 构建）');
+      throw new Error(t('ssh.moduleUnavailable'));
     }
 
     // 非主动断开 → 通知上层（重建隧道 + WS）
@@ -100,7 +101,7 @@ export class SshTunnelTransport implements Transport {
     }
 
     if (!token) {
-      throw new Error('未能获取远端 session token');
+      throw new Error(t('ssh.tokenNotFound'));
     }
 
     // §3.5 本地端口转发
@@ -125,10 +126,7 @@ export class SshTunnelTransport implements Transport {
     );
     const bin = probe.stdout.trim().split('\n')[0]?.trim() ?? '';
     if (!bin) {
-      throw new Error(
-        '远端未找到 hermes 可执行文件：PATH、登录 shell 与常见安装目录' +
-          '（~/.local/bin、~/.hermes/bin、/usr/local/bin、/opt/homebrew/bin）均无。',
-      );
+      throw new Error(t('ssh.hermesNotFound'));
     }
     return bin;
   }
@@ -149,7 +147,7 @@ export class SshTunnelTransport implements Transport {
         fn();
       };
       const timer = setTimeout(
-        () => finish(() => reject(new Error('等待 HERMES_BACKEND_READY 超时'))),
+        () => finish(() => reject(new Error(t('ssh.readyTimeout')))),
         timeoutMs,
       );
       const unsubOut = HermesSsh.onStdout(taskId, line => {
@@ -164,7 +162,10 @@ export class SshTunnelTransport implements Transport {
         finish(() =>
           reject(
             new Error(
-              `远端 hermes serve 退出 (code=${exitCode})：${buffer.slice(-500)}`,
+              t('ssh.serveExited', {
+                code: exitCode,
+                tail: buffer.slice(-500),
+              }),
             ),
           ),
         ),

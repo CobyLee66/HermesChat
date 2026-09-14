@@ -8,6 +8,7 @@ import {create} from 'zustand';
 import {TimelineAggregator, type InflightSnapshot} from '../rpc/aggregator';
 import {getRpc} from '../rpc/runtime';
 import {executeSlash, looksLikeSlashCommand, parseSlash} from '../rpc/slash';
+import {t} from '../i18n';
 import type {
   ApprovalChoice,
   ApprovalRequestPayload,
@@ -286,7 +287,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
       await getRpc().call('prompt.submit', {session_id: sid, text});
     } catch (e) {
       agg.applyEvent('error', {
-        message: `发送失败: ${e instanceof Error ? e.message : String(e)}`,
+        message: t('chat.sendFailed', {
+          message: e instanceof Error ? e.message : String(e),
+        }),
       });
       snapshot(sid, {busy: false});
     }
@@ -678,7 +681,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             .getState()
             .list.find(p => p.name === foreign.hostProfile)?.path;
           if (!exec || !hostPath) {
-            throw new Error('需要 SSH 连接才能读取该会话的历史');
+            throw new Error(t('chat.sshRequiredForHistory'));
           }
           const history = await fetchRemoteHistory(
             exec,
@@ -734,7 +737,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
         }
       } catch (e) {
         aggFor(sid).applyEvent('error', {
-          message: `派生到当前 profile 失败: ${e instanceof Error ? e.message : String(e)}`,
+          message: t('chat.forkFailed', {
+            message: e instanceof Error ? e.message : String(e),
+          }),
         });
         snapshot(sid, {forking: false});
       }
@@ -769,7 +774,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
           });
         } catch (e) {
           aggFor(sid).applyEvent('error', {
-            message: `图片上传失败: ${e instanceof Error ? e.message : String(e)}`,
+            message: t('chat.imageUploadFailed', {
+              message: e instanceof Error ? e.message : String(e),
+            }),
           });
           snapshot(sid);
         }
@@ -795,7 +802,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
         await getRpc().call('image.detach', {session_id: sid, path});
       } catch (e) {
         aggFor(sid).applyEvent('error', {
-          message: `移除图片失败: ${e instanceof Error ? e.message : String(e)}`,
+          message: t('chat.imageRemoveFailed', {
+            message: e instanceof Error ? e.message : String(e),
+          }),
         });
         snapshot(sid);
       }
@@ -816,7 +825,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
         await getRpc().call('session.interrupt', {session_id: sid});
       } catch (e) {
         aggFor(sid).applyEvent('error', {
-          message: `中断失败: ${e instanceof Error ? e.message : String(e)}`,
+          message: t('chat.interruptFailed', {
+            message: e instanceof Error ? e.message : String(e),
+          }),
         });
         snapshot(sid);
       }
@@ -835,7 +846,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
         });
       } catch (e) {
         agg.applyEvent('error', {
-          message: `审批应答失败: ${e instanceof Error ? e.message : String(e)}`,
+          message: t('chat.approvalFailed', {
+            message: e instanceof Error ? e.message : String(e),
+          }),
         });
         snapshot(sid);
       }
@@ -855,7 +868,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
         });
       } catch (e) {
         agg.applyEvent('error', {
-          message: `作答失败: ${e instanceof Error ? e.message : String(e)}`,
+          message: t('chat.clarifyFailed', {
+            message: e instanceof Error ? e.message : String(e),
+          }),
         });
         snapshot(sid);
       }

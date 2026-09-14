@@ -11,6 +11,7 @@ import {ChatHeaderTitle} from '../components/ChatHeaderTitle';
 import {SearchBar} from '../components/SearchBar';
 import {SlashSuggest} from '../components/SlashSuggest';
 import {Colors} from '../components/theme';
+import {t, useT} from '../i18n';
 import {
   desktopPickFile,
   desktopPickImages,
@@ -58,7 +59,7 @@ function fileToDataUrl(file: unknown): Promise<string> {
       result: string | null;
     }}).FileReader;
     if (!Ctor) {
-      reject(new Error('当前环境不支持读取文件'));
+      reject(new Error(t('desktop.readFileUnsupported')));
       return;
     }
     const reader = new Ctor();
@@ -67,10 +68,10 @@ function fileToDataUrl(file: unknown): Promise<string> {
       if (typeof result === 'string') {
         resolve(result);
       } else {
-        reject(new Error('读取文件失败'));
+        reject(new Error(t('desktop.readFileFailed')));
       }
     };
-    reader.onerror = () => reject(new Error('读取文件失败'));
+    reader.onerror = () => reject(new Error(t('desktop.readFileFailed')));
     reader.readAsDataURL(file);
   });
 }
@@ -83,6 +84,7 @@ export function ChatPane({
   /** narrow 单列：头部带「返回」 */
   narrow?: boolean;
 }) {
+  const t = useT();
   const chatState = useChatStore(s => s.bySession[chat.sessionId]);
   const connState = useConnectionStore(s => s.state);
 
@@ -192,12 +194,15 @@ export function ChatPane({
             chat.sessionId,
             urls.map((uri, i) => ({
               uri,
-              name: `粘贴图片_${Date.now()}_${i + 1}.png`,
+              name: `${t('desktop.pasteImageName', {
+                stamp: Date.now(),
+                n: i + 1,
+              })}.png`,
             })),
           ),
         )
         .catch(e =>
-          alertError('粘贴图片失败', e instanceof Error ? e.message : String(e)),
+          alertError(t('desktop.pasteImageFailed'), e instanceof Error ? e.message : String(e)),
         );
     };
     const win = (globalThis as {
@@ -207,7 +212,7 @@ export function ChatPane({
     return () => {
       win?.removeEventListener?.('paste', onPaste);
     };
-  }, [attachImages, chat.sessionId, connReady]);
+  }, [attachImages, chat.sessionId, connReady, t]);
 
   // 拖拽文件进窗口：图片 → 待发附件；其它文件 → @file: 引用
   useEffect(() => {
@@ -229,7 +234,10 @@ export function ChatPane({
           .then(dataUrl => {
             if (f.type?.startsWith('image/')) {
               return attachImages(chat.sessionId, [
-                {uri: dataUrl, name: f.name ?? `图片_${Date.now()}.png`},
+                {
+                  uri: dataUrl,
+                  name: `${t('desktop.imageName', {stamp: Date.now()})}.png`,
+                },
               ]);
             }
             return attachFile(chat.sessionId, {
@@ -244,7 +252,7 @@ export function ChatPane({
             });
           })
           .catch(e =>
-            alertError('添加附件失败', e instanceof Error ? e.message : String(e)),
+            alertError(t('desktop.addAttachFailed'), e instanceof Error ? e.message : String(e)),
           );
       }
     };
@@ -257,7 +265,7 @@ export function ChatPane({
       win?.removeEventListener?.('dragover', onDragOver);
       win?.removeEventListener?.('drop', onDrop);
     };
-  }, [attachFile, attachImages, chat.sessionId, connReady, setInput]);
+  }, [attachFile, attachImages, chat.sessionId, connReady, setInput, t]);
 
   // foreign 会话首次发送完成派生：跟随切到派生出的 own 会话
   const migratedTo = chatState?.migratedTo;
@@ -277,11 +285,14 @@ export function ChatPane({
             activeOpacity={0.7}
             onPress={close}
             hitSlop={8}>
-            <Text style={styles.backText}>‹ 返回</Text>
+            <Text style={styles.backText}>{t('common.back')}</Text>
           </TouchableOpacity>
         ) : null}
         <View style={styles.headerTitleWrap}>
-          <ChatHeaderTitle sessionId={chat.sessionId} title={chat.title || '会话'} />
+          <ChatHeaderTitle
+            sessionId={chat.sessionId}
+            title={chat.title || t('chat.defaultTitle')}
+          />
         </View>
         <TouchableOpacity
           style={styles.menuBtn}
@@ -293,24 +304,22 @@ export function ChatPane({
 
       {connState === 'reconnecting' ? (
         <View style={styles.banner}>
-          <Text style={styles.bannerText}>连接已断开，正在重连…</Text>
+          <Text style={styles.bannerText}>{t('profile.reconnecting')}</Text>
         </View>
       ) : null}
       {chatState?.resumeFailed ? (
         <View style={styles.banner}>
-          <Text style={styles.bannerText}>会话已被服务端回收，请重新选择会话</Text>
+          <Text style={styles.bannerText}>{t('chat.sessionRecycled')}</Text>
         </View>
       ) : null}
       {chatState?.foreign ? (
         <View style={styles.bannerGray}>
-          <Text style={styles.bannerGrayText}>
-            QQ 来源会话 · 发送消息将派生到当前 profile 继续
-          </Text>
+          <Text style={styles.bannerGrayText}>{t('chat.foreignBanner')}</Text>
         </View>
       ) : null}
       {chatState?.forking ? (
         <View style={styles.bannerGray}>
-          <Text style={styles.bannerGrayText}>正在派生到当前 profile…</Text>
+          <Text style={styles.bannerGrayText}>{t('chat.forkingBanner')}</Text>
         </View>
       ) : null}
 
@@ -319,7 +328,7 @@ export function ChatPane({
           value={search.query}
           onChangeText={search.setQuery}
           onClose={search.hide}
-          placeholder="查找聊天记录"
+          placeholder={t('desktop.searchPlaceholder')}
           total={search.total}
           activeIndex={search.activeIndex}
           onPrev={search.onPrev}

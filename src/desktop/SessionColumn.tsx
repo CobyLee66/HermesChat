@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 
 import {Colors} from '../components/theme';
+import {useT} from '../i18n';
 import {
   SessionListPanel,
   useProfileNickname,
@@ -34,6 +35,7 @@ const MENU_WIDTH = 200;
 const MENU_HEIGHT = 100;
 
 export function SessionColumn({profile}: {profile: string}) {
+  const t = useT();
   const nicknameText = useProfileNickname(profile);
   const selectProfile = useDesktopUiStore(s => s.selectProfile);
   const [creating, setCreating] = useState(false);
@@ -59,11 +61,11 @@ export function SessionColumn({profile}: {profile: string}) {
       const opened = await createSessionFlow(profile);
       openChat({sessionId: opened.sessionId, profile, title: opened.title});
     } catch (e) {
-      alertError('新建会话失败', e instanceof Error ? e.message : String(e));
+      alertError(t('desktop.newSessionFailed'), e instanceof Error ? e.message : String(e));
     } finally {
       setCreating(false);
     }
-  }, [creating, profile]);
+  }, [creating, profile, t]);
 
   const onRowContextMenu = useCallback(
     (row: SessionListRow, pos: RowContextMenuPos) => {
@@ -81,11 +83,11 @@ export function SessionColumn({profile}: {profile: string}) {
         navigator?: {clipboard?: {writeText?: (t: string) => Promise<void>}};
       }).navigator?.clipboard;
       void clipboard
-        ?.writeText?.(menu.row.title || '未命名会话')
+        ?.writeText?.(menu.row.title || t('session.untitled'))
         ?.catch(() => {});
     }
     closeMenu();
-  }, [menu, closeMenu]);
+  }, [menu, closeMenu, t]);
 
   const onDelete = useCallback(() => {
     if (menu) {
@@ -105,7 +107,7 @@ export function SessionColumn({profile}: {profile: string}) {
           activeOpacity={0.7}
           onPress={() => selectProfile(null)}
           hitSlop={8}>
-          <Text style={styles.backText}>‹ 返回</Text>
+          <Text style={styles.backText}>{t('common.back')}</Text>
         </TouchableOpacity>
         <View style={styles.titleWrap}>
           <Text style={styles.titleText} numberOfLines={1}>
@@ -117,7 +119,7 @@ export function SessionColumn({profile}: {profile: string}) {
           onPress={onNewSession}
           disabled={creating}>
           <Text style={[styles.newText, creating && styles.newTextDisabled]}>
-            新会话
+            {t('session.newTitle')}
           </Text>
         </TouchableOpacity>
       </View>
@@ -136,11 +138,11 @@ export function SessionColumn({profile}: {profile: string}) {
         <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={closeMenu}>
           <View style={[styles.menu, {left: menuLeft, top: menuTop}]}>
             <TouchableOpacity style={styles.menuItem} onPress={onCopyTitle}>
-              <Text style={styles.menuText}>复制会话标题</Text>
+              <Text style={styles.menuText}>{t('desktop.copyTitle')}</Text>
             </TouchableOpacity>
             <View style={styles.menuSep} />
             <TouchableOpacity style={styles.menuItem} onPress={onDelete}>
-              <Text style={styles.menuTextDanger}>删除会话</Text>
+              <Text style={styles.menuTextDanger}>{t('session.deleteTitle')}</Text>
             </TouchableOpacity>
           </View>
         </TouchableOpacity>

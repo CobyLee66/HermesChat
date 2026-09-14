@@ -1,6 +1,7 @@
 import React, {useEffect, useRef, useState} from 'react';
 import {Animated, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 
+import {useT} from '../i18n';
 import {thinkingHead, thinkingTail} from '../utils/thinkingPreview';
 import {Colors} from './theme';
 
@@ -16,7 +17,8 @@ interface Props {
  *（流式中显示尾部两行实时刷新，结束后缩略为开头一行），点击展开全文。 */
 export function ThinkingBlock({text, variant, live}: Props) {
   const [expanded, setExpanded] = useState(false);
-  const label = variant === 'thinking' ? '思考过程' : '推理过程';
+  const t = useT();
+  const label = variant === 'thinking' ? t('chat.thinking') : t('chat.reasoning');
   return (
     <View style={styles.wrap}>
       <TouchableOpacity

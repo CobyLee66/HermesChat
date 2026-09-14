@@ -4,6 +4,7 @@
  * 显示文案「未命名会话」参与匹配（搜「未命名」应能命中空标题会话）。
  */
 
+import {t} from '../i18n';
 import type {SessionListRow} from '../rpc/types';
 
 /** 单行匹配（query 先去首尾空白，空串恒不过滤） */
@@ -12,7 +13,7 @@ export function sessionMatchesQuery(row: SessionListRow, query: string): boolean
   if (!q) {
     return true;
   }
-  const title = (row.title || '未命名会话').toLowerCase();
+  const title = (row.title || t('session.untitled')).toLowerCase();
   const preview = (row.preview || '').toLowerCase();
   return title.includes(q) || preview.includes(q);
 }

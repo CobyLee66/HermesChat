@@ -13,6 +13,7 @@
  */
 
 import type {ProjectedMessage} from '../rpc/types';
+import {t} from '../i18n';
 import type {ExecRemoteFn} from './execRemote';
 
 /** 单次拉取上限（行数），防止巨型会话占爆 exec 输出。 */
@@ -202,7 +203,10 @@ export async function fetchRemoteHistory(
   const res = await exec(buildHistoryCommand(dbPath, sessionId), 30000);
   if (res.exitCode !== 0) {
     throw new Error(
-      `读取远端会话历史失败（sqlite3 exit=${res.exitCode}）：${res.stderr.slice(0, 120)}`,
+      t('ssh.remoteHistoryFailed', {
+        code: res.exitCode,
+        stderr: res.stderr.slice(0, 120),
+      }),
     );
   }
   return parseHistoryOutput(res.stdout);

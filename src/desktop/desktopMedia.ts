@@ -4,6 +4,7 @@
  * 上游 media.ts 的 web 分支再做压缩（canvas）。
  */
 
+import {t} from '../i18n';
 import {getDesktopBridge} from '../ssh/desktopHermesSsh';
 import {alertError} from '../utils/alert';
 
@@ -22,7 +23,7 @@ export function hasDesktopMedia(): boolean {
 export async function desktopPickImages(): Promise<PickedFile[]> {
   const bridge = getDesktopBridge();
   if (!bridge) {
-    throw new Error('桌面桥不可用');
+    throw new Error(t('desktop.bridgeUnavailable'));
   }
   const files = await bridge.pickFiles({images: true, multiple: true});
   const out: PickedFile[] = [];
@@ -31,7 +32,7 @@ export async function desktopPickImages(): Promise<PickedFile[]> {
       const dataUrl = await bridge.readFileDataUrl(f.path);
       out.push({uri: dataUrl, name: f.name});
     } catch (e) {
-      alertError('读取图片失败', e instanceof Error ? e.message : String(e));
+      alertError(t('desktop.pickImageFailed'), e instanceof Error ? e.message : String(e));
     }
   }
   return out;
@@ -41,7 +42,7 @@ export async function desktopPickImages(): Promise<PickedFile[]> {
 export async function desktopPickFile(): Promise<PickedFile | null> {
   const bridge = getDesktopBridge();
   if (!bridge) {
-    throw new Error('桌面桥不可用');
+    throw new Error(t('desktop.bridgeUnavailable'));
   }
   const [f] = await bridge.pickFiles({images: false, multiple: false});
   if (!f) {
@@ -55,7 +56,7 @@ export async function desktopPickFile(): Promise<PickedFile | null> {
 export async function desktopReadFilePath(path: string): Promise<string> {
   const bridge = getDesktopBridge();
   if (!bridge) {
-    throw new Error('桌面桥不可用');
+    throw new Error(t('desktop.bridgeUnavailable'));
   }
   return bridge.readFileDataUrl(path);
 }
@@ -67,7 +68,7 @@ export async function desktopPickTextFile(): Promise<{
 } | null> {
   const bridge = getDesktopBridge();
   if (!bridge) {
-    throw new Error('桌面桥不可用');
+    throw new Error(t('desktop.bridgeUnavailable'));
   }
   const [f] = await bridge.pickFiles({images: false, multiple: false});
   if (!f) {

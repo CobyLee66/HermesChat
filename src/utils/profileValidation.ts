@@ -1,3 +1,4 @@
+import {t} from '../i18n';
 import type {ConnectionProfile} from '../store/connection';
 
 export type ProfileForm = Omit<ConnectionProfile, 'id'>;
@@ -19,23 +20,25 @@ export function validateProfileForm(form: ProfileForm): ProfileFormErrors {
   const errors: ProfileFormErrors = {};
   if (!form.host.trim()) {
     errors.host =
-      form.type === 'direct' ? '请填写 Gateway 主机地址' : '请填写 SSH 主机地址';
+      form.type === 'direct'
+        ? t('validation.gatewayHostRequired')
+        : t('validation.sshHostRequired');
   }
   const port = form.port.trim();
   if (!port) {
-    errors.port = '请填写端口';
+    errors.port = t('validation.portRequired');
   } else {
     const n = Number(port);
     if (!Number.isInteger(n) || n < 1 || n > 65535) {
-      errors.port = '端口需为 1–65535 的整数';
+      errors.port = t('validation.portInvalid');
     }
   }
   if (form.type === 'ssh') {
     if (!form.username.trim()) {
-      errors.username = '请填写 SSH 用户名';
+      errors.username = t('validation.usernameRequired');
     }
     if (!form.password && !form.privateKey.trim()) {
-      errors.auth = '密码与私钥至少填写一项';
+      errors.auth = t('validation.authRequired');
     }
   }
   return errors;

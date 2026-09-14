@@ -10,6 +10,7 @@ import {
 import MarkdownIt from 'markdown-it';
 
 import {Colors} from './theme';
+import {useT} from '../i18n';
 import {
   injectSrcMapRule,
   parseMapAttr,
@@ -260,6 +261,7 @@ interface Props {
 }
 
 export function MarkdownText({text}: Props) {
+  const t = useT();
   const html = useMemo(() => cachedRender(text), [text]);
   const hostRef = useRef<MdHostNode | null>(null);
   // 流式更新时注册表里的 getText 走 ref 取最新源文本
@@ -327,11 +329,11 @@ export function MarkdownText({text}: Props) {
             onPress={closeMenu}>
             <View style={[styles.menuCard, {left: menuLeft, top: menuTop}]}>
               <TouchableOpacity style={styles.menuItem} onPress={onCopyMarkdown}>
-                <Text style={styles.menuText}>复制 Markdown</Text>
+                <Text style={styles.menuText}>{t('md.copyMarkdown')}</Text>
               </TouchableOpacity>
               <View style={styles.menuSep} />
               <TouchableOpacity style={styles.menuItem} onPress={onCopyPlain}>
-                <Text style={styles.menuText}>复制纯文本</Text>
+                <Text style={styles.menuText}>{t('md.copyPlain')}</Text>
               </TouchableOpacity>
             </View>
           </TouchableOpacity>

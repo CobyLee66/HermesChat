@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 
 import type {ModelOptionsResult, ModelProviderRow} from '../rpc/types';
+import {useT} from '../i18n';
 import {Colors} from './theme';
 
 interface Props {
@@ -107,20 +108,21 @@ function ListBody({
   error: string | null;
   onPickModel: (model: string, provider: string) => void;
 }) {
+  const t = useT();
   return (
     <>
-      <Text style={styles.title}>切换模型</Text>
+      <Text style={styles.title}>{t('model.switchTitle')}</Text>
       {loading ? (
         <ActivityIndicator style={styles.loading} color={Colors.accent} />
       ) : error ? (
-        <Text style={styles.error}>加载失败：{error}</Text>
+        <Text style={styles.error}>{t('model.loadFailed', {error})}</Text>
       ) : (
         <ScrollView style={styles.list}>
           {providers.map((p: ModelProviderRow) => (
             <View key={p.slug}>
               <Text style={styles.providerHeader}>
                 {p.name}
-                {p.is_current ? '（当前）' : ''}
+                {p.is_current ? t('chat.currentModel') : ''}
               </Text>
               {(p.models ?? []).slice(0, 30).map(m => {
                 const isCurrent = p.is_current && m === data?.model;
@@ -141,12 +143,14 @@ function ListBody({
                 );
               })}
               {(p.total_models ?? 0) > (p.models?.length ?? 0) ? (
-                <Text style={styles.more}>… 共 {p.total_models} 个</Text>
+                <Text style={styles.more}>
+                  {t('model.more', {count: p.total_models ?? 0})}
+                </Text>
               ) : null}
             </View>
           ))}
           {providers.length === 0 ? (
-            <Text style={styles.error}>无可用模型</Text>
+            <Text style={styles.error}>{t('model.empty')}</Text>
           ) : null}
         </ScrollView>
       )}

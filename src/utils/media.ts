@@ -8,6 +8,8 @@ import {Platform} from 'react-native';
 import ImageResizer from '@bam.tech/react-native-image-resizer';
 import RNFS from 'react-native-fs';
 
+import {t} from '../i18n';
+
 export interface PreparedImage {
   /** JPEG 字节流的 base64（image.attach_bytes 的 content_base64） */
   base64: string;
@@ -64,7 +66,7 @@ function webDoc(): {
 } {
   const doc = (globalThis as {document?: unknown}).document;
   if (!doc) {
-    throw new Error('web 环境缺少 document');
+    throw new Error(t('media.noDocument'));
   }
   return doc as {createElement: (tag: 'canvas' | 'img') => WebCanvas & WebImageEl};
 }
@@ -73,7 +75,7 @@ function loadImageEl(src: string): Promise<WebImageEl> {
   return new Promise((resolve, reject) => {
     const img = webDoc().createElement('img');
     img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error('图片解码失败（格式不受支持？）'));
+    img.onerror = () => reject(new Error(t('media.decodeFailed')));
     img.src = src;
   });
 }
@@ -105,7 +107,7 @@ async function webResizeToJpeg(
   canvas.height = h;
   const ctx = canvas.getContext('2d');
   if (!ctx) {
-    throw new Error('canvas 2d 上下文不可用');
+    throw new Error(t('media.noCanvasContext'));
   }
   ctx.fillStyle = '#FFFFFF';
   ctx.fillRect(0, 0, w, h);
@@ -227,7 +229,7 @@ export async function readFileAsDataUrl(
     if (uri.startsWith('data:')) {
       return uri;
     }
-    throw new Error('web 构建不支持读取本地路径文件');
+    throw new Error(t('media.localPathUnsupported'));
   }
   const base64 = await RNFS.readFile(uri, 'base64');
   const mime = mimeType || 'application/octet-stream';

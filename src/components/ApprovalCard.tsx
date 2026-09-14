@@ -1,6 +1,8 @@
 import React, {useEffect, useRef} from 'react';
 import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 
+import {useT} from '../i18n';
+import type {MessageKey} from '../i18n/locales/en';
 import {getRpc} from '../rpc/runtime';
 import type {ApprovalCardItem, ApprovalChoice} from '../rpc/types';
 import {Colors} from './theme';
@@ -11,11 +13,11 @@ interface Props {
   onRespond: (requestId: string, choice: ApprovalChoice) => void;
 }
 
-const CHOICE_LABEL: Record<ApprovalChoice, string> = {
-  once: '允许一次',
-  session: '本会话允许',
-  always: '始终允许',
-  deny: '拒绝',
+const CHOICE_LABEL: Record<ApprovalChoice, MessageKey> = {
+  once: 'approval.once',
+  session: 'approval.session',
+  always: 'approval.always',
+  deny: 'approval.deny',
 };
 
 /** 审批卡片：内联按钮组，应答后禁用。挂载时发 approval.received 回执。 */
@@ -39,18 +41,21 @@ export function ApprovalCard({card, sessionId, onRespond}: Props) {
   }, [card.requestId, card.resolved, card.expired, sessionId]);
 
   const resolved = card.resolved;
+  const t = useT();
   return (
     <View style={styles.card}>
-      <Text style={styles.title}>🛡 权限审批</Text>
+      <Text style={styles.title}>{t('approval.title')}</Text>
       {card.description ? (
         <Text style={styles.desc}>{card.description}</Text>
       ) : null}
       {card.command ? <Text style={styles.command}>{card.command}</Text> : null}
       {card.expired ? (
-        <Text style={styles.resolved}>已超时，服务端不再等待</Text>
+        <Text style={styles.resolved}>{t('approval.expired')}</Text>
       ) : resolved ? (
         <Text style={styles.resolved}>
-          已选择：{CHOICE_LABEL[resolved] ?? resolved}
+          {t('approval.resolved', {
+            choice: CHOICE_LABEL[resolved] ? t(CHOICE_LABEL[resolved]) : resolved,
+          })}
         </Text>
       ) : (
         <View style={styles.buttons}>
@@ -68,7 +73,7 @@ export function ApprovalCard({card, sessionId, onRespond}: Props) {
                   styles.btnText,
                   choice === 'deny' ? styles.btnDenyText : null,
                 ]}>
-                {CHOICE_LABEL[choice] ?? choice}
+                {CHOICE_LABEL[choice] ? t(CHOICE_LABEL[choice]) : choice}
               </Text>
             </TouchableOpacity>
           ))}

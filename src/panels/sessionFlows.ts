@@ -4,6 +4,7 @@
  * 成功后返回 {sessionId, title}，由调用方决定导航（手机 push / 桌面选中）。
  */
 
+import {t} from '../i18n';
 import {getExecRemote} from '../ssh/execRemote';
 import {fetchRemoteHistory} from '../ssh/remoteHistory';
 import {useChatStore} from '../store/chat';
@@ -30,9 +31,9 @@ export async function createSessionFlow(profile: string): Promise<OpenedSession>
     info: result.info,
     profile,
     storedSessionId: result.stored_session_id,
-    title: '新会话',
+    title: t('session.newTitle'),
   });
-  return {sessionId: result.session_id, title: '新会话'};
+  return {sessionId: result.session_id, title: t('session.newTitle')};
 }
 
 /**
@@ -47,7 +48,7 @@ export async function openSessionFlow(
   // 点击瞬间可能正处断线重连窗口（回前台探活判死 / WS 被后台掐断）：
   // 等连接就绪再发 RPC，否则偶发 "rpc not connected"（再点才好的根因）
   await useConnectionStore.getState().waitReady();
-  const title = row.title || '会话';
+  const title = row.title || t('chat.defaultTitle');
   const {resume} = useSessionsStore.getState();
   const attach = useChatStore.getState().attach;
 
@@ -74,7 +75,7 @@ export async function openSessionFlow(
       .getState()
       .list.find(p => p.name === row.hostProfile)?.path;
     if (!exec || !hostPath) {
-      throw new Error('需要 SSH 连接才能读取该会话的历史');
+      throw new Error(t('chat.sshRequiredForHistory'));
     }
     const messages = await fetchRemoteHistory(exec, `${hostPath}/state.db`, row.id);
     attach(row.id, {
@@ -115,8 +116,8 @@ export async function deleteSessionFlow(
   title: string,
 ): Promise<boolean> {
   const ok = await confirmDialog(
-    '删除会话',
-    `确定删除「${title || '未命名会话'}」吗？`,
+    t('session.deleteTitle'),
+    t('session.deleteConfirm', {name: title || t('session.untitled')}),
   );
   if (!ok) {
     return false;
@@ -126,7 +127,7 @@ export async function deleteSessionFlow(
     await useConnectionStore.getState().waitReady();
     await useSessionsStore.getState().remove(profile, sessionId);
   } catch (e) {
-    alertError('删除失败', e instanceof Error ? e.message : String(e));
+    alertError(t('session.deleteFailed'), e instanceof Error ? e.message : String(e));
     return false;
   }
   return true;

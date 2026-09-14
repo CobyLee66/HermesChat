@@ -12,6 +12,7 @@ import {create} from 'zustand';
 import type {RpcClient} from '../rpc/client';
 import {hasRpc, setRpc} from '../rpc/runtime';
 import {setExecRemote, type ExecRemoteFn} from '../ssh/execRemote';
+import {t} from '../i18n';
 import {dlog} from '../utils/desktopLog';
 import {useChatStore} from './chat';
 import {useSessionsStore} from './sessions';
@@ -205,7 +206,7 @@ function startHealthWatchdog(get: () => ConnectionStore) {
       healthFailCount += 1;
       dlog('WARN', `周期探活失败（${healthFailCount}/${HEALTH_FAIL_STREAK}）`);
       if (healthFailCount >= HEALTH_FAIL_STREAK && get().state === 'ready') {
-        get().handleDrop('健康探活连续失败：隧道无响应');
+        get().handleDrop(t('conn.healthFailDrop'));
       }
     });
   }, HEALTH_INTERVAL_MS);
@@ -261,12 +262,12 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => {
   async function connectInternal(): Promise<boolean> {
     const {profiles, currentProfileId, connector} = get();
     if (!connector) {
-      set({state: 'disconnected', error: 'connector 未初始化'});
+      set({state: 'disconnected', error: t('conn.connectorMissing')});
       return false;
     }
     const profile = profiles.find(p => p.id === currentProfileId);
     if (!profile) {
-      set({state: 'disconnected', error: '未找到当前连接配置'});
+      set({state: 'disconnected', error: t('conn.noActiveProfile')});
       return false;
     }
     const result = await connector.connect(profile);
@@ -466,7 +467,7 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => {
       probeHealthOnce().then(ok => {
         if (!ok && get().state === 'ready') {
           dlog('WARN', '回前台探活失败：连接已成僵尸，触发重连');
-          get().handleDrop('回前台探活失败：隧道无响应');
+          get().handleDrop(t('conn.foregroundProbeFail'));
         }
       });
     },
@@ -476,7 +477,7 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => {
         return;
       }
       if (get().state === 'disconnected') {
-        throw new Error('未连接');
+        throw new Error(t('conn.notConnected'));
       }
       // 重连中：立即触发一次重试，不傻等退避计时
       get().retryNow();
@@ -486,7 +487,7 @@ export const useConnectionStore = create<ConnectionStore>((set, get) => {
           return;
         }
         if (Date.now() >= deadline) {
-          throw new Error('连接恢复超时，请稍后重试');
+          throw new Error(t('conn.recoveryTimeout'));
         }
         await new Promise<void>(r => setTimeout(r, 200));
       }

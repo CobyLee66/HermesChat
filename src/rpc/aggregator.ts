@@ -5,6 +5,7 @@
 
 import {diffFromResult} from './diffText';
 import {parseMessageText} from './references';
+import {t} from '../i18n';
 import type {
   ApprovalCardItem,
   ApprovalRequestPayload,
@@ -416,7 +417,10 @@ export class TimelineAggregator {
         blocks.push({type: 'text', text: p.text});
       }
       if (p.status === 'error') {
-        blocks.push({type: 'error', text: p.error || p.text || '未知错误'});
+        blocks.push({
+          type: 'error',
+          text: p.error || p.text || t('rpc.unknownError'),
+        });
       }
       this.push({
         kind: 'assistant',
@@ -444,7 +448,7 @@ export class TimelineAggregator {
     if (p.status === 'error') {
       msg.blocks.push({
         type: 'error',
-        text: p.error || p.text || '未知错误',
+        text: p.error || p.text || t('rpc.unknownError'),
       });
     }
     if (
@@ -645,7 +649,7 @@ export class TimelineAggregator {
   // ─── 内部：错误与状态 ─────────────────────────────────────
 
   private onError(p: ErrorPayload) {
-    const text = p.message || '未知错误';
+    const text = p.message || t('rpc.unknownError');
     this.lastThinkingHint = null;
     // 流式进行中：错误块挂到当前消息；否则独立红条
     if (this.current && this.current.streaming) {

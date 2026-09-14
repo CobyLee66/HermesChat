@@ -7,6 +7,7 @@ import {ScrollView, StyleSheet, Text, TouchableOpacity, View} from 'react-native
 
 import {Avatar} from '../components/Avatar';
 import {Colors} from '../components/theme';
+import {useT} from '../i18n';
 import {useProfileNickname} from '../panels/SessionListPanel';
 import {useProfilesStore} from '../store/profiles';
 import {useConnectionStore} from '../store/connection';
@@ -14,6 +15,7 @@ import {confirmDialog} from '../utils/alert';
 import {useDesktopUiStore} from './desktopUiStore';
 
 export function ProfileRail() {
+  const t = useT();
   const list = useProfilesStore(s => s.list);
   const selectedProfile = useDesktopUiStore(s => s.selectedProfile);
   const selectProfile = useDesktopUiStore(s => s.selectProfile);
@@ -37,20 +39,23 @@ export function ProfileRail() {
             style={styles.footerBtn}
             activeOpacity={0.7}
             onPress={() => setProfileEditOpen(selectedProfile)}>
-            <Text style={styles.footerText}>编辑</Text>
+            <Text style={styles.footerText}>{t('common.edit')}</Text>
           </TouchableOpacity>
         ) : null}
         <TouchableOpacity
           style={styles.footerBtn}
           activeOpacity={0.7}
           onPress={() => {
-            void confirmDialog('退出连接', '确定断开与主机的连接吗？').then(ok => {
+            void confirmDialog(
+              t('profile.disconnectTitle'),
+              t('profile.disconnectConfirm'),
+            ).then(ok => {
               if (ok) {
                 useConnectionStore.getState().disconnect();
               }
             });
           }}>
-          <Text style={styles.footerDanger}>退出</Text>
+          <Text style={styles.footerDanger}>{t('profile.disconnect')}</Text>
         </TouchableOpacity>
       </View>
     </View>

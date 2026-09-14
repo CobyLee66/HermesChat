@@ -7,13 +7,15 @@
 import React from 'react';
 import {StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 
+import {useT} from '../i18n';
+import type {MessageKey} from '../i18n/locales/en';
 import {Colors} from './theme';
 
 export type HomeView = 'sessions' | 'cron';
 
-const SEGMENTS: {key: HomeView; label: string}[] = [
-  {key: 'sessions', label: '会话'},
-  {key: 'cron', label: '定时任务'},
+const SEGMENTS: {key: HomeView; labelKey: MessageKey}[] = [
+  {key: 'sessions', labelKey: 'view.sessions'},
+  {key: 'cron', labelKey: 'view.cron'},
 ];
 
 export function ViewSwitcher({
@@ -23,6 +25,7 @@ export function ViewSwitcher({
   value: HomeView;
   onChange: (view: HomeView) => void;
 }) {
+  const t = useT();
   return (
     <View style={styles.wrap}>
       {SEGMENTS.map(seg => {
@@ -36,7 +39,7 @@ export function ViewSwitcher({
             accessibilityRole="button"
             accessibilityState={{selected: active}}>
             <Text style={[styles.segText, active && styles.segTextActive]}>
-              {seg.label}
+              {t(seg.labelKey)}
             </Text>
           </TouchableOpacity>
         );

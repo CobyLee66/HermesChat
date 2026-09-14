@@ -11,6 +11,7 @@
  */
 
 import {extractToken, type Transport, type TransportResult} from './transport';
+import {t} from '../i18n';
 
 export interface DirectConfig {
   host: string;
@@ -31,9 +32,7 @@ export class DirectTransport implements Transport {
       token = await this.fetchToken(httpUrl);
     }
     if (!token) {
-      throw new Error(
-        '未能从 gateway 首页提取 session token，可在配置中手动填写',
-      );
+      throw new Error(t('ssh.tokenExtractFail'));
     }
     return {
       wsUrl: `ws://${this.cfg.host}:${this.cfg.port}/api/ws?token=${encodeURIComponent(token)}`,
@@ -52,12 +51,12 @@ export class DirectTransport implements Transport {
     try {
       const resp = await fetch(httpUrl, {signal: controller.signal});
       if (!resp.ok) {
-        throw new Error(`连接 gateway 失败（HTTP ${resp.status}）`);
+        throw new Error(t('ssh.gatewayHttp', {status: resp.status}));
       }
       return extractToken(await resp.text()) ?? '';
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      throw new Error(`无法连接 gateway（${httpUrl}）：${msg}`);
+      throw new Error(t('ssh.gatewayUnreachable', {url: httpUrl, message: msg}));
     } finally {
       clearTimeout(timer);
     }

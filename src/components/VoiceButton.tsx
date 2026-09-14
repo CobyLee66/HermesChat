@@ -18,6 +18,7 @@ import * as HermesAudio from '../ssh/HermesAudio';
 import RNFS from 'react-native-fs';
 
 import {transcribeAudio} from '../rpc/rest';
+import {t, useT} from '../i18n';
 import {useConnectionStore} from '../store/connection';
 import {IconImage} from './icons';
 import {Colors} from './theme';
@@ -45,10 +46,10 @@ async function ensureRecordPermission(): Promise<boolean> {
   const granted = await PermissionsAndroid.request(
     PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
     {
-      title: '录音权限',
-      message: '语音输入需要使用麦克风',
-      buttonPositive: '允许',
-      buttonNegative: '拒绝',
+      title: t('voice.micPermissionTitle'),
+      message: t('voice.micPermissionMessage'),
+      buttonPositive: t('voice.allow'),
+      buttonNegative: t('voice.deny'),
     },
   );
   return granted === PermissionsAndroid.RESULTS.GRANTED;
@@ -57,13 +58,19 @@ async function ensureRecordPermission(): Promise<boolean> {
 function timeoutReject(ms: number): Promise<never> {
   return new Promise((_, reject) => {
     setTimeout(
-      () => reject(new Error(`语音识别超时（${Math.round(ms / 1000)} 秒），请重试`)),
+      () =>
+        reject(
+          new Error(
+            t('voice.recognizeTimeout', {seconds: Math.round(ms / 1000)}),
+          ),
+        ),
       ms,
     );
   });
 }
 
 export function VoiceButton({profile, onText}: Props) {
+  const t = useT();
   const [phase, setPhase] = useState<Phase>('idle');
   const [secs, setSecs] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -89,7 +96,7 @@ export function VoiceButton({profile, onText}: Props) {
 
   const start = async () => {
     if (!(await ensureRecordPermission())) {
-      Alert.alert('无法录音', '请在系统设置中允许麦克风权限');
+      Alert.alert(t('voice.micDenied'), t('voice.micDeniedHint'));
       return;
     }
     const path = `${RNFS.CachesDirectoryPath}/voice_${Date.now()}.m4a`;
@@ -121,13 +128,16 @@ export function VoiceButton({profile, onText}: Props) {
             if (text) {
               onText(text);
             } else {
-              Alert.alert('语音输入', '未识别到语音内容');
+              Alert.alert(t('voice.title'), t('voice.noSpeech'));
             }
           })(),
           timeoutReject(BUSY_TIMEOUT_MS),
         ]);
       } catch (e) {
-        Alert.alert('语音识别失败', e instanceof Error ? e.message : String(e));
+        Alert.alert(
+          t('voice.recognizeFailed'),
+          e instanceof Error ? e.message : String(e),
+        );
       } finally {
         if (path) {
           RNFS.unlink(path).catch(() => {});
@@ -141,7 +151,10 @@ export function VoiceButton({profile, onText}: Props) {
     if (phase === 'idle') {
       start().catch(e => {
         setPhase('idle');
-        Alert.alert('录音失败', e instanceof Error ? e.message : String(e));
+        Alert.alert(
+          t('voice.recordFailed'),
+          e instanceof Error ? e.message : String(e),
+        );
       });
     } else if (phase === 'recording') {
       stopAndTranscribe();
@@ -155,7 +168,7 @@ export function VoiceButton({profile, onText}: Props) {
       onPress={onPress}
       disabled={phase === 'busy'}
       activeOpacity={0.7}
-      accessibilityLabel="语音输入">
+      accessibilityLabel={t('voice.title')}>
       {phase === 'idle' ? (
         <IconImage name="microphone" size={26} />
       ) : phase === 'recording' ? (
@@ -166,7 +179,9 @@ export function VoiceButton({profile, onText}: Props) {
       ) : (
         <>
           <ActivityIndicator size="small" color={Colors.textSecondary} />
-          <Text style={[styles.subLabel, styles.subLabelMuted]}>识别中…</Text>
+          <Text style={[styles.subLabel, styles.subLabelMuted]}>
+            {t('voice.busy')}
+          </Text>
         </>
       )}
     </TouchableOpacity>

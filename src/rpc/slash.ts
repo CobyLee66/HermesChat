@@ -8,6 +8,8 @@
  * 斜杠文本，客户端必须在发送前分流，否则命令会被当普通文本发给模型。
  */
 
+import {t} from '../i18n';
+
 /** complete.slash 返回的单个补全项（registry 项 text 不带 /，TUI extras 带 /）。 */
 export interface SlashCompletionItem {
   text: string;
@@ -144,7 +146,7 @@ export async function executeSlash({
   const {name, arg} = parseSlash(command);
 
   if (!name) {
-    sys('空的斜杠命令');
+    sys(t('slash.empty'));
     return 'error';
   }
 
@@ -153,8 +155,8 @@ export async function executeSlash({
       command: command.replace(/^\/+/, ''),
       session_id: sessionId,
     })) as {output?: string; warning?: string} | null;
-    const body = r?.output || `/${name}: 无输出`;
-    sys(r?.warning ? `警告: ${r.warning}\n${body}` : body);
+    const body = r?.output || t('slash.noOutput', {name});
+    sys(r?.warning ? t('slash.warning', {warning: r.warning, body}) : body);
     return 'done';
   } catch {
     // 主通道拒绝/未知命令/需要客户端行为 → 落到 dispatch
@@ -165,13 +167,13 @@ export async function executeSlash({
       await call('command.dispatch', {name, arg, session_id: sessionId}),
     );
     if (!d) {
-      sys(`错误: command.dispatch 返回无效响应`);
+      sys(t('slash.invalidDispatch'));
       return 'error';
     }
     switch (d.type) {
       case 'exec':
       case 'plugin':
-        sys(d.output ?? '（无输出）');
+        sys(d.output ?? t('slash.noneOutput'));
         return 'done';
       case 'alias':
         return executeSlash({
@@ -185,19 +187,25 @@ export async function executeSlash({
         const msg = d.message?.trim() ?? '';
         if (!msg) {
           sys(
-            `/${name}: ${d.type === 'skill' ? 'skill 缺少 payload message' : 'dispatch 消息为空'}`,
+            `/${name}: ${
+              d.type === 'skill'
+                ? t('slash.skillMissingMessage')
+                : t('slash.dispatchEmpty')
+            }`,
           );
           return 'error';
         }
         if (d.type === 'skill') {
-          sys(`⚡ 加载技能: ${d.name}`);
+          sys(t('slash.skillLoaded', {name: d.name}));
         }
         await send(msg);
         return 'sent';
       }
     }
   } catch (e) {
-    sys(`错误: ${e instanceof Error ? e.message : String(e)}`);
+    sys(t('slash.error', {
+      message: e instanceof Error ? e.message : String(e),
+    }));
     return 'error';
   }
 }

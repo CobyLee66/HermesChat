@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 
 import type {ClarifyCardItem, ClarifyQuestion} from '../rpc/types';
+import {useT} from '../i18n';
 import {Colors} from './theme';
 
 interface Props {
@@ -22,9 +23,10 @@ interface Props {
  * 批量问题逐题作答（每题独立提交，服务端按 qid 归答案）。
  */
 export function ClarifyCard({card, onAnswer}: Props) {
+  const t = useT();
   return (
     <View style={styles.card}>
-      <Text style={styles.title}>💬 需要你的回答</Text>
+      <Text style={styles.title}>{t('clarify.title')}</Text>
       {card.questions.map((q, i) => (
         <QuestionRow
           key={q.qid || i}
@@ -34,7 +36,9 @@ export function ClarifyCard({card, onAnswer}: Props) {
           onAnswer={answer => onAnswer(card.requestId, answer, q.qid || undefined)}
         />
       ))}
-      {card.expired ? <Text style={styles.expired}>已超时，服务端不再等待</Text> : null}
+      {card.expired ? (
+        <Text style={styles.expired}>{t('approval.expired')}</Text>
+      ) : null}
     </View>
   );
 }
@@ -52,13 +56,14 @@ function QuestionRow({
 }) {
   const [selected, setSelected] = useState<string[]>([]);
   const [draft, setDraft] = useState('');
+  const t = useT();
   const multi = question.multiSelect === true && question.choices.length > 0;
 
   if (answered) {
     return (
       <View style={styles.questionWrap}>
         <Text style={styles.question}>{question.question}</Text>
-        <Text style={styles.answered}>已作答</Text>
+        <Text style={styles.answered}>{t('clarify.answered')}</Text>
       </View>
     );
   }
@@ -77,7 +82,7 @@ function QuestionRow({
     <View style={styles.questionWrap}>
       <Text style={styles.question}>
         {question.question}
-        {multi ? '（可多选）' : ''}
+        {multi ? t('chat.multiHint') : ''}
       </Text>
       {question.choices.length > 0 ? (
         <View style={styles.choices}>
@@ -111,7 +116,9 @@ function QuestionRow({
           activeOpacity={0.8}
           disabled={selected.length === 0 || disabled}
           onPress={() => onAnswer(JSON.stringify(selected))}>
-          <Text style={styles.confirmText}>确定（{selected.length}）</Text>
+          <Text style={styles.confirmText}>
+            {t('clarify.confirmMulti', {count: selected.length})}
+          </Text>
         </TouchableOpacity>
       ) : null}
       <View style={styles.freeRow}>
@@ -119,13 +126,13 @@ function QuestionRow({
           style={styles.freeInput}
           value={draft}
           onChangeText={setDraft}
-          placeholder="或直接输入回答…"
+          placeholder={t('chat.answerPlaceholder')}
           placeholderTextColor={Colors.textSecondary}
           editable={!disabled}
           onSubmitEditing={() => {
-            const t = draft.trim();
-            if (t) {
-              onAnswer(t);
+            const text = draft.trim();
+            if (text) {
+              onAnswer(text);
             }
           }}
         />
@@ -134,7 +141,7 @@ function QuestionRow({
           activeOpacity={0.8}
           disabled={!draft.trim() || disabled}
           onPress={() => onAnswer(draft.trim())}>
-          <Text style={styles.confirmText}>发送</Text>
+          <Text style={styles.confirmText}>{t('input.send')}</Text>
         </TouchableOpacity>
       </View>
     </View>

@@ -12,13 +12,15 @@
 
 import {Platform} from 'react-native';
 
+import {t} from '../i18n';
 import {useConnectionStore, type ConnectionProfile} from '../store/connection';
 import {SshManager} from './SshManager';
 import {extractToken, type Transport, type TransportResult} from './transport';
 
 /** 伪配置的 host 标记（区分真实 SSH 配置，避免误连） */
 const DIRECT_HOST = 'web-direct';
-export const WEB_DIRECT_NAME = '浏览器直连（本机 127.0.0.1:9119）';
+/** 伪配置显示名（创建时取当前语言；已持久化的旧配置保留创建时名称） */
+export const webDirectName = (): string => t('ssh.webDirectName');
 
 interface WebLocation {
   origin: string;
@@ -28,11 +30,11 @@ interface WebLocation {
 
 function webLocation(): WebLocation {
   if (Platform.OS !== 'web') {
-    throw new Error('浏览器直连仅在 web 构建中可用');
+    throw new Error(t('ssh.webDirectWebOnly'));
   }
   const loc = (globalThis as {location?: WebLocation}).location;
   if (!loc) {
-    throw new Error('浏览器直连需要 window.location');
+    throw new Error(t('ssh.webDirectNeedsLocation'));
   }
   return loc;
 }
@@ -46,11 +48,11 @@ export class WebDirectTransport implements Transport {
     const loc = webLocation();
     const resp = await fetch(`${loc.origin}/__hermes/`);
     if (!resp.ok) {
-      throw new Error(`获取 dashboard 页面失败（HTTP ${resp.status}）`);
+      throw new Error(t('ssh.dashboardHttp', {status: resp.status}));
     }
     const token = extractToken(await resp.text());
     if (!token) {
-      throw new Error('未能从 dashboard 页面提取 session token');
+      throw new Error(t('ssh.dashboardTokenNotFound'));
     }
     const wsScheme = loc.protocol === 'https:' ? 'wss' : 'ws';
     return {
@@ -75,7 +77,7 @@ export function webDirectTransportFactory(cfg: ConnectionProfile): Transport {
   if (cfg.type === 'direct' || cfg.host === DIRECT_HOST) {
     return new WebDirectTransport();
   }
-  throw new Error('浏览器环境不支持 SSH 隧道，请使用「浏览器直连」入口');
+  throw new Error(t('ssh.tunnelUnsupported'));
 }
 
 /**
@@ -103,7 +105,7 @@ export async function connectWebDirect(): Promise<boolean> {
   let id = conn.profiles.find(p => p.host === DIRECT_HOST)?.id;
   if (!id) {
     id = conn.addProfile({
-      name: WEB_DIRECT_NAME,
+      name: webDirectName(),
       type: 'direct',
       host: DIRECT_HOST,
       port: '9119',
