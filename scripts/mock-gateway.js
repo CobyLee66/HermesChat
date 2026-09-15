@@ -169,6 +169,8 @@ function startMockGateway({
     lastSendError: null,
     /** 挂起的 clarify 快照（单对象；clarify.respond 后清空，模拟服务端解锁） */
     pendingClarify,
+    /** 当前思考等级（config.get/set reasoning 的内存态；默认 medium = 服务端回落值） */
+    reasoningEffort: 'medium',
   };
 
   const ok = (id, value) => JSON.stringify({jsonrpc: '2.0', id, result: value});
@@ -225,6 +227,7 @@ function startMockGateway({
               model: 'mock-model',
               provider: 'mock',
               title: state.title,
+              reasoning_effort: state.reasoningEffort,
               running: false,
               profile_name: PROFILE,
             },
@@ -281,6 +284,13 @@ function startMockGateway({
         return;
       case 'slash.exec': {
         const cmd = String(params.command ?? '').trim();
+        // 裸 /reasoning 查询（等级设置已被客户端拦截走 config.set，到不了这里）
+        if (/^reasoning$/.test(cmd)) {
+          send(
+            ok(id, {output: `  Reasoning effort: ${state.reasoningEffort}`}),
+          );
+          return;
+        }
         const m = cmd.match(/^title(?:\s+([\s\S]*))?$/);
         if (!m) {
           send(err(id, 4018, `mock: 未实现的斜杠命令 /${cmd}`));
@@ -335,6 +345,60 @@ function startMockGateway({
       case 'model.options':
         send(ok(id, {providers: [], model: 'mock-model', provider: 'mock'}));
         return;
+      case 'config.get':
+        if (params.key === 'reasoning') {
+          send(ok(id, {value: state.reasoningEffort, display: 'show'}));
+          return;
+        }
+        send(err(id, 4002, `mock: 未实现的 config.get key ${params.key}`));
+        return;
+      case 'config.set': {
+        if (params.key !== 'reasoning') {
+          send(err(id, 4002, `mock: 未实现的 config.set key ${params.key}`));
+          return;
+        }
+        // 真实服务端语义：非法等级 err 4002；成功后应用 live 会话并推
+        // session.info 事件（顶栏经事件路径刷新思考等级）
+        const level = String(params.value ?? '').trim().toLowerCase();
+        const LEVELS = [
+          'none',
+          'minimal',
+          'low',
+          'medium',
+          'high',
+          'xhigh',
+          'max',
+          'ultra',
+        ];
+        if (!LEVELS.includes(level)) {
+          send(err(id, 4002, `unknown reasoning value: ${params.value}`));
+          return;
+        }
+        state.reasoningEffort = level;
+        send(ok(id, {key: 'reasoning', value: level}));
+        send(
+          JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'event',
+            params: {
+              type: 'session.info',
+              session_id: LIVE_ID,
+              payload: {
+                model: 'mock-model',
+                provider: 'mock',
+                title: state.title,
+                reasoning_effort: level,
+                running: false,
+                profile_name: PROFILE,
+                // 真实 _session_info 带 usage（session.info/usage 事件同构），
+                // 缺了它顶栏的用量段会在 info 整体替换后消失
+                usage: {...MOCK_USAGE},
+              },
+            },
+          }),
+        );
+        return;
+      }
       case 'prompt.submit': {
         const text = String(params.text ?? '');
         state.messages.push({

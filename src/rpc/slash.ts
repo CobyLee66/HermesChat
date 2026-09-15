@@ -107,6 +107,37 @@ export function parseSlash(command: string): {name: string; arg: string} {
   return m ? {name: m[1], arg: m[2].trim()} : {name: '', arg: ''};
 }
 
+/** 服务端 canonical 思考等级（hermes_constants.VALID_REASONING_EFFORTS + none，升序；ModelPicker 等级区同用）。 */
+export const REASONING_LEVELS = [
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+  'ultra',
+] as const;
+
+const REASONING_LEVEL_SET = new Set<string>(REASONING_LEVELS);
+
+/**
+ * /reasoning 参数解析：仅当参数是「等级 ± --global/--session」时返回
+ * {level, global}（镜像服务端 CLI `_handle_reasoning_command` 的解析：
+ * 先剔除 scope token，剩余须恰好一个且为有效等级）。空参 / show|hide|
+ * full|clamp / 未知参数返回 null —— 调用方应继续走 slash 流水线。
+ */
+export function parseReasoningLevelArg(
+  arg: string,
+): {level: string; global: boolean} | null {
+  const tokens = arg.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const rest = tokens.filter(tk => tk !== '--global' && tk !== '--session');
+  if (rest.length !== 1 || !REASONING_LEVEL_SET.has(rest[0])) {
+    return null;
+  }
+  return {level: rest[0], global: tokens.includes('--global')};
+}
+
 function parseCommandDispatch(raw: unknown): CommandDispatchResponse | null {
   if (!raw || typeof raw !== 'object') {
     return null;

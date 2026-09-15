@@ -11,21 +11,31 @@ import {
 } from 'react-native';
 
 import type {ModelOptionsResult, ModelProviderRow} from '../rpc/types';
+import {REASONING_LEVELS} from '../rpc/slash';
 import {useT} from '../i18n';
 import {Colors} from './theme';
+
+/** ModelPicker 的加载结果：模型分组 + 当前思考等级。 */
+export interface ModelPickerData {
+  models: ModelOptionsResult;
+  /** 当前生效思考等级（config.get reasoning 的 value；'' = 读取失败/老服务端，仅影响当前态高亮） */
+  reasoning: string;
+}
 
 interface Props {
   visible: boolean;
   onClose: () => void;
-  /** 拉取 model.options（由调用方接 RPC） */
-  load: () => Promise<ModelOptionsResult>;
+  /** 拉取 model.options + 当前思考等级（由调用方接 RPC） */
+  load: () => Promise<ModelPickerData>;
   /** 选择模型后回调（config.set 由调用方发） */
   onPick: (model: string, provider: string) => void;
+  /** 选择思考等级后回调（config.set 由调用方发） */
+  onPickReasoning: (level: string) => void;
 }
 
-/** 模型切换弹层：原生 bottom sheet；web/桌面为居中对话框。按 provider 分组。 */
-export function ModelPicker({visible, onClose, load, onPick}: Props) {
-  const [data, setData] = useState<ModelOptionsResult | null>(null);
+/** 模型切换弹层：原生 bottom sheet；web/桌面为居中对话框。按 provider 分组，顶部带思考等级区。 */
+export function ModelPicker({visible, onClose, load, onPick, onPickReasoning}: Props) {
+  const [data, setData] = useState<ModelPickerData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const centered = Platform.OS === 'web';
@@ -42,7 +52,7 @@ export function ModelPicker({visible, onClose, load, onPick}: Props) {
       .finally(() => setLoading(false));
   }, [visible, load]);
 
-  const rows = (data?.providers ?? []).filter(
+  const rows = (data?.models.providers ?? []).filter(
     p => (p.models?.length ?? 0) > 0 || p.is_current,
   );
   // 服务端 canonical 顺序把用户自定义 provider 固定排最后；这里稳定分区提到前面
@@ -69,6 +79,10 @@ export function ModelPicker({visible, onClose, load, onPick}: Props) {
                 onPick(m, p);
                 onClose();
               }}
+              onPickReasoning={lv => {
+                onPickReasoning(lv);
+                onClose();
+              }}
             />
           </View>
         </TouchableOpacity>
@@ -86,6 +100,10 @@ export function ModelPicker({visible, onClose, load, onPick}: Props) {
                 onPick(m, p);
                 onClose();
               }}
+              onPickReasoning={lv => {
+                onPickReasoning(lv);
+                onClose();
+              }}
             />
           </View>
         </>
@@ -101,12 +119,14 @@ function ListBody({
   loading,
   error,
   onPickModel,
+  onPickReasoning,
 }: {
   providers: ModelProviderRow[];
-  data: ModelOptionsResult | null;
+  data: ModelPickerData | null;
   loading: boolean;
   error: string | null;
   onPickModel: (model: string, provider: string) => void;
+  onPickReasoning: (level: string) => void;
 }) {
   const t = useT();
   return (
@@ -118,6 +138,24 @@ function ListBody({
         <Text style={styles.error}>{t('model.loadFailed', {error})}</Text>
       ) : (
         <ScrollView style={styles.list}>
+          <Text style={styles.providerHeader}>{t('model.reasoningTitle')}</Text>
+          <View style={styles.chipRow}>
+            {REASONING_LEVELS.map(lv => {
+              // 等级名是协议词，原文展示（与顶栏 reasoning_effort 口径一致）
+              const active = lv === data?.reasoning;
+              return (
+                <TouchableOpacity
+                  key={lv}
+                  style={[styles.chip, active ? styles.chipActive : null]}
+                  onPress={() => onPickReasoning(lv)}>
+                  <Text
+                    style={[styles.chipText, active ? styles.chipTextActive : null]}>
+                    {lv}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
           {providers.map((p: ModelProviderRow) => (
             <View key={p.slug}>
               <Text style={styles.providerHeader}>
@@ -125,7 +163,7 @@ function ListBody({
                 {p.is_current ? t('chat.currentModel') : ''}
               </Text>
               {(p.models ?? []).slice(0, 30).map(m => {
-                const isCurrent = p.is_current && m === data?.model;
+                const isCurrent = p.is_current && m === data?.models.model;
                 return (
                   <TouchableOpacity
                     key={`${p.slug}/${m}`}
@@ -206,6 +244,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   list: {paddingHorizontal: 16},
+  chipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingHorizontal: 8,
+    marginBottom: 4,
+  },
+  chip: {
+    borderRadius: 14,
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    backgroundColor: Colors.fill,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.fillBorder,
+  },
+  chipActive: {backgroundColor: Colors.accent, borderColor: Colors.accent},
+  chipText: {fontSize: 13, color: Colors.text},
+  chipTextActive: {color: '#FFFFFF', fontWeight: '600'},
   providerHeader: {
     fontSize: 13,
     fontWeight: '600',

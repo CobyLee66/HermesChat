@@ -255,6 +255,7 @@ export const en = {
   'model.loadFailed': 'Failed to load: {error}',
   'model.empty': 'No models available',
   'model.more': '… {count} total',
+  'model.reasoningTitle': 'Thinking level',
 
   // ── Markdown 复制菜单（web） ──
   'md.copyMarkdown': 'Copy Markdown',
@@ -269,6 +270,10 @@ export const en = {
   'chat.toggleDetailShow': 'Show tools & thinking',
   'chat.toggleDetailHide': 'Hide tools & thinking',
   'chat.switchFailed': 'Switch failed',
+  'chat.reasoningSet': '✓ Reasoning effort set to {level}',
+  'chat.reasoningSetGlobal':
+    '✓ Reasoning effort set to {level} (saved to global config)',
+  'chat.reasoningSetFailed': 'Failed to set reasoning level: {error}',
   'chat.infoModel': 'Model',
   'chat.infoProvider': 'Provider',
   'chat.infoTokenUsage': 'Token usage',

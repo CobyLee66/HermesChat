@@ -233,6 +233,7 @@ export const zhCN: Record<MessageKey, string> = {
   'model.loadFailed': '加载失败：{error}',
   'model.empty': '无可用模型',
   'model.more': '… 共 {count} 个',
+  'model.reasoningTitle': '思考等级',
 
   // ── Markdown 复制菜单（web） ──
   'md.copyMarkdown': '复制 Markdown',
@@ -247,6 +248,9 @@ export const zhCN: Record<MessageKey, string> = {
   'chat.toggleDetailShow': '显示工具与思考',
   'chat.toggleDetailHide': '隐藏工具与思考',
   'chat.switchFailed': '切换失败',
+  'chat.reasoningSet': '✓ 思考等级已设为 {level}',
+  'chat.reasoningSetGlobal': '✓ 思考等级已设为 {level}（已保存到全局配置）',
+  'chat.reasoningSetFailed': '切换思考等级失败：{error}',
   'chat.infoModel': '模型',
   'chat.infoProvider': '供应商',
   'chat.infoTokenUsage': 'Token 用量',

@@ -53,7 +53,8 @@ export function ChatOverlays({
   // foreign 只读会话（未 resume 的 multiplex 大库行）：改名/删除 RPC 都够不到，
   // 菜单里隐藏这两项
   const foreign = useChatStore(s => s.bySession[sessionId]?.foreign ?? null);
-  const {switchModel, fetchModelOptions} = useChatStore();
+  const {switchModel, fetchModelOptions, setReasoningLevel, fetchReasoningLevel} =
+    useChatStore();
 
   // 改名弹窗（本地状态：仅本组件渲染）
   const [rename, setRename] = useState<{visible: boolean; text: string}>({
@@ -172,10 +173,24 @@ export function ChatOverlays({
       <ModelPicker
         visible={state.modelPickerVisible}
         onClose={() => setState({modelPickerVisible: false})}
-        load={() => fetchModelOptions(sessionId)}
+        load={() =>
+          // 思考等级读取失败（老服务端无此 key）不拖垮整个面板，仅无当前态高亮
+          Promise.all([
+            fetchModelOptions(sessionId),
+            fetchReasoningLevel(sessionId).catch(() => ''),
+          ]).then(([models, reasoning]) => ({models, reasoning}))
+        }
         onPick={(model, provider) => {
           switchModel(sessionId, model, provider).catch(e =>
             alertError(t('chat.switchFailed'), e instanceof Error ? e.message : String(e)),
+          );
+        }}
+        onPickReasoning={level => {
+          setReasoningLevel(sessionId, level).catch(e =>
+            alertError(
+              t('chat.reasoningSetFailed'),
+              e instanceof Error ? e.message : String(e),
+            ),
           );
         }}
       />

@@ -7,7 +7,12 @@ import {create} from 'zustand';
 
 import {TimelineAggregator, type InflightSnapshot} from '../rpc/aggregator';
 import {getRpc} from '../rpc/runtime';
-import {executeSlash, looksLikeSlashCommand, parseSlash} from '../rpc/slash';
+import {
+  executeSlash,
+  looksLikeSlashCommand,
+  parseReasoningLevelArg,
+  parseSlash,
+} from '../rpc/slash';
 import {t} from '../i18n';
 import type {
   ApprovalChoice,
@@ -247,6 +252,19 @@ interface ChatStore {
   ): Promise<void>;
   switchModel(sid: string, model: string, provider?: string): Promise<string>;
   fetchModelOptions(sid?: string): Promise<ModelOptionsResult>;
+  /**
+   * 切换思考等级：`config.set {key:'reasoning'}`（官方 desktop 模型菜单同款
+   * 路径）。有 live agent 时服务端会推 session.info 整体刷新顶栏；无 agent
+   * 时不推事件，成功后本地合并 info.reasoning_effort 兜底。
+   * globalScope=true 带 scope:'global'（额外写 config.yaml 全局持久化）。
+   */
+  setReasoningLevel(
+    sid: string,
+    level: string,
+    globalScope?: boolean,
+  ): Promise<void>;
+  /** 读当前生效思考等级：`config.get {key:'reasoning'}` → value（服务端回落链：会话 override → live agent → config.yaml → "medium"）。 */
+  fetchReasoningLevel(sid: string): Promise<string>;
 }
 
 export const useChatStore = create<ChatStore>((set, get) => {
@@ -539,7 +557,33 @@ export const useChatStore = create<ChatStore>((set, get) => {
       const agg = aggFor(sid);
       agg.appendSystemMessage(command);
       snapshot(sid, {});
-      const {name} = parseSlash(command);
+      const {name, arg} = parseSlash(command);
+      // /reasoning <level> 拦截走 config.set（官方 desktop 同款）：服务端把
+      // /reasoning 交给 slash worker 子进程执行（不在 _LIVE_SESSION_DIRECT_COMMANDS，
+      // _mirror_slash_side_effects 无 reasoning 分支），worker 只改子进程自己的
+      // reasoning_config——live 会话不生效、不推 session.info，顶栏因此永不刷新；
+      // 且 worker 不落任何可读回状态，/title 式事后读回也救不了（读回的是旧值）。
+      // config.set 则应用 live 会话并推 session.info，顶栏经事件路径自动同步。
+      // 裸 /reasoning、show/hide/full/clamp 显示开关、未知参数仍走 slash 流水线。
+      const reasoning = name === 'reasoning' ? parseReasoningLevelArg(arg) : null;
+      if (reasoning) {
+        try {
+          await get().setReasoningLevel(sid, reasoning.level, reasoning.global);
+          agg.appendSystemMessage(
+            t(reasoning.global ? 'chat.reasoningSetGlobal' : 'chat.reasoningSet', {
+              level: reasoning.level,
+            }),
+          );
+        } catch (e) {
+          agg.appendSystemMessage(
+            t('chat.reasoningSetFailed', {
+              error: e instanceof Error ? e.message : String(e),
+            }),
+          );
+        }
+        snapshot(sid, {});
+        return;
+      }
       await executeSlash({
         command,
         sessionId: sid,
@@ -890,6 +934,36 @@ export const useChatStore = create<ChatStore>((set, get) => {
         'model.options',
         sid ? {session_id: sid} : undefined,
       );
+    },
+
+    async setReasoningLevel(sid, level, globalScope) {
+      await getRpc().call('config.set', {
+        key: 'reasoning',
+        value: level,
+        session_id: sid,
+        ...(globalScope ? {scope: 'global'} : null),
+      });
+      // 有 live agent 时服务端随后推 session.info 整体替换 info（同值，无闪烁）；
+      // agent 未建（还没跑过 turn）时不推事件——本地合并让顶栏立即反映，
+      // 等 lazy build 完成后服务端的 session.info 会按 override 回填同值。
+      const prev = get().bySession[sid] ?? EMPTY;
+      set(s => ({
+        bySession: {
+          ...s.bySession,
+          [sid]: {
+            ...prev,
+            info: {...(prev.info ?? {}), reasoning_effort: level},
+          },
+        },
+      }));
+    },
+
+    async fetchReasoningLevel(sid) {
+      const r = await getRpc().call<{value?: string}>('config.get', {
+        key: 'reasoning',
+        session_id: sid,
+      });
+      return typeof r?.value === 'string' ? r.value : '';
     },
   };
 });
