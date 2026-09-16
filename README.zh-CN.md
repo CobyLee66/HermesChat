@@ -12,6 +12,20 @@
 
 ---
 
+## 下载
+
+预编译安装包发布在 [**Releases**](https://github.com/CobyLee66/HermesChat/releases) 页面。当前版本：**[v0.1.0](https://github.com/CobyLee66/HermesChat/releases/tag/v0.1.0)**
+
+| 平台 | 下载 | 说明 |
+|---|---|---|
+| Android | [HermesChat-0.1.0.apk](https://github.com/CobyLee66/HermesChat/releases/download/v0.1.0/HermesChat-0.1.0.apk) | 使用公开 debug keystore 签名 —— 见 [SECURITY.md](SECURITY.md) |
+| Windows | [HermesChat-Setup-0.1.0.exe](https://github.com/CobyLee66/HermesChat/releases/download/v0.1.0/HermesChat-Setup-0.1.0.exe) | 未签名 —— SmartScreen 弹窗选「仍要运行」 |
+| macOS（Apple Silicon） | [HermesChat-0.1.0-arm64.dmg](https://github.com/CobyLee66/HermesChat/releases/download/v0.1.0/HermesChat-0.1.0-arm64.dmg) | 未签名 —— 首次打开被 Gatekeeper 拦截时右键 → 打开 |
+
+也可以[从源码构建](#快速开始)；历史版本见 [Releases 页面](https://github.com/CobyLee66/HermesChat/releases)。
+
+---
+
 ## 功能特性
 
 | 模块 | 能力 |
