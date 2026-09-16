@@ -159,6 +159,8 @@ export const en = {
 
   // ── 聊天时间线错误 ──
   'chat.sendFailed': 'Send failed: {message}',
+  'chat.sessionRecovered':
+    'Connection was interrupted; the session was recovered automatically.',
   'chat.sshRequiredForHistory':
     'An SSH connection is required to read this session\u2019s history',
   'chat.forkFailed': 'Fork to current profile failed: {message}',
@@ -236,7 +238,9 @@ export const en = {
   // ── 澄清卡 ──
   'clarify.title': '💬 Your answer is needed',
   'clarify.answered': 'Answered',
-  'clarify.confirmMulti': 'Confirm ({count})',
+  'clarify.yourAnswer': 'Your answer',
+  'clarify.submit': 'Submit answers',
+  'clarify.pendingCount': '{count} question(s) unanswered',
 
   // ── 聊天界面 ──
   'chat.defaultTitle': 'Chat',

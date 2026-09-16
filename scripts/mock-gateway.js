@@ -6,10 +6,16 @@
  * 只改内存）。只实现冒烟所需方法，其余返回 -4040。
  *
  * 已实现：`/`（SPA HTML 带 __HERMES_SESSION_TOKEN__）、`/api/health`、
- * WS `/api/ws` → gateway.ready + profiles.list / session.list / session.resume /
- * session.history / session.usage / complete.slash / slash.exec(title) /
- * session.title / session.delete / session.close / model.options /
- * **prompt.submit（流式回包）**。
+ * WS `/api/ws` → gateway.ready + profiles.list / session.create / session.list /
+ * session.resume（含冷路径换新 live sid）/ session.history / session.usage /
+ * complete.slash / slash.exec(title) / session.title / session.delete /
+ * session.close / model.options / **prompt.submit（流式回包，只认 live sid，
+ * 未知 sid 返 4007）**。
+ * live clarify 流（D052）：prompt 文本 `CLARIFY`（单问）/`CLARIFY_BATCH`
+ * （批量两题）触发挂起，clarify.respond 全题应答后释放（tool.complete 回显
+ * → 续写 → complete，历史落 clarify 工具行）。
+ * 测试控制通道：`gw.reapLiveSession(liveSid, reason)` 回收会话并广播
+ * session.reclaimed（模拟服务端孤儿回收，供发送自愈冒烟触发）。
  *
  * cron 冒烟 REST：`GET /api/cron/jobs`、`GET /api/cron/jobs/{id}/runs`、
  * `GET /api/sessions/{id}/messages`（dashboard REST 同构；消息行含 tool 行与
@@ -169,13 +175,125 @@ function startMockGateway({
     lastSendError: null,
     /** 挂起的 clarify 快照（单对象；clarify.respond 后清空，模拟服务端解锁） */
     pendingClarify,
+    /**
+     * live clarify 流（prompt 文本 CLARIFY / CLARIFY_BATCH 触发）：非空表示
+     * turn 挂起在 clarify 上（message.start 已发、complete 未发——保真真实
+     * 服务端挂起期间不发 message.complete），全题应答后由 clarify.respond
+     * 释放：tool.complete(答案回显) → 续写 delta → message.complete →
+     * 历史落 clarify 工具行（供重进会话「历史只读卡」冒烟）。
+     */
+    liveClarify: null,
     /** 当前思考等级（config.get/set reasoning 的内存态；默认 medium = 服务端回落值） */
     reasoningEffort: 'medium',
+    // ── 会话生命周期（2026-09-16 发送自愈冒烟用，其余冒烟不触碰）──
+    /** seed 会话当前 live sid（被 reap 后冷路径 resume 会换新值） */
+    seededLiveSid: LIVE_ID,
+    /** seed 会话是否已被 reap（下次 resume 走冷路径换新 live sid） */
+    seededReaped: false,
+    /** seed 会话冷路径计数（live0002、live0003…） */
+    seededCounter: 1,
+    /** session.create 出来的新会话（首条 prompt 前不落库 = 不进 session.list） */
+    extraSessions: [],
+    extraCounter: 0,
+    /** 活跃 WS 的 send 函数（reapLiveSession 广播用） */
+    senders: new Set(),
   };
 
   const ok = (id, value) => JSON.stringify({jsonrpc: '2.0', id, result: value});
   const err = (id, code, message) =>
     JSON.stringify({jsonrpc: '2.0', id, error: {code, message}});
+
+  /** 定时器统一登记（close 时清理） */
+  const later = (fn, ms) => {
+    const t = setTimeout(() => {
+      state.timers.delete(t);
+      fn();
+    }, ms);
+    state.timers.add(t);
+  };
+
+  /** 按帧级 session_id 单播事件（mock 单连接等价真实单播） */
+  const emitTo = (send, liveSid, type, payload) =>
+    send(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'event',
+        params: {type, session_id: liveSid, payload},
+      }),
+    );
+
+  /**
+   * live clarify 释放（全部问题应答后由 clarify.respond 触发）：照真实服务端
+   * 事件序——tool.complete（答案回显：单问=纯文本，批量=JSON {answers}）→
+   * 续写 message.delta → message.complete，并把 assistant 前文行 / clarify
+   * 工具行（投影只带 args 不带 result）/ assistant 续写行落进历史投影。
+   */
+  function releaseLiveClarify(send) {
+    const lc = state.liveClarify;
+    if (!lc) {
+      return;
+    }
+    state.liveClarify = null;
+    state.pendingClarify = null;
+    const isBatch = Array.isArray(lc.payload.questions);
+    emitTo(send, lc.liveSid, 'tool.complete', {
+      tool_id: lc.toolId,
+      name: 'clarify',
+      result_text: isBatch
+        ? JSON.stringify({answers: lc.payload.answers ?? {}})
+        : String(lc.answer ?? ''),
+      duration_s: 1.2,
+    });
+    const parts = [
+      '收到你的回答，我按这个口径继续。CLARIFY_CONTINUATION_MARK 第一段：澄清结束后输出应显示在澄清卡下方。\n\n',
+      'CLARIFY_CONTINUATION_MARK 第二段：卡片应停留在它被回答时的历史位置，不再钉在会话底部。\n\n',
+      'CLARIFY_CONTINUATION_MARK 第三段（收尾）。\n\n',
+    ];
+    parts.forEach((text, i) =>
+      later(
+        () => emitTo(send, lc.liveSid, 'message.delta', {text}),
+        300 + i * 350,
+      ),
+    );
+    later(() => {
+      const fullText = parts.join('');
+      emitTo(send, lc.liveSid, 'message.complete', {
+        text: fullText,
+        usage: {
+          model: 'mock-model',
+          context_used: 120,
+          context_max: 8000,
+          context_percent: 2,
+        },
+      });
+      const now = Math.floor(Date.now() / 1000);
+      lc.messages.push({role: 'assistant', text: lc.preText, timestamp: now});
+      lc.messages.push({
+        role: 'tool',
+        name: 'clarify',
+        args: isBatch
+          ? {
+              questions: lc.payload.questions.map(q => ({
+                question: q.question,
+                choices: q.choices,
+                ...(q.multi_select ? {multi_select: true} : null),
+              })),
+            }
+          : {question: lc.payload.question, choices: lc.payload.choices},
+        timestamp: now,
+      });
+      lc.messages.push({role: 'assistant', text: fullText, timestamp: now});
+    }, 300 + parts.length * 350 + 150);
+  }
+
+  const mockInfo = sessionTitle => ({
+    model: 'mock-model',
+    provider: 'mock',
+    title: sessionTitle,
+    reasoning_effort: state.reasoningEffort,
+    running: false,
+    profile_name: PROFILE,
+  });
 
   function dispatch(send, req) {
     const {id, method, params = {}} = req;
@@ -203,6 +321,19 @@ function startMockGateway({
         send(
           ok(id, {
             sessions: [
+              // 新建会话**落库后**才可见（服务端首次 prompt.submit 才写
+              // sessions 行）——空会话被回收后列表里永远不出现
+              ...state.extraSessions
+                .filter(s => s.persisted)
+                .map(s => ({
+                  id: s.storedId,
+                  title: s.title || '未命名会话',
+                  preview:
+                    String(s.messages[s.messages.length - 1]?.text ?? '').slice(0, 60),
+                  started_at: Math.floor(Date.now() / 1000) - 30,
+                  message_count: s.messages.length,
+                  source: 'tui',
+                })),
               {
                 id: STORED_ID,
                 title: state.title,
@@ -215,29 +346,81 @@ function startMockGateway({
           }),
         );
         return;
-      case 'session.resume':
-        state.liveActive = true;
+      case 'session.create': {
+        // 真实网关语义：live sid + 持久化 id 都由服务端分配；空会话此时
+        // **未落库**（不进 session.list、被回收后 resume 必 4007）
+        state.extraCounter += 1;
+        const n = state.extraCounter;
+        const created = {
+          storedId: `storedN${String(n).padStart(3, '0')}`,
+          liveSid: `liveN${String(n).padStart(3, '0')}`,
+          title: String(params.title ?? '').trim(),
+          messages: [],
+          live: true,
+          persisted: false,
+        };
+        state.extraSessions.push(created);
         send(
           ok(id, {
-            session_id: LIVE_ID,
-            stored_session_id: STORED_ID,
-            running: false,
-            messages: state.messages,
-            info: {
-              model: 'mock-model',
-              provider: 'mock',
-              title: state.title,
-              reasoning_effort: state.reasoningEffort,
-              running: false,
-              profile_name: PROFILE,
-            },
-            // 真实服务端形态：**单个对象**（不是数组）；无挂起时不带该字段
-            ...(state.pendingClarify
-              ? {pending_clarify: state.pendingClarify}
-              : null),
+            session_id: created.liveSid,
+            stored_session_id: created.storedId,
+            message_count: 0,
+            messages: [],
+            info: mockInfo(created.title),
           }),
         );
         return;
+      }
+      case 'session.resume': {
+        const requested = String(params.session_id ?? '');
+        if (requested === STORED_ID) {
+          let liveSid = state.seededLiveSid;
+          if (state.seededReaped) {
+            // 冷路径：被回收的持久化会话重建 agent，返回**新** live sid
+            //（客户端据此迁移 bySession key，发送自愈被测行为）
+            state.seededCounter += 1;
+            liveSid = `live${String(state.seededCounter).padStart(4, '0')}`;
+            state.seededLiveSid = liveSid;
+            state.seededReaped = false;
+          }
+          state.liveActive = true;
+          send(
+            ok(id, {
+              session_id: liveSid,
+              stored_session_id: STORED_ID,
+              running: false,
+              messages: state.messages,
+              info: mockInfo(state.title),
+              // 真实服务端形态：**单个对象**（不是数组）；无挂起时不带该字段
+              ...(state.pendingClarify
+                ? {pending_clarify: state.pendingClarify}
+                : null),
+            }),
+          );
+          return;
+        }
+        const extra = state.extraSessions.find(s => s.storedId === requested);
+        if (!extra) {
+          // 库中无行（空会话未落库即被回收 / 他端已删）→ 4007
+          send(err(id, 4007, 'session not found'));
+          return;
+        }
+        if (!extra.live) {
+          extra.live = true;
+          extra.extraSeq = (extra.extraSeq ?? 0) + 1;
+          extra.liveSid = `liveN${String(state.extraCounter).padStart(3, '0')}R${extra.extraSeq}`;
+        }
+        send(
+          ok(id, {
+            session_id: extra.liveSid,
+            stored_session_id: extra.storedId,
+            running: false,
+            messages: extra.messages,
+            info: mockInfo(extra.title),
+          }),
+        );
+        return;
+      }
       case 'clarify.respond': {
         // 真实网关语义：clarify.respond 查全局 pending 注册表（不需要
         // session_id）；有 question_id 即批量逐题锁答案，否则整题解锁。
@@ -257,11 +440,18 @@ function startMockGateway({
             .filter(q => !(q in pending.answers));
           if (remaining.length === 0) {
             state.pendingClarify = null;
+            if (state.liveClarify && state.liveClarify.payload === pending) {
+              releaseLiveClarify(send);
+            }
           }
           send(ok(id, {status: 'ok', remaining}));
           return;
         }
         state.pendingClarify = null;
+        if (state.liveClarify && state.liveClarify.payload === pending) {
+          state.liveClarify.answer = String(params.answer ?? '');
+          releaseLiveClarify(send);
+        }
         send(ok(id, {status: 'ok'}));
         return;
       }
@@ -271,7 +461,11 @@ function startMockGateway({
       case 'session.usage': {
         // 真实网关语义：_sess_nowait 直查内存表，只认 live sid（持久化 id
         // 一律 4001）；顶层返回 usage dict（agent 未建时零计数 dict）
-        if (String(params.session_id ?? '') !== LIVE_ID) {
+        const sid = String(params.session_id ?? '');
+        const known =
+          (sid === state.seededLiveSid && state.liveActive) ||
+          state.extraSessions.some(s => s.live && s.liveSid === sid);
+        if (!known) {
           send(err(id, 4001, 'session not found'));
           return;
         }
@@ -319,8 +513,22 @@ function startMockGateway({
         // 真实网关语义：活动判定与查库都按持久化 id——live sid 一律 4007；
         // 活动会话 4023（客户端应先 session.close(live sid) 再重试）
         const target = String(params.session_id ?? '');
-        if (target === LIVE_ID || target !== STORED_ID) {
+        if (target === state.seededLiveSid) {
           send(err(id, 4007, 'session not found'));
+          return;
+        }
+        if (target !== STORED_ID) {
+          const extra = state.extraSessions.find(s => s.storedId === target);
+          if (!extra) {
+            send(err(id, 4007, 'session not found'));
+            return;
+          }
+          if (extra.live) {
+            send(err(id, 4023, 'cannot delete an active session'));
+            return;
+          }
+          state.extraSessions = state.extraSessions.filter(s => s !== extra);
+          send(ok(id, {deleted: target}));
           return;
         }
         if (state.liveActive) {
@@ -334,7 +542,15 @@ function startMockGateway({
         // 真实网关语义：close 直查内存表，只认 live sid；持久化 id 返回
         // closed:false（不报错）
         const sid = String(params.session_id ?? '');
-        if (sid === LIVE_ID && state.liveActive) {
+        const extra = state.extraSessions.find(
+          s => s.live && s.liveSid === sid,
+        );
+        if (extra) {
+          extra.live = false;
+          send(ok(id, {closed: true}));
+          return;
+        }
+        if (sid === state.seededLiveSid && state.liveActive) {
           state.liveActive = false;
           send(ok(id, {closed: true}));
           return;
@@ -401,28 +617,92 @@ function startMockGateway({
       }
       case 'prompt.submit': {
         const text = String(params.text ?? '');
-        state.messages.push({
+        // 真实网关语义：prompt.submit 只认 live sid，查无 → 4007 session
+        // not found（发送自愈被测行为）；同时首条 prompt 触发落库
+        //（_ensure_session_db_row），空会话从此进 session.list。
+        let target;
+        if (
+          String(params.session_id ?? '') === state.seededLiveSid &&
+          state.liveActive
+        ) {
+          target = {messages: state.messages, liveSid: state.seededLiveSid};
+        } else {
+          const extra = state.extraSessions.find(
+            s => s.live && s.liveSid === String(params.session_id ?? ''),
+          );
+          if (extra) {
+            extra.persisted = true;
+            target = {messages: extra.messages, liveSid: extra.liveSid};
+          }
+        }
+        if (!target) {
+          send(err(id, 4007, 'session not found'));
+          return;
+        }
+        target.messages.push({
           role: 'user',
           text,
           timestamp: Math.floor(Date.now() / 1000),
         });
         send(ok(id, {status: 'streaming'}));
         // 事件帧单播（真实服务端只发绑定的 transport，mock 单连接等价）
+        const liveSid = target.liveSid;
         const emit = (type, payload) =>
           send(
             JSON.stringify({
               jsonrpc: '2.0',
               method: 'event',
-              params: {type, session_id: LIVE_ID, payload},
+              params: {type, session_id: liveSid, payload},
             }),
           );
-        const timer = (fn, ms) => {
-          const t = setTimeout(() => {
-            state.timers.delete(t);
-            fn();
-          }, ms);
-          state.timers.add(t);
-        };
+        const timer = (fn, ms) => later(fn, ms);
+        // ── live clarify 流（CLARIFY / CLARIFY_BATCH 触发，D052 冒烟用）──
+        // 照真实事件序：message.start → 前文 delta → tool.start(clarify) →
+        // clarify.request，然后**挂起**（不发 message.complete——服务端阻塞
+        // 在工具回调里），等 clarify.respond 全题应答后由 releaseLiveClarify
+        // 释放（tool.complete 回显 → 续写 → complete → 历史落工具行）。
+        const clarifyMatch = text.match(/^CLARIFY(_BATCH)?/i);
+        if (clarifyMatch) {
+          const batch = Boolean(clarifyMatch[1]);
+          const payload = batch
+            ? {
+                request_id: `cl-live-${Date.now()}`,
+                questions: [
+                  {
+                    qid: 'q0',
+                    question: '使用哪个数据集？',
+                    choices: ['A数据集', 'B数据集'],
+                  },
+                  {qid: 'q1', question: '时间范围是？', choices: []},
+                ],
+              }
+            : {
+                request_id: `cl-live-${Date.now()}`,
+                question: '要下载 PDF 还是 HTML 版本？',
+                choices: ['PDF', 'HTML'],
+              };
+          const preText = '好的，在动手前先确认：';
+          state.pendingClarify = payload;
+          state.liveClarify = {
+            payload,
+            liveSid,
+            messages: target.messages,
+            toolId: 'mock-clarify-tool',
+            preText,
+          };
+          emit('message.start', {});
+          timer(() => emit('message.delta', {text: preText}), 120);
+          timer(
+            () =>
+              emit('tool.start', {
+                tool_id: 'mock-clarify-tool',
+                name: 'clarify',
+              }),
+            400,
+          );
+          timer(() => emit('clarify.request', payload), 550);
+          return;
+        }
         emit('message.start', {});
         // 首个事件 120ms 即到（客户端尽快看到内容）；rich 前序事件推后正文起点
         let at = 120;
@@ -499,7 +779,7 @@ function startMockGateway({
               context_percent: 2,
             },
           });
-          state.messages.push({
+          target.messages.push({
             role: 'assistant',
             text: fullText,
             timestamp: Math.floor(Date.now() / 1000),
@@ -577,6 +857,7 @@ function startMockGateway({
           }
         }
       };
+      state.senders.add(send);
       send(
         JSON.stringify({
           jsonrpc: '2.0',
@@ -597,6 +878,7 @@ function startMockGateway({
       });
       ws.on('close', (code, reason) => {
         state.sockets -= 1;
+        state.senders.delete(send);
         state.wsClosed = {
           code,
           reason: String(reason || ''),
@@ -606,12 +888,61 @@ function startMockGateway({
     });
   });
 
+  /**
+   * 测试控制通道：回收一个 live 会话（模拟服务端 ws_orphan_reap /
+   * idle_timeout）。默认广播 session.reclaimed（帧级无 session_id 的**全局**
+   * 广播，客户端置 staleLive 走发送快路径自愈）；broadcast=false 模拟网关
+   * 进程直接死亡（无任何通知，客户端发送撞 4007 走 catch 自愈路径）。
+   * 空会话（persisted=false）回收后从注册表移除——resume 必 4007、
+   * session.list 永远不可见，与真实服务端「首次 prompt 前不落库」一致。
+   */
+  function reapLiveSession(liveSid, reason = 'ws_orphan_reap', {broadcast = true} = {}) {
+    let storedId = STORED_ID;
+    if (liveSid === state.seededLiveSid) {
+      state.liveActive = false;
+      state.seededReaped = true;
+    } else {
+      const extra = state.extraSessions.find(
+        s => s.live && s.liveSid === liveSid,
+      );
+      if (!extra) {
+        return false;
+      }
+      storedId = extra.storedId;
+      extra.live = false;
+      if (!extra.persisted) {
+        state.extraSessions = state.extraSessions.filter(s => s !== extra);
+      }
+    }
+    if (!broadcast) {
+      return true;
+    }
+    const frame = JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'event',
+      params: {
+        type: 'session.reclaimed',
+        session_id: '',
+        payload: {
+          session_id: liveSid,
+          stored_session_id: storedId,
+          reason,
+        },
+      },
+    });
+    for (const send of state.senders) {
+      send(frame);
+    }
+    return true;
+  }
+
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(port, '127.0.0.1', () => {
       resolve({
         port,
         state,
+        reapLiveSession,
         close: () =>
           new Promise(r => {
             state.timers.forEach(t => clearTimeout(t));

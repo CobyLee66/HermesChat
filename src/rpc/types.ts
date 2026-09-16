@@ -567,6 +567,17 @@ export interface ClarifyCardItem {
   questions: ClarifyQuestion[];
   /** 已应答的 qid（批量逐题作答；单问题固定用 '' 作 key） */
   answeredQids: string[];
+  /** qid → 展示用答案文本（多选是 JSON 数组串，展示层负责美化）；
+   * 来源：本端提交 / resume 快照 answers 播种 / tool.complete 回显。
+   * 历史 hydrate 合成的只读卡没有答案（服务端投影不含 tool result）。 */
+  answers?: Record<string, string>;
+  /** 整体提交进行中（submitClarify 逐题发送时禁用卡片交互） */
+  submitting?: boolean;
+  /** 挂起时配对的 clarify tool_id（tool.start 先于 clarify.request 到达），
+   * 用于 tool.complete 时按回显答案收敛卡片（其他端作答的场景） */
+  linkedToolId?: string;
+  /** hydrate 从历史 tool 行合成：只读、全部已答、无答案文本 */
+  fromHistory?: boolean;
   expired?: boolean;
 }
 

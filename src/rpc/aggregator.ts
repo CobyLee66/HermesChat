@@ -59,6 +59,46 @@ function stringifyResult(result: unknown): string {
   }
 }
 
+/**
+ * 从 wire payload（clarify.request / resume 快照）或历史 tool 行 args 归一化
+ * 问题列表。单问 {question, choices, multi_select?}；批量 {questions:[...]}。
+ * 无法归一化出问题（缺 question 文本）返回 null。
+ */
+function normalizeClarifyQuestions(source: {
+  question?: unknown;
+  choices?: unknown;
+  multi_select?: unknown;
+  questions?: unknown;
+}): ClarifyQuestion[] | null {
+  const rawQuestions =
+    Array.isArray(source.questions) && source.questions.length > 0
+      ? source.questions
+      : [
+          {
+            qid: '',
+            question: source.question,
+            choices: source.choices,
+            multi_select: source.multi_select,
+          },
+        ];
+  const questions = (rawQuestions as Record<string, unknown>[])
+    .map(q => ({
+      qid: typeof q.qid === 'string' ? q.qid : '',
+      question: typeof q.question === 'string' ? q.question : '',
+      choices: Array.isArray(q.choices)
+        ? q.choices.filter((c): c is string => typeof c === 'string')
+        : [],
+      multiSelect: q.multi_select === true,
+    }))
+    .filter(q => q.question);
+  return questions.length > 0 ? questions : null;
+}
+
+/** clarify 卡是否全部问题已答（交互结束的判定）。 */
+function clarifyFullyAnswered(card: ClarifyCardItem): boolean {
+  return card.questions.every(q => card.answeredQids.includes(q.qid ?? ''));
+}
+
 export class TimelineAggregator {
   private items: TimelineItem[] = [];
   /** 当前流式助手消息（message.start 之后、message.complete 之前） */
@@ -71,13 +111,31 @@ export class TimelineAggregator {
    * 空串清除（桌面端同款语义——不进正文，只做状态行，最新覆盖）。
    */
   lastThinkingHint: string | null = null;
+  /**
+   * 交互卡（clarify/approval）结束后是否已封存流式消息、正在等续写。
+   * 挂起交互期间 turn 仍在服务端运行：作答/超时把 current 封存（让续写落到
+   * 卡片下方）后、下一个 delta/complete 到来前的窗口里，isStreaming 仍应
+   * 为 true（busy 不能闪断，用量读回/历史重拉也要继续让位）。
+   */
+  private sealedInteraction = false;
+  /**
+   * 交互封存时累计的已展示文本长度（concatTextOf 口径）。turn 若在作答后
+   * 立即结束（无续写 delta），孤儿 message.complete 的整段权威文本要截掉
+   * 这段前缀再落新消息，否则同一段文本在两张消息里重复。
+   */
+  private sealedPrefixLen: number | null = null;
+  /** tool.start(clarify) 记录的 tool_id，clarify.request 到达时配对到卡片 */
+  private clarifyToolId: string | null = null;
 
   getItems(): TimelineItem[] {
     return this.items;
   }
 
   isStreaming(): boolean {
-    return this.current !== null && this.current.streaming;
+    if (this.current && this.current.streaming) {
+      return true;
+    }
+    return this.sealedInteraction;
   }
 
   // ─── 历史投影 ──────────────────────────────────────────────
@@ -94,6 +152,9 @@ export class TimelineAggregator {
     this.items = [];
     this.current = null;
     this.sealedText = false;
+    this.sealedInteraction = false;
+    this.sealedPrefixLen = null;
+    this.clarifyToolId = null;
     this.lastStatus = null;
     this.lastThinkingHint = null;
     this.needsHistoryRefresh = false;
@@ -151,6 +212,23 @@ export class TimelineAggregator {
           timestamp: m.timestamp,
         });
       } else if (m.role === 'tool') {
+        // 历史 clarify 工具行 → 只读已答卡（位置 = 行位置，即澄清发生处）。
+        // 投影的 tool 行只带 args 不带 result（server `_history_to_messages`），
+        // 答案文本不可得，题目一律显示「已作答」。
+        if (m.name === 'clarify') {
+          const questions = normalizeClarifyQuestions(m.args ?? {});
+          if (questions) {
+            this.push({
+              kind: 'clarify',
+              id: nextId('cl'),
+              requestId: nextId('clh'),
+              questions,
+              answeredQids: questions.map(q => q.qid ?? ''),
+              fromHistory: true,
+            });
+            continue;
+          }
+        }
         const tool: ToolCallBlock = {
           toolId: m.row_id !== undefined ? `hist-${m.row_id}` : nextId('t'),
           name: m.name ?? 'tool',
@@ -244,7 +322,12 @@ export class TimelineAggregator {
       return;
     }
     const card = this.items[idx] as ApprovalCardItem;
+    if (card.resolved !== undefined) {
+      return;
+    }
     this.replaceAt(idx, {...card, resolved: choice});
+    // 点选即交互结束：封存当前流式消息，后续输出落到卡片下方（归位）
+    this.sealInteractive();
   }
 
   private onApprovalRequest(p: ApprovalRequestPayload) {
@@ -275,8 +358,13 @@ export class TimelineAggregator {
 
   // ─── 澄清提问（clarify） ────────────────────────────────────
 
-  /** 用户作答后调用：把该问题标记为已答（批量逐题）。 */
-  resolveClarify(requestId: string, questionId: string) {
+  /** 用户作答后调用：把该问题标记为已答（批量逐题），answer 为展示用文本。 */
+  resolveClarify(requestId: string, questionId: string, answer?: string) {
+    this.applyClarifyAnswers(requestId, [{qid: questionId, answer}]);
+  }
+
+  /** 整体提交时置/清 submitting（UI 禁用卡片交互防重复提交）。 */
+  setClarifySubmitting(requestId: string, submitting: boolean) {
     const idx = this.items.findIndex(
       it => it.kind === 'clarify' && it.requestId === requestId,
     );
@@ -284,13 +372,45 @@ export class TimelineAggregator {
       return;
     }
     const card = this.items[idx] as ClarifyCardItem;
-    if (card.answeredQids.includes(questionId)) {
+    this.replaceAt(idx, {...card, submitting});
+  }
+
+  /**
+   * 把若干 qid 标记为已答（答案文本可选）。全部问题答完时封存当前流式
+   * 消息——服务端释放 turn 后的续写会作为新消息落到卡片下方，卡片就地
+   * 获得正确时序位置（不再钉在列表底部）。
+   */
+  private applyClarifyAnswers(
+    requestId: string,
+    entries: {qid: string; answer?: string}[],
+  ) {
+    const idx = this.items.findIndex(
+      it => it.kind === 'clarify' && it.requestId === requestId,
+    );
+    if (idx < 0) {
       return;
     }
-    this.replaceAt(idx, {
-      ...card,
-      answeredQids: [...card.answeredQids, questionId],
-    });
+    const card = this.items[idx] as ClarifyCardItem;
+    const wasComplete = clarifyFullyAnswered(card);
+    const answeredQids = [...card.answeredQids];
+    const answers = {...(card.answers ?? {})};
+    for (const {qid, answer} of entries) {
+      // 只收卡片里真实存在的问题（防 echo/调用方串错 qid）
+      if (!card.questions.some(q => (q.qid ?? '') === qid)) {
+        continue;
+      }
+      if (!answeredQids.includes(qid)) {
+        answeredQids.push(qid);
+      }
+      if (answer !== undefined) {
+        answers[qid] = answer;
+      }
+    }
+    const next: ClarifyCardItem = {...card, answeredQids, answers};
+    this.replaceAt(idx, next);
+    if (!wasComplete && clarifyFullyAnswered(next)) {
+      this.sealInteractive();
+    }
   }
 
   private onClarifyRequest(p: ClarifyRequestPayload) {
@@ -298,46 +418,122 @@ export class TimelineAggregator {
       return;
     }
     // 单问 {question, choices, multi_select?}；批量 {questions:[...]}
-    const rawQuestions =
-      Array.isArray(p.questions) && p.questions.length > 0
-        ? p.questions
-        : [{qid: '', question: p.question, choices: p.choices, multi_select: p.multi_select}];
-    const questions: ClarifyQuestion[] = rawQuestions
-      .map(q => ({
-        qid: q.qid ?? '',
-        question: q.question ?? '',
-        choices: Array.isArray(q.choices) ? q.choices : [],
-        multiSelect: q.multi_select === true,
-      }))
-      .filter(q => q.question);
-    if (questions.length === 0) {
+    const questions = normalizeClarifyQuestions(p);
+    if (!questions) {
       return;
     }
     // 去重（断线重放同 request_id）
-    const existing = this.items.findIndex(
+    const existingIdx = this.items.findIndex(
       it => it.kind === 'clarify' && it.requestId === p.request_id,
     );
+    const existing = existingIdx >= 0
+      ? (this.items[existingIdx] as ClarifyCardItem)
+      : null;
     // resume 快照回放批量澄清时带 answers（服务端已锁定的 qid→答案，见
-    // _pending_clarify_request_payload）：直接播种已答状态，否则重进会话后
-    // 已作答的题目又变成可答（官方 desktop 的 lockedAnswers 恢复同款）。
-    const answeredQids =
-      p.answers && typeof p.answers === 'object'
-        ? Object.keys(p.answers).filter(qid =>
-            questions.some(q => q.qid === qid),
-          )
-        : [];
+    // _pending_clarify_request_payload）：播种已答状态与展示文本，否则重进
+    // 会话后已作答的题目又变成可答（官方 desktop 的 lockedAnswers 恢复同款）。
+    const seeded =
+      p.answers && typeof p.answers === 'object' ? p.answers : null;
+    const answeredQids = seeded
+      ? questions.map(q => q.qid ?? '').filter(qid => qid in seeded)
+      : [];
+    const answers: Record<string, string> = {};
+    if (seeded) {
+      for (const qid of answeredQids) {
+        const v = seeded[qid];
+        if (typeof v === 'string') {
+          answers[qid] = v;
+        }
+      }
+    }
     const card: ClarifyCardItem = {
       kind: 'clarify',
-      id: nextId('cl'),
+      id: existing ? existing.id : nextId('cl'),
       requestId: p.request_id,
       questions,
       answeredQids,
+      ...(Object.keys(answers).length > 0 ? {answers} : null),
+      // tool.start(clarify) 先于 clarify.request 到达：记下配对 tool_id，
+      // tool.complete 时按回显答案收敛（其他端作答场景）。重放时本地
+      // clarifyToolId 已丢，保留卡片上旧值。
+      linkedToolId:
+        this.clarifyToolId ?? existing?.linkedToolId ?? undefined,
     };
-    if (existing >= 0) {
-      this.replaceAt(existing, card);
+    if (existingIdx >= 0) {
+      this.replaceAt(existingIdx, card);
     } else {
       this.push(card);
     }
+    if (this.clarifyToolId) {
+      this.clarifyToolId = null;
+    }
+    // 快照已全答（服务端竞态窗口）：交互实际已结束，封存防续写错位
+    if (!existing && clarifyFullyAnswered(card)) {
+      this.sealInteractive();
+    }
+  }
+
+  /**
+   * tool.complete(clarify) 的答案回显收敛：其他端作答/服务端释放的权威
+   * 信号。result：单问=纯文本；批量=JSON {"answers":{qid:answer},
+   * "timed_out"?}（server `_block` 批量读出）。配对按 linkedToolId，
+   * 缺失时退到唯一的未答完卡片。
+   */
+  private applyClarifyEcho(p: ToolCompletePayload) {
+    let target: ClarifyCardItem | undefined;
+    for (const it of this.items) {
+      if (it.kind === 'clarify' && it.linkedToolId === p.tool_id) {
+        target = it;
+        break;
+      }
+    }
+    if (!target) {
+      const pending = this.items.filter(
+        it =>
+          it.kind === 'clarify' &&
+          !clarifyFullyAnswered(it as ClarifyCardItem),
+      ) as ClarifyCardItem[];
+      if (pending.length === 1) {
+        target = pending[0];
+      }
+    }
+    if (!target) {
+      return;
+    }
+    const resultText =
+      typeof p.result_text === 'string' && p.result_text
+        ? p.result_text
+        : stringifyResult(p.result);
+    const entries: {qid: string; answer?: string}[] = [];
+    let parsed: unknown = null;
+    if (resultText) {
+      try {
+        parsed = JSON.parse(resultText);
+      } catch {
+        // 单问纯文本答案
+      }
+    }
+    if (
+      parsed !== null &&
+      typeof parsed === 'object' &&
+      parsed !== null &&
+      'answers' in parsed
+    ) {
+      const echo = (parsed as {answers?: unknown}).answers;
+      if (echo && typeof echo === 'object') {
+        for (const q of target.questions) {
+          const qid = q.qid ?? '';
+          const v = (echo as Record<string, unknown>)[qid];
+          entries.push({
+            qid,
+            answer: typeof v === 'string' ? v : undefined,
+          });
+        }
+      }
+    } else if (resultText) {
+      entries.push({qid: '', answer: resultText});
+    }
+    this.applyClarifyAnswers(target.requestId, entries);
   }
 
   // ─── 交互超时（approval/clarify.expire） ────────────────────
@@ -354,7 +550,20 @@ export class TimelineAggregator {
     if (idx < 0) {
       return;
     }
-    this.replaceAt(idx, {...this.items[idx], expired: true} as TimelineItem);
+    const card = this.items[idx];
+    this.replaceAt(idx, {...card, expired: true} as TimelineItem);
+    // 交互已答完/已处理的卡：交互早在 resolve 时结束（流式消息已封存过），
+    // 此时 current 可能是续写中的新消息，不能再封。
+    const ended =
+      card.kind === 'approval'
+        ? card.resolved !== undefined
+        : card.kind === 'clarify'
+          ? clarifyFullyAnswered(card)
+          : false;
+    if (!ended) {
+      // 超时即交互结束（服务端拿超时结果继续跑）：封存流式消息，续写落到卡片下方
+      this.sealInteractive();
+    }
   }
 
   // ─── 内部：消息流 ─────────────────────────────────────────
@@ -413,8 +622,15 @@ export class TimelineAggregator {
     if (!msg) {
       // 没有 message.start 的孤儿 complete：直接落成一条完整消息
       const blocks: AssistantBlock[] = [];
-      if (p.text && p.text.trim()) {
-        blocks.push({type: 'text', text: p.text});
+      let text = typeof p.text === 'string' ? p.text : '';
+      // 交互封存后的孤儿 complete：权威文本覆盖整 turn，截掉封存时已展示的
+      // 前缀，否则同一段文本在两张消息里重复（「作答后 turn 立即结束、无
+      // 续写 delta」的路径）
+      if (this.sealedPrefixLen !== null) {
+        text = text.slice(this.sealedPrefixLen);
+      }
+      if (text && text.trim()) {
+        blocks.push({type: 'text', text});
       }
       if (p.status === 'error') {
         blocks.push({
@@ -422,12 +638,16 @@ export class TimelineAggregator {
           text: p.error || p.text || t('rpc.unknownError'),
         });
       }
-      this.push({
-        kind: 'assistant',
-        id: nextId('a'),
-        blocks: this.extractMediaBlocks(blocks),
-        streaming: false,
-      });
+      if (blocks.length > 0) {
+        this.push({
+          kind: 'assistant',
+          id: nextId('a'),
+          blocks: this.extractMediaBlocks(blocks),
+          streaming: false,
+        });
+      }
+      this.sealedInteraction = false;
+      this.sealedPrefixLen = null;
       return;
     }
     // 若流式 delta 未产生文本（或 complete 文本更全），用 complete 文本补齐
@@ -464,6 +684,8 @@ export class TimelineAggregator {
     msg.streaming = false;
     this.sealedText = false;
     this.lastThinkingHint = null;
+    this.sealedInteraction = false;
+    this.sealedPrefixLen = null;
     if (msg.fromInflightProjection) {
       // 本轮尾部是重进 mid-turn 会话时的纯文本投影（工具卡/思考块缺失）；
       // turn 已结束、历史投影已含结构——交给 chat store 重拉重建。
@@ -549,6 +771,13 @@ export class TimelineAggregator {
     if (this.findToolBlock(p.tool_id)) {
       return;
     }
+    // clarify 是交互卡不是工具卡：只记 tool_id 供 clarify.request 配对
+    // （tool.start 先于 clarify.request 到达），完成回显由 onToolComplete
+    // 收敛到卡片，全程不建工具块——避免与澄清卡双重展示。
+    if (p.name === 'clarify') {
+      this.clarifyToolId = p.tool_id;
+      return;
+    }
     const msg = this.ensureCurrent();
     const tool: ToolCallBlock = {
       toolId: p.tool_id,
@@ -578,6 +807,12 @@ export class TimelineAggregator {
 
   private onToolComplete(p: ToolCompletePayload) {
     if (!p.tool_id) {
+      return;
+    }
+    // clarify 工具：结果回显收敛到澄清卡（见 applyClarifyEcho），不建工具块
+    if (p.name === 'clarify' || this.clarifyToolId === p.tool_id) {
+      this.clarifyToolId = null;
+      this.applyClarifyEcho(p);
       return;
     }
     const found = this.findToolBlock(p.tool_id);
@@ -660,6 +895,9 @@ export class TimelineAggregator {
     } else {
       this.push({kind: 'system', id: nextId('s'), eventKind: 'error', text});
     }
+    // 错误终结 turn：交互封存窗口一并结束
+    this.sealedInteraction = false;
+    this.sealedPrefixLen = null;
   }
 
   private onStatusUpdate(p: StatusUpdatePayload) {
@@ -774,6 +1012,8 @@ export class TimelineAggregator {
     msg.streaming = true;
     this.current = msg;
     this.sealedText = false;
+    this.sealedInteraction = false;
+    this.sealedPrefixLen = null;
     this.push(msg);
   }
 
@@ -812,6 +1052,21 @@ export class TimelineAggregator {
       this.touchCurrent();
       this.current = null;
     }
+  }
+
+  /**
+   * 交互卡（clarify/approval）结束（全答/点选/超时）时封存当前流式消息：
+   * 服务端释放 turn 后的续写经 ensureCurrent 落到卡片**下方**的新消息，
+   * 卡片就地获得正确时序位置。同时置 sealedInteraction（busy 保持到
+   * 续写/complete 到来）并累计 sealedPrefixLen（孤儿 complete 去重）。
+   */
+  private sealInteractive() {
+    if (this.current && this.current.streaming) {
+      this.sealedPrefixLen =
+        (this.sealedPrefixLen ?? 0) + this.concatTextOf(this.current).length;
+      this.sealCurrent();
+    }
+    this.sealedInteraction = true;
   }
 
   private push(item: TimelineItem) {

@@ -11,7 +11,7 @@
 
 import {AppState, type AppStateStatus} from 'react-native';
 
-import {RpcClient} from '../rpc/client';
+import {RpcClient, RpcError} from '../rpc/client';
 import type {SessionResumeResult} from '../rpc/types';
 import type {
   ConnectResult,
@@ -152,9 +152,21 @@ export class SshManager implements Connector {
         // 重连后主动读回 usage：resume 的 info 普遍缺 usage（计数器是
         // gateway 进程内状态），不读回则顶栏用量要等新消息输出才恢复
         void chat.syncSessionInfo(liveSid);
-      } catch {
-        // 单个会话恢复失败不阻塞其他会话（服务端可能已回收）
-        chat.markResumeFailed(sid);
+      } catch (e) {
+        // 单个会话恢复失败不阻塞其他会话（服务端可能已回收）。空会话
+        // （新建后没发过消息）被回收时服务端根本没有库行——resume 必 4007，
+        // 重进也无门（session.list 看不见它），黄条「请重进」是死路：
+        // 改静默标 staleLive，用户下次发送时走自愈（重建会话）；
+        // 其余失败维持黄条提示。
+        if (
+          e instanceof RpcError &&
+          e.code === 4007 &&
+          useChatStore.getState().bySession[sid]?.pendingFirstSubmit
+        ) {
+          chat.markStaleLive(sid);
+        } else {
+          chat.markResumeFailed(sid);
+        }
       }
     }
   }

@@ -183,7 +183,8 @@ describe('resume 挂起交互恢复（单对象 wire 形态）', () => {
       }),
     ).not.toThrow();
     const s = useChatStore.getState().bySession;
-    expect(s.oldSid).toBeUndefined();
+    // 旧 key 保留 migratedTo shell（页面跟随），卡片恢复到新 key
+    expect(s.oldSid?.migratedTo).toBe('newSid');
     expect(s.newSid.items.filter(i => i.kind === 'clarify')).toHaveLength(1);
   });
 });

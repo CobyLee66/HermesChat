@@ -250,6 +250,279 @@ describe('TimelineAggregator 澄清提问卡', () => {
   });
 });
 
+describe('TimelineAggregator clarify 归位（D052）', () => {
+  /** 典型 live 序列：流式文本 → clarify 工具 → 澄清卡（不建工具块） */
+  function startSuspendedClarify(agg: TimelineAggregator, batch = false) {
+    agg.applyEvent('message.start', {});
+    agg.applyEvent('message.delta', {text: '先说明'});
+    agg.applyEvent('tool.start', {tool_id: 'tc1', name: 'clarify'});
+    agg.applyEvent(
+      'clarify.request',
+      batch
+        ? {
+            request_id: 'cb',
+            questions: [
+              {qid: 'q0', question: '问题一', choices: ['a']},
+              {qid: 'q1', question: '问题二', choices: ['b']},
+            ],
+          }
+        : {request_id: 'cs', question: '选哪个？', choices: ['A', 'B']},
+    );
+  }
+
+  it('clarify 工具不建工具块（澄清卡是唯一展示），卡在消息之后', () => {
+    const agg = new TimelineAggregator();
+    startSuspendedClarify(agg);
+    const items = agg.getItems();
+    expect(items).toHaveLength(2);
+    expect(items[0].kind).toBe('assistant');
+    // 当前流式消息里没有 clarify 工具块
+    expect((items[0] as AssistantMsg).blocks.some(b => b.type === 'tool')).toBe(
+      false,
+    );
+    expect(items[1].kind).toBe('clarify');
+    // 配对 tool_id 记到卡上
+    expect((items[1] as ClarifyCardItem).linkedToolId).toBe('tc1');
+  });
+
+  it('全答完封存流式消息：续写落到卡片下方，卡获得正确时序位置', () => {
+    const agg = new TimelineAggregator();
+    startSuspendedClarify(agg, true);
+    agg.resolveClarify('cb', 'q0', 'a');
+    // 未全答：current 仍是原流式消息（续写还接在卡片前面）
+    agg.applyEvent('message.delta', {text: 'x'});
+    let items = agg.getItems();
+    expect(items[items.length - 1].kind).toBe('clarify');
+    expect(agg.isStreaming()).toBe(true);
+
+    agg.resolveClarify('cb', 'q1', 'b');
+    // 全答完：续写开新消息，追加在卡片之后（inverted 列表 = 视觉在卡片下方）
+    agg.applyEvent('message.delta', {text: '收到答案，继续'});
+    agg.applyEvent('message.complete', {text: ''});
+    items = agg.getItems();
+    expect(items.map(i => i.kind)).toEqual([
+      'assistant',
+      'clarify',
+      'assistant',
+    ]);
+    const card = items[1] as ClarifyCardItem;
+    expect(card.answeredQids).toEqual(['q0', 'q1']);
+    expect(card.answers).toEqual({q0: 'a', q1: 'b'});
+    // 封存前的 delta 归原消息，封存后的续写归新消息
+    expect((items[0] as AssistantMsg).blocks).toEqual([
+      {type: 'text', text: '先说明x'},
+    ]);
+    const tail = items[2] as AssistantMsg;
+    expect(tail.blocks).toEqual([{type: 'text', text: '收到答案，继续'}]);
+  });
+
+  it('作答后到续写前的窗口 busy 不闪断（isStreaming 保持 true）', () => {
+    const agg = new TimelineAggregator();
+    startSuspendedClarify(agg);
+    expect(agg.isStreaming()).toBe(true);
+    agg.resolveClarify('cs', '', 'A');
+    expect(agg.isStreaming()).toBe(true);
+    agg.applyEvent('message.complete', {text: '先说明'});
+    expect(agg.isStreaming()).toBe(false);
+  });
+
+  it('孤儿 complete 前缀去重：作答后 turn 立即结束不重复已展示文本', () => {
+    const agg = new TimelineAggregator();
+    startSuspendedClarify(agg);
+    agg.resolveClarify('cs', '', 'A');
+    // 无任何续写 delta，complete 带整 turn 权威文本
+    agg.applyEvent('message.complete', {text: '先说明'});
+    const items = agg.getItems();
+    expect(items.map(i => i.kind)).toEqual(['assistant', 'clarify']);
+    // 前缀已在第一条消息展示，孤儿分支截掉后无新消息
+    expect((items[0] as AssistantMsg).blocks).toEqual([
+      {type: 'text', text: '先说明'},
+    ]);
+  });
+
+  it('孤儿 complete 前缀去重：有增量时只落增量部分', () => {
+    const agg = new TimelineAggregator();
+    startSuspendedClarify(agg);
+    agg.resolveClarify('cs', '', 'A');
+    agg.applyEvent('message.complete', {text: '先说明加结论'});
+    const items = agg.getItems();
+    expect(items.map(i => i.kind)).toEqual([
+      'assistant',
+      'clarify',
+      'assistant',
+    ]);
+    expect((items[2] as AssistantMsg).blocks).toEqual([
+      {type: 'text', text: '加结论'},
+    ]);
+  });
+
+  it('tool.complete(clarify) 回显收敛：不建工具块、按 result 填答案（其他端作答）', () => {
+    const agg = new TimelineAggregator();
+    startSuspendedClarify(agg, true);
+    agg.applyEvent('tool.complete', {
+      tool_id: 'tc1',
+      name: 'clarify',
+      result: {answers: {q0: 'a', q1: 'b'}},
+    });
+    // 不补建 clarify 工具块
+    expect(agg.getItems().some(i => i.kind === 'assistant')).toBe(true);
+    for (const it of agg.getItems()) {
+      if (it.kind === 'assistant') {
+        expect(it.blocks.some(b => b.type === 'tool')).toBe(false);
+      }
+    }
+    const card = agg.getItems().find(
+      i => i.kind === 'clarify',
+    ) as ClarifyCardItem;
+    expect(card.answeredQids).toEqual(['q0', 'q1']);
+    expect(card.answers).toEqual({q0: 'a', q1: 'b'});
+    // 全答完：续写落到卡下方
+    agg.applyEvent('message.delta', {text: '续'});
+    const items = agg.getItems();
+    expect(items[items.length - 1].kind).toBe('assistant');
+    expect(items[1].kind).toBe('clarify');
+  });
+
+  it('tool.complete(clarify) 单问纯文本回显落到 qid=""', () => {
+    const agg = new TimelineAggregator();
+    startSuspendedClarify(agg);
+    agg.applyEvent('tool.complete', {
+      tool_id: 'tc1',
+      name: 'clarify',
+      result: '用户选的 A',
+    });
+    const card = agg.getItems().find(
+      i => i.kind === 'clarify',
+    ) as ClarifyCardItem;
+    expect(card.answeredQids).toEqual(['']);
+    expect(card.answers).toEqual({'': '用户选的 A'});
+  });
+
+  it('resume 快照 answers 播种 answeredQids 与展示文本', () => {
+    const agg = new TimelineAggregator();
+    agg.applyEvent('clarify.request', {
+      request_id: 'cr',
+      questions: [
+        {qid: 'q0', question: '问题一', choices: ['a']},
+        {qid: 'q1', question: '问题二', choices: ['b']},
+      ],
+      answers: {q0: '锁定值'},
+    });
+    const card = agg.getItems()[0] as ClarifyCardItem;
+    expect(card.answeredQids).toEqual(['q0']);
+    expect(card.answers).toEqual({q0: '锁定值'});
+  });
+
+  it('clarify.expire 后续写也落到卡片下方（超时 turn 继续）', () => {
+    const agg = new TimelineAggregator();
+    startSuspendedClarify(agg);
+    agg.applyEvent('clarify.expire', {request_id: 'cs'});
+    agg.applyEvent('message.delta', {text: '超时续写'});
+    const items = agg.getItems();
+    expect(items.map(i => i.kind)).toEqual([
+      'assistant',
+      'clarify',
+      'assistant',
+    ]);
+    expect((items[1] as ClarifyCardItem).expired).toBe(true);
+  });
+
+  it('approval 点选后续写落到审批卡下方（同病同治）', () => {
+    const agg = new TimelineAggregator();
+    agg.applyEvent('message.start', {});
+    agg.applyEvent('message.delta', {text: '要执行'});
+    agg.applyEvent('approval.request', {
+      request_id: 'r9',
+      command: 'rm -rf /tmp/x',
+    });
+    agg.resolveApproval('r9', 'once');
+    agg.applyEvent('message.delta', {text: '批完了'});
+    const items = agg.getItems();
+    expect(items.map(i => i.kind)).toEqual([
+      'assistant',
+      'approval',
+      'assistant',
+    ]);
+  });
+
+  it('已答完的卡再收到 expire 不重复封存（续写仍接新消息）', () => {
+    const agg = new TimelineAggregator();
+    startSuspendedClarify(agg);
+    agg.resolveClarify('cs', '', 'A');
+    agg.applyEvent('message.delta', {text: '续写中'});
+    // 迟到的 expire：不能把续写消息再封一次
+    agg.applyEvent('clarify.expire', {request_id: 'cs'});
+    agg.applyEvent('message.delta', {text: '继续'});
+    const items = agg.getItems();
+    expect(items.map(i => i.kind)).toEqual([
+      'assistant',
+      'clarify',
+      'assistant',
+    ]);
+    const tail = items[2] as AssistantMsg;
+    expect(tail.blocks).toEqual([{type: 'text', text: '续写中继续'}]);
+  });
+});
+
+describe('hydrate：历史 clarify 工具行合成只读卡（D052）', () => {
+  it('role=tool name=clarify 单问 args → 只读已答卡，位置在行位置', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([
+      {role: 'user', text: '帮我看下'},
+      {role: 'assistant', text: '先确认一下'},
+      {role: 'tool', name: 'clarify', args: {question: '选哪个？', choices: ['A', 'B']}},
+      {role: 'assistant', text: '好，按 A 处理'},
+    ]);
+    const items = agg.getItems();
+    expect(items.map(i => i.kind)).toEqual([
+      'user',
+      'assistant',
+      'clarify',
+      'assistant',
+    ]);
+    const card = items[2] as ClarifyCardItem;
+    expect(card.fromHistory).toBe(true);
+    expect(card.questions).toEqual([
+      {qid: '', question: '选哪个？', choices: ['A', 'B'], multiSelect: false},
+    ]);
+    expect(card.answeredQids).toEqual(['']);
+    expect(card.answers).toBeUndefined();
+  });
+
+  it('批量 args（questions 数组）合成全部已答的只读卡', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([
+      {
+        role: 'tool',
+        name: 'clarify',
+        args: {
+          questions: [
+            {question: '问题一', choices: ['a']},
+            {question: '问题二'},
+          ],
+        },
+      },
+    ]);
+    const card = agg.getItems()[0] as ClarifyCardItem;
+    expect(card.questions).toHaveLength(2);
+    expect(card.answeredQids).toHaveLength(2);
+  });
+
+  it('args 归一不出问题时兜底落回通用工具卡（不丢信息）', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([{role: 'tool', name: 'clarify', args: {}}]);
+    const items = agg.getItems();
+    expect(items).toHaveLength(1);
+    expect(items[0].kind).toBe('assistant');
+    const block = (items[0] as AssistantMsg).blocks[0] as {
+      type: 'tool';
+      tool: ToolCallBlock;
+    };
+    expect(block.type).toBe('tool');
+    expect(block.tool.name).toBe('clarify');
+  });
+});
+
 describe('TimelineAggregator 错误与状态', () => {
   it('error 事件（非流式）生成红色系统条', () => {
     const agg = new TimelineAggregator();

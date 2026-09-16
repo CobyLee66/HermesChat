@@ -32,6 +32,9 @@ export async function createSessionFlow(profile: string): Promise<OpenedSession>
     profile,
     storedSessionId: result.stored_session_id,
     title: t('session.newTitle'),
+    // 空会话标记：服务端首次 prompt.submit 前不落库，等待期间被回收的话
+    // resume 必 4007 且列表不可见——发送时允许自愈路径「重建会话」
+    pendingFirstSubmit: true,
   });
   return {sessionId: result.session_id, title: t('session.newTitle')};
 }

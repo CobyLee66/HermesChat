@@ -6,6 +6,7 @@
 import {create} from 'zustand';
 
 import {TimelineAggregator, type InflightSnapshot} from '../rpc/aggregator';
+import {RpcError} from '../rpc/client';
 import {getRpc} from '../rpc/runtime';
 import {
   executeSlash,
@@ -67,6 +68,18 @@ export interface SessionChatState {
   storedSessionId: string;
   /** 重连后 resume 失败标记（UI 提示重进） */
   resumeFailed?: boolean;
+  /**
+   * live sid 已被服务端回收（session.reclaimed 广播 / 空会话 resume 4007）。
+   * 不直接打扰 UI：下次发送走自愈（resume / 空会话重建）后再提交。
+   */
+  staleLive?: boolean;
+  /**
+   * createSessionFlow 新建、尚未成功发出过 prompt 的空会话。限定「发送时
+   * 重建会话」自愈只作用于这类会话——服务端空会话在首次 prompt.submit 前
+   * 不落库，被回收后 resume 必 4007 且 session.list 看不见（重进无门）；
+   * 有库行的会话不允许重建，防止误复活他端已删除的会话。
+   */
+  pendingFirstSubmit?: boolean;
   /**
    * foreign 只读视图：multiplex 大库里归属本 profile、但物理在其它库的会话。
    * 不 resume（避免错人格 agent），历史经 SSH exec 只读 sqlite 展示；
@@ -168,6 +181,8 @@ interface ChatStore {
       running?: boolean;
       /** resume 结果的 turn 进行中快照（部分流出的助手文本等） */
       inflight?: InflightSnapshot | null;
+      /** createSessionFlow 新建的空会话：允许发送自愈走「重建会话」路径 */
+      pendingFirstSubmit?: boolean;
     },
   ): void;
   detach(sid: string): void;
@@ -188,6 +203,18 @@ interface ChatStore {
   ): void;
   /** resume 失败（服务端已回收）：标记，不清数据。 */
   markResumeFailed(sid: string): void;
+  /** live sid 已失效但不打扰 UI：置 staleLive，等发送时自愈。 */
+  markStaleLive(sid: string): void;
+  /**
+   * 服务端 session.reclaimed 全局广播（帧级无 session_id，身份在 payload：
+   * {session_id: live sid, stored_session_id, reason}）。按 key 匹配、
+   * miss 时按 storedSessionId 兜底；命中且未迁移/非 foreign 则置 staleLive。
+   */
+  markSessionReclaimed(
+    liveSid: string,
+    storedId: string,
+    reason: string,
+  ): void;
   sendPrompt(sid: string, text: string): Promise<void>;
   /**
    * 斜杠命令执行（dashboard 同款客户端流水线）：slash.exec 主通道，
@@ -243,12 +270,16 @@ interface ChatStore {
     requestId: string,
     choice: ApprovalChoice,
   ): Promise<void>;
-  /** 澄清提问作答；questionId 仅批量问题需要（服务端按 qid 归答案）。 */
-  respondClarify(
+  /**
+   * 澄清提问整体提交：answers 为本次要发的问题草稿（qid → 答案文本）。
+   * 协议是逐题 `clarify.respond`（批量问题带 question_id），整体提交 =
+   * 按题目顺序连发；成功一题标记一题，中途失败停住（已锁定题不丢，
+   * 重试只补发未答题）。
+   */
+  submitClarify(
     sid: string,
     requestId: string,
-    answer: string,
-    questionId?: string,
+    answers: {qid: string; answer: string}[],
   ): Promise<void>;
   switchModel(sid: string, model: string, provider?: string): Promise<string>;
   fetchModelOptions(sid?: string): Promise<ModelOptionsResult>;
@@ -286,12 +317,28 @@ export const useChatStore = create<ChatStore>((set, get) => {
     }));
   }
 
-  /** 普通 prompt 提交的公共尾部：用户气泡回显 + prompt.submit + 失败红条。 */
-  async function submitPlain(
+  /** chat store ↔ connection store 环依赖：惰性 require（SshManager 同款先例）。 */
+  function waitReadyForRpc(): Promise<void> {
+    const {useConnectionStore} =
+      require('./connection') as typeof import('./connection');
+    return useConnectionStore.getState().waitReady();
+  }
+
+  /** 服务端「会话不存在」错误：4007（live/stored 均查无）。 */
+  function isSessionMissingError(e: unknown): boolean {
+    return e instanceof RpcError && e.code === 4007;
+  }
+
+  type RecoveryResult =
+    | {ok: true; sid: string; images: {path: string}[]}
+    | {ok: false; reason: string};
+
+  /** 发送本体：用户气泡回显 + prompt.submit + 成功后关闭自愈窗口。 */
+  async function doSubmit(
     sid: string,
     text: string,
-    images: {path: string}[] = [],
-    clearAttachments = false,
+    images: {path: string}[],
+    clearAttachments: boolean,
   ) {
     const agg = aggFor(sid);
     agg.appendUserMessage(text, images);
@@ -301,13 +348,182 @@ export const useChatStore = create<ChatStore>((set, get) => {
       sid,
       clearAttachments ? {busy: true, pendingAttachments: []} : {busy: true},
     );
+    await getRpc().call('prompt.submit', {session_id: sid, text});
+    // 提交成功 = 会话在服务端已真实存在（首条 prompt 才落库），此后 resume
+    // 有库行可走，「重建会话」自愈分支不再允许。busy 显式保持 true：
+    // snapshot 会从聚合器重算（此刻流式事件还没到，重算会闪断），原有语义
+    // 是提交后保持 busy 直到首个流式事件/complete 落地。
+    snapshot(sid, {staleLive: false, pendingFirstSubmit: false, busy: true});
+  }
+
+  /** 自愈后把待发图片尽力重传到新会话（旧会话的服务端队列已销毁）。 */
+  async function reuploadAttachments(
+    sid: string,
+    images: PendingAttachment[],
+  ): Promise<{path: string}[]> {
+    const ok: {path: string}[] = [];
+    for (const att of images) {
+      try {
+        const prep = await prepareImageForUpload(att.localUri, att.name);
+        const res = await getRpc().call<ImageAttachResult>(
+          'image.attach_bytes',
+          {
+            session_id: sid,
+            content_base64: prep.base64,
+            filename: prep.filename,
+          },
+        );
+        ok.push({path: res.path});
+      } catch (e) {
+        aggFor(sid).applyEvent('error', {
+          message: t('chat.imageUploadFailed', {
+            message: e instanceof Error ? e.message : String(e),
+          }),
+        });
+        snapshot(sid);
+      }
+    }
+    return ok;
+  }
+
+  /**
+   * 发送自愈：live sid 已失效（4007 / staleLive）时恢复出一个可用会话。
+   * - resume 持久化 id：服务端给回 live sid（刚 4007 过，几乎必然是冷路径
+   *   的新 sid），reattachAfterResume 让挂载中的页面经 migratedTo 跟随迁移；
+   * - resume 也 4007 且是「新建未发过消息」的空会话：服务端根本没落库
+   *   （回收后列表也不可见、重进无门）→ session.create 重建同名会话，
+   *   首条消息发出后自然落库。
+   * 恢复不了返回 {ok:false, reason}，调用方回退错误红条。
+   */
+  async function recoverLiveSession(
+    sid: string,
+    images: PendingAttachment[],
+  ): Promise<RecoveryResult> {
     try {
-      await getRpc().call('prompt.submit', {session_id: sid, text});
+      await waitReadyForRpc();
     } catch (e) {
-      agg.applyEvent('error', {
-        message: t('chat.sendFailed', {
-          message: e instanceof Error ? e.message : String(e),
-        }),
+      return {ok: false, reason: e instanceof Error ? e.message : String(e)};
+    }
+    const st = get().bySession[sid];
+    if (!st || st.migratedTo) {
+      return {ok: false, reason: 'session state gone'};
+    }
+    const rpc = getRpc();
+    const storedId = st.storedSessionId || sid;
+    try {
+      const r = await rpc.call<SessionResumeResult>('session.resume', {
+        session_id: storedId,
+        profile: st.profile,
+        cols: 100,
+      });
+      const liveSid = r?.session_id || sid;
+      get().reattachAfterResume(sid, liveSid, {
+        messages: r?.messages ?? [],
+        info: r?.info,
+        running: r?.running,
+        inflight: r?.inflight,
+        pendingApprovals: r?.pending_approval,
+        pendingClarifies: r?.pending_clarify,
+      });
+      void get().syncSessionInfo(liveSid);
+      const uploaded = await reuploadAttachments(liveSid, images);
+      aggFor(liveSid).appendSystemMessage(t('chat.sessionRecovered'));
+      snapshot(liveSid, {});
+      return {ok: true, sid: liveSid, images: uploaded};
+    } catch (resumeErr) {
+      const reason =
+        resumeErr instanceof Error ? resumeErr.message : String(resumeErr);
+      if (!isSessionMissingError(resumeErr) || !st.pendingFirstSubmit) {
+        dlog('WARN', `发送自愈 resume 失败 ${sid.slice(0, 8)}: ${reason}`);
+        return {ok: false, reason};
+      }
+      // 空会话重建：服务端无库行，resume 永远 4007。同 profile 同标题重建，
+      // 旧 key 标 migratedTo 让页面跟随；列表置 stale，首条消息后自然出现。
+      try {
+        const created = await rpc.call<SessionCreateResult>('session.create', {
+          profile: st.profile,
+          cols: 100,
+          title: st.title ?? '',
+        });
+        const liveSid = created.session_id;
+        get().attach(liveSid, {
+          messages: created.messages ?? [],
+          info: created.info,
+          profile: st.profile,
+          storedSessionId: created.stored_session_id ?? liveSid,
+          title: st.title,
+          pendingFirstSubmit: true,
+        });
+        set(s => ({
+          bySession: {
+            ...s.bySession,
+            [sid]: {
+              ...(s.bySession[sid] ?? EMPTY),
+              migratedTo: liveSid,
+              busy: false,
+              staleLive: false,
+            },
+          },
+        }));
+        useSessionsStore.getState().markStale();
+        const uploaded = await reuploadAttachments(liveSid, images);
+        aggFor(liveSid).appendSystemMessage(t('chat.sessionRecovered'));
+        snapshot(liveSid, {});
+        return {ok: true, sid: liveSid, images: uploaded};
+      } catch (createErr) {
+        const createReason =
+          createErr instanceof Error ? createErr.message : String(createErr);
+        dlog(
+          'WARN',
+          `发送自愈重建会话失败 ${sid.slice(0, 8)}: ${createReason}`,
+        );
+        return {ok: false, reason: createReason};
+      }
+    }
+  }
+
+  /**
+   * 普通 prompt 提交：发送本体 + live sid 失效时的一次性自愈重发。
+   * 自愈只在 4007（会话不存在）时触发，且只重试一次，不循环。
+   */
+  async function submitPlain(
+    sid: string,
+    text: string,
+    images: {path: string}[] = [],
+    clearAttachments = false,
+  ) {
+    // 发送前留存待发横条：自愈后旧会话的服务端图片队列已销毁，
+    // 要按 localUri 向新会话重传
+    const pendingAtts =
+      clearAttachments ? get().bySession[sid]?.pendingAttachments ?? [] : [];
+    // live sid 已知失效（session.reclaimed / 重连时空会话 resume 4007）：
+    // 跳过必败的首发，自愈后直接在新会话里发
+    if (get().bySession[sid]?.staleLive) {
+      const healed = await recoverLiveSession(sid, pendingAtts);
+      if (!healed.ok) {
+        aggFor(sid).applyEvent('error', {
+          message: t('chat.sendFailed', {message: healed.reason}),
+        });
+        snapshot(sid, {busy: false});
+        return;
+      }
+      await doSubmit(healed.sid, text, healed.images, true);
+      return;
+    }
+    try {
+      await doSubmit(sid, text, images, clearAttachments);
+    } catch (e) {
+      let failMsg = e instanceof Error ? e.message : String(e);
+      if (isSessionMissingError(e)) {
+        const healed = await recoverLiveSession(sid, pendingAtts);
+        if (healed.ok) {
+          await doSubmit(healed.sid, text, healed.images, true);
+          return;
+        }
+        failMsg = healed.reason;
+      }
+      aggFor(sid).applyEvent('error', {
+        message: t('chat.sendFailed', {message: failMsg}),
       });
       snapshot(sid, {busy: false});
     }
@@ -371,6 +587,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
         forking: false,
         migratedTo: undefined,
         resumeFailed: false,
+        staleLive: false,
+        pendingFirstSubmit: opts?.pendingFirstSubmit ?? false,
         ...(opts?.running !== undefined ? {busy: opts.running} : null),
       });
     },
@@ -392,7 +610,20 @@ export const useChatStore = create<ChatStore>((set, get) => {
         aggregators.delete(oldSid);
         set(s => {
           const next = {...s.bySession};
-          delete next[oldSid];
+          const shell = next[oldSid];
+          if (shell) {
+            // 旧 key 保留 shell + migratedTo 标记：挂载中的聊天页路由参数
+            // 还是旧 sid，靠 ChatScreen/ChatPane 的 migratedTo 跟随逻辑换到
+            // 新 sid。整体删除会让页面读到 undefined → 时间线空白、发送仍打
+            // 旧 sid 报「session not found」（2026-09-16 用户报障根因）。
+            next[oldSid] = {
+              ...shell,
+              migratedTo: liveSid,
+              busy: false,
+              resumeFailed: false,
+              staleLive: false,
+            };
+          }
           return {bySession: next};
         });
       }
@@ -407,6 +638,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
             thinkingHint: null,
             busy: opts.running ?? false,
             resumeFailed: false,
+            staleLive: false,
+            migratedTo: undefined,
             // resume 返回的 info（模型/思考等级可能已变）：有则整体替换，
             // usage 缺口由调用方随后的 syncSessionInfo 读回补齐
             ...(opts.info ? {info: opts.info} : null),
@@ -422,6 +655,38 @@ export const useChatStore = create<ChatStore>((set, get) => {
           [sid]: {...(s.bySession[sid] ?? EMPTY), resumeFailed: true, busy: false},
         },
       }));
+    },
+
+    markStaleLive(sid) {
+      set(s => ({
+        bySession: {
+          ...s.bySession,
+          [sid]: {...(s.bySession[sid] ?? EMPTY), staleLive: true, busy: false},
+        },
+      }));
+    },
+
+    markSessionReclaimed(liveSid, storedId, reason) {
+      const state = get();
+      let key = liveSid && state.bySession[liveSid] ? liveSid : '';
+      if (!key && storedId) {
+        // resume/迁移后 state 的 key 可能已是新 live sid，按持久化 id 兜底
+        key =
+          Object.keys(state.bySession).find(
+            k => state.bySession[k].storedSessionId === storedId,
+          ) ?? '';
+      }
+      const hit = key ? state.bySession[key] : undefined;
+      // 已迁移（migratedTo）与 foreign 只读视图不处理：前者页面已在跟随，
+      // 后者本就不是本网关的 live 会话
+      if (!hit || hit.migratedTo || hit.foreign) {
+        return;
+      }
+      dlog(
+        'INFO',
+        `session.reclaimed ${liveSid.slice(0, 8)} reason=${reason} → staleLive`,
+      );
+      get().markStaleLive(key);
     },
 
     detach(sid) {
@@ -898,18 +1163,17 @@ export const useChatStore = create<ChatStore>((set, get) => {
       }
     },
 
-    async respondClarify(sid, requestId, answer, questionId) {
+    async submitClarify(sid, requestId, answers) {
       const agg = aggFor(sid);
-      // 乐观更新：该问题立即标记已答
-      agg.resolveClarify(requestId, questionId ?? '');
-      snapshot(sid);
+      const card = agg
+        .getItems()
+        .find(it => it.kind === 'clarify' && it.requestId === requestId);
+      if (!card || card.kind !== 'clarify' || card.submitting || card.expired) {
+        return;
+      }
+      // 用户交互入口发 RPC：先等连接就绪（AGENTS 纪律，sessionFlows 同款）
       try {
-        // clarify.respond 走全局 pending 注册表，不需要 session_id
-        await getRpc().call('clarify.respond', {
-          request_id: requestId,
-          answer,
-          ...(questionId ? {question_id: questionId} : null),
-        });
+        await waitReadyForRpc();
       } catch (e) {
         agg.applyEvent('error', {
           message: t('chat.clarifyFailed', {
@@ -917,7 +1181,50 @@ export const useChatStore = create<ChatStore>((set, get) => {
           }),
         });
         snapshot(sid);
+        return;
       }
+      // 按卡片题目顺序、只发未答题（重试/其他端已锁定的题不重发）；
+      // 单问题 qid 为 ''，不带 question_id（服务端单问路径）
+      const pending = card.questions
+        .map(q => ({qid: q.qid ?? '', question: q.question}))
+        .filter(q => !card.answeredQids.includes(q.qid));
+      const toSend = pending
+        .map(q => ({
+          qid: q.qid,
+          entry: answers.find(a => a.qid === q.qid),
+        }))
+        .filter((x): x is {qid: string; entry: {qid: string; answer: string}} =>
+          Boolean(x.entry && x.entry.answer.trim()),
+        );
+      if (toSend.length === 0) {
+        return;
+      }
+      agg.setClarifySubmitting(requestId, true);
+      snapshot(sid);
+      for (const {qid, entry} of toSend) {
+        try {
+          // clarify.respond 走全局 pending 注册表，不需要 session_id；
+          // 逐题成功后标记（中途失败已锁定题不回滚，重试只补发剩余）
+          await getRpc().call('clarify.respond', {
+            request_id: requestId,
+            answer: entry.answer,
+            ...(qid ? {question_id: qid} : null),
+          });
+          agg.resolveClarify(requestId, qid, entry.answer);
+          snapshot(sid);
+        } catch (e) {
+          agg.setClarifySubmitting(requestId, false);
+          agg.applyEvent('error', {
+            message: t('chat.clarifyFailed', {
+              message: e instanceof Error ? e.message : String(e),
+            }),
+          });
+          snapshot(sid);
+          return;
+        }
+      }
+      agg.setClarifySubmitting(requestId, false);
+      snapshot(sid);
     },
 
     async switchModel(sid, model, provider) {

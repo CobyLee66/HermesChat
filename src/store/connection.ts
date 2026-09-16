@@ -219,6 +219,21 @@ function wireEvents(rpc: RpcClient) {
       useSessionsStore.getState().markStale();
       return;
     }
+    if (evt.type === 'session.reclaimed') {
+      // 服务端**全局广播**（帧级 session_id 为空串，身份在 payload 里）：
+      // {session_id: live sid, stored_session_id, reason: idle_timeout|
+      // lru_evict|ws_orphan_reap}。不接线的话该事件永远进不了 chat store，
+      // 客户端只能等下次 prompt.submit 撞 4007。
+      const p = (evt.payload ?? {}) as {
+        session_id?: string;
+        stored_session_id?: string;
+        reason?: string;
+      };
+      useChatStore
+        .getState()
+        .markSessionReclaimed(p.session_id ?? '', p.stored_session_id ?? '', p.reason ?? '');
+      return;
+    }
     if (evt.session_id) {
       useChatStore
         .getState()

@@ -89,7 +89,7 @@ export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
   ) {
     const chat = useChatStore(s => s.bySession[sessionId]);
     const respondApproval = useChatStore(s => s.respondApproval);
-    const respondClarify = useChatStore(s => s.respondClarify);
+    const submitClarify = useChatStore(s => s.submitClarify);
     const t = useT();
 
     const items = useMemo(() => chat?.items ?? EMPTY_ITEMS, [chat?.items]);
@@ -260,8 +260,8 @@ export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
             return (
               <ClarifyCard
                 card={item}
-                onAnswer={(rid, answer, qid) =>
-                  respondClarify(sessionId, rid, answer, qid)
+                onSubmit={(rid, answers) =>
+                  submitClarify(sessionId, rid, answers)
                 }
               />
             );
@@ -287,7 +287,7 @@ export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
     [
       onSelectText,
       respondApproval,
-      respondClarify,
+      submitClarify,
       sessionId,
       showDetail,
       highlightMessageId,

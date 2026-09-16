@@ -149,6 +149,7 @@ export const zhCN: Record<MessageKey, string> = {
 
   // ── 聊天时间线错误 ──
   'chat.sendFailed': '发送失败: {message}',
+  'chat.sessionRecovered': '连接中断过，会话已自动恢复，消息发到这里',
   'chat.sshRequiredForHistory': '需要 SSH 连接才能读取该会话的历史',
   'chat.forkFailed': '派生到当前 profile 失败: {message}',
   'chat.imageUploadFailed': '图片上传失败: {message}',
@@ -214,7 +215,9 @@ export const zhCN: Record<MessageKey, string> = {
   // ── 澄清卡 ──
   'clarify.title': '💬 需要你的回答',
   'clarify.answered': '已作答',
-  'clarify.confirmMulti': '确定（{count}）',
+  'clarify.yourAnswer': '你的回答',
+  'clarify.submit': '提交回答',
+  'clarify.pendingCount': '还有 {count} 题未作答',
 
   // ── 聊天界面 ──
   'chat.defaultTitle': '会话',

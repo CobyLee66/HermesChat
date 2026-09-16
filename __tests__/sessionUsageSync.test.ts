@@ -208,7 +208,7 @@ describe('重进会话主动同步上下文信息', () => {
     const info = infoOf('newSid');
     expect(info?.model).toBe('重连后模型');
     expect(info?.reasoning_effort).toBe('low');
-    // 旧 key 已迁移
-    expect(useChatStore.getState().bySession.oldSid).toBeUndefined();
+    // 旧 key 已迁移：保留 migratedTo shell（页面跟随），状态装到新 key
+    expect(useChatStore.getState().bySession.oldSid?.migratedTo).toBe('newSid');
   });
 });

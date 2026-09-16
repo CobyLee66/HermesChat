@@ -141,7 +141,10 @@ describe('chat store attach 重建', () => {
       inflight: {user: '你好', assistant: '半成品', streaming: true},
     });
     const s = useChatStore.getState().bySession;
-    expect(s.oldSid).toBeUndefined();
+    // 旧 key 保留 migratedTo shell：挂载中的聊天页路由参数还是旧 sid，
+    // 靠它跟随到新 sid（整体删除会让页面空白 + 发送打旧 sid 报错）
+    expect(s.oldSid?.migratedTo).toBe('newSid');
+    expect(s.oldSid?.busy).toBe(false);
     expect(s.newSid.busy).toBe(true);
     const tail = s.newSid.items[s.newSid.items.length - 1] as AssistantMsg;
     expect(tail.blocks).toEqual([{type: 'text', text: '半成品'}]);

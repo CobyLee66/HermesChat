@@ -215,8 +215,14 @@ async function main() {
     }
     await page.screenshot({path: `${OUT}/web-pending-clarify-0-single.png`});
 
-    // ─── 4. 场景 1：点选项作答 → clarify.respond ──────────────────
+    // ─── 4. 场景 1：选草稿 + 整体提交 → clarify.respond ───────────
+    // D052 新交互：点选项只落草稿，再点卡片底部「提交回答」才发送
     await page.getByText('PDF', {exact: true}).first().click();
+    check(
+      (await respondCalls().length) === 0,
+      '场景1 点选项不立即发送（草稿态）',
+    );
+    await page.getByText('提交回答', {exact: true}).click();
     const t1 = Date.now();
     while (respondCalls().length === 0 && Date.now() - t1 < 5000) {
       await page.waitForTimeout(200);
@@ -230,8 +236,8 @@ async function main() {
     );
     await page.waitForTimeout(500);
     check(
-      await page.getByText('已作答', {exact: true}).first().isVisible(),
-      '场景1 该题显示「已作答」',
+      (await page.getByText('你的回答：PDF').count()) === 1,
+      '场景1 该题显示「你的回答：PDF」',
     );
     await page.screenshot({path: `${OUT}/web-pending-clarify-1-answered.png`});
 
@@ -241,16 +247,17 @@ async function main() {
     check(dialogs.length === 0, '场景2 批量快照打开无弹窗');
     check((await cardText()) === 1, '场景2 澄清卡渲染');
     check(
-      (await page.getByText('已作答', {exact: true}).count()) === 1,
-      '场景2 q0 由 answers 回放为已答（仅 1 条「已作答」）',
+      (await page.getByText('你的回答：口径A').count()) === 1,
+      '场景2 q0 由 answers 回放展示答案文本',
     );
     check(
-      await page.getByText('要几份？', {exact: true}).isVisible(),
+      await page.getByText('要几份？').first().isVisible(),
       '场景2 未答的 q1 仍可作答',
     );
     await page.screenshot({path: `${OUT}/web-pending-clarify-2-batch.png`});
 
     await page.getByText('2', {exact: true}).first().click();
+    await page.getByText('提交回答', {exact: true}).click();
     const t2 = Date.now();
     while (respondCalls().length < 2 && Date.now() - t2 < 5000) {
       await page.waitForTimeout(200);
