@@ -82,8 +82,9 @@ android {
         applicationId "com.hermeschat"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
+        // 版本号与 package.json 的 version 对齐（变更记录见 CHANGELOG.md）；每次发版 versionCode 递增
         versionCode 1
-        versionName "1.0"
+        versionName "0.1.0"
         // 明文 HTTP/WS 由 AndroidManifest.xml 直接写死 usesCleartextTraffic=true；
         // manifestPlaceholders 会被 RN gradle 插件在 afterEvaluate 覆盖为 false，勿用
     }
