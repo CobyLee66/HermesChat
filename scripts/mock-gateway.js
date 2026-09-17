@@ -21,6 +21,12 @@
  * `GET /api/sessions/{id}/messages`（dashboard REST 同构；消息行含 tool 行与
  * display_kind=hidden 行，供运行详情「只渲染对话文本」的过滤断言）。
  *
+ * README 配图 demo 模式（`demo:true`，2026-09-17）：换用中性英文假数据——
+ * 多 profile、多条会话、富聊天历史（表格/代码块/思考块/工具行）、演示模型
+ * 列表、英文 cron 任务与运行记录、英文流式与 clarify 文案，供
+ * scripts/web-shot-readme.js 拍 README 截图（AGENTS.md：入库配图一律 mock
+ * 假数据，不拍真实会话）。默认关闭，冒烟行为不受影响。
+ *
  * 关键保真点（照真实服务端行为，docs/protocol.md §2）：
  * - `slash.exec` 执行 `/title X` **只改标题、不推任何事件**；
  * - `session.title` 不带 title 参数 = 只读形式，返回 `{title, session_key}`。
@@ -128,6 +134,337 @@ const MOCK_CRON_MESSAGES = {
   pagination: {limit: 500, offset: 0, order: 'latest', returned: 4},
 };
 
+// ─── README 配图 demo 数据（demo:true 时启用；全中性占位，无真实信息）──────
+const DEMO_PROFILE = 'main';
+const DEMO_MODEL = 'model-x-large';
+/** profiles.list 演示返回：3 个 profile（头像=首字符色块；昵称走 ui_meta
+ * 与 description 副标题区分开，避免行内标题/副标题重复） */
+const DEMO_PROFILES = [
+  {
+    name: 'main',
+    path: '/home/demo/.hermes/profiles/main',
+    is_default: true,
+    model: 'model-x-large',
+    provider: 'demo',
+    description: 'Daily driver',
+    skill_count: 12,
+    last_session: null,
+    ui_meta: {nickname: 'Main agent'},
+  },
+  {
+    name: 'code-reviewer',
+    path: '/home/demo/.hermes/profiles/code-reviewer',
+    is_default: false,
+    model: 'model-x-mini',
+    provider: 'demo',
+    description: 'Fast code reviews',
+    skill_count: 5,
+    last_session: null,
+    ui_meta: {nickname: 'Reviewer'},
+  },
+  {
+    name: 'writer',
+    path: '/home/demo/.hermes/profiles/writer',
+    is_default: false,
+    model: 'model-y-pro',
+    provider: 'demo-alt',
+    description: 'Long-form writing',
+    skill_count: 3,
+    last_session: null,
+    ui_meta: {nickname: 'Writer'},
+  },
+];
+
+/** session.list 演示行（时间戳取启动时刻，最近活跃降序；source 混聊天/自动化） */
+function demoSessions(nowSec) {
+  const h = 3600;
+  return [
+    {
+      id: 'demo-s002',
+      title: 'Weekly report — draft',
+      preview: 'Draft is ready: three highlights, one risk, next steps',
+      started_at: nowSec - 5 * h,
+      message_count: 12,
+      source: 'tui',
+    },
+    {
+      id: 'demo-s003',
+      title: 'Debug WebSocket reconnect',
+      preview: 'Backoff caps at 30 s; the turn resumes via session.resume',
+      started_at: nowSec - 26 * h,
+      message_count: 8,
+      source: 'tui',
+    },
+    {
+      id: 'demo-s004',
+      title: 'Kyoto trip — autumn itinerary',
+      preview: 'Day 1: arrive, check in, evening walk along the river',
+      started_at: nowSec - 3 * 24 * h,
+      message_count: 18,
+      source: 'tui',
+    },
+    {
+      id: 'demo-s005',
+      title: 'Nightly dependency audit',
+      preview: '3 outdated packages, no known advisories',
+      started_at: nowSec - 4 * 24 * h,
+      message_count: 6,
+      source: 'cron',
+    },
+    {
+      id: 'demo-s006',
+      title: 'Inbox zero sweep',
+      preview: 'Summarized 12 threads, drafted 3 replies for review',
+      started_at: nowSec - 6 * 24 * h,
+      message_count: 9,
+      source: 'tui',
+    },
+    {
+      id: 'demo-s007',
+      title: 'Rename screenshots script',
+      preview: 'web-shot-readme.js now covers the mobile viewport',
+      started_at: nowSec - 8 * 24 * h,
+      message_count: 4,
+      source: 'cli',
+    },
+  ];
+}
+
+/**
+ * 种子会话的富聊天历史（demo）：user 提问 + tool 行（工具卡）+ 带 reasoning
+ * 的 assistant 行（思考块 + Markdown 表格/代码块）——最后的 changelog 提问由
+ * 截图脚本现场经 composer 发出（prompt.submit 触发英文富流式回包），拍出
+ * 「完整对话」效果（见 DEMO_STREAM）。
+ */
+function demoHistory(nowSec) {
+  const t0 = nowSec - 600;
+  return [
+    {
+      role: 'user',
+      text: 'Review the reconnect logic in src/rpc/client.ts and summarize the risks.',
+      timestamp: t0,
+    },
+    {
+      role: 'tool',
+      name: 'read_file',
+      context: 'src/rpc/client.ts',
+      args: {path: 'src/rpc/client.ts'},
+      row_id: 1,
+      timestamp: t0 + 20,
+    },
+    {
+      role: 'assistant',
+      reasoning:
+        'The risky path is the stale live-session id: recovery only triggers on ' +
+        'the next submit. Let me check the backoff helper too before writing this up.',
+      text:
+        '**Review notes — reconnect logic**\n\n' +
+        '| Path | Finding | Risk |\n|---|---|---|\n' +
+        '| Backoff | 1 s → 30 s, capped | Low |\n' +
+        '| Stale live id | Recovered on next submit only | Medium |\n' +
+        '| Turn resume | `session.resume` restores in-flight text | Low |\n\n' +
+        'The one medium-risk item is the stale-id path — after a reconnect the ' +
+        'thread looks frozen until the next message is sent. Minimal fix:\n\n' +
+        '```ts\nif (err.code === 4007) {\n  await reattach();\n}\n```\n\n' +
+        'The rest of the flow looks solid.',
+      timestamp: t0 + 90,
+    },
+  ];
+}
+
+/** demo prompt.submit 的英文富流式内容（reasoning 两段 + read_file 工具卡） */
+const DEMO_REPLY_PARTS = [
+  // 流式按块输出：每块**自带段落分隔符**（拼接 = 完整 reply）——分隔符丢失
+  // 会让相邻 Markdown 结构黏连（如 `` ``` `` 后直接跟文字被解析成代码块语言
+  // 名，整段吞掉），流式中的每一帧都必须仍是合法 Markdown
+  'Found it — after a reconnect the header keeps the **last known** context ' +
+    'usage until the next turn finishes.\n\n',
+  'Changelog entry:\n\n',
+  '- **Fixed:** stale context usage after a reconnect — `session.usage` is ' +
+    'now called right after `session.resume`\n' +
+    '- **Fixed:** stale live-session id no longer freezes the thread on the ' +
+    'next submit\n' +
+    '- Header updates only when the percentage actually changes\n\n',
+  '```ts\nawait rpc.call("session.usage", {session_id: liveSid});\n```\n\n',
+  'With both fixes the conversation and the header come back in sync the ' +
+    'moment the tunnel reopens.',
+];
+const DEMO_STREAM = {
+  reasoning: [
+    'Checking where the context-usage snapshot is refreshed after a reconnect.\n',
+    'The header only re-syncs on session.usage — if the turn finishes while ' +
+      'detached, the percentage goes stale until the next reply. A ' +
+      'resume-time refresh should fix it.\n',
+  ],
+  tool: {
+    toolId: 'demo-tool-1',
+    name: 'read_file',
+    context: 'src/store/chat.ts',
+    args: {path: 'src/store/chat.ts'},
+    progress: 'Reading file…',
+    result:
+      '+ await syncUsage(liveSid);  // after session.resume\n' +
+      '+ // header context % is now correct right after a drop\n' +
+      '  2 lines changed',
+    durationS: 0.6,
+  },
+  replyParts: DEMO_REPLY_PARTS,
+  reply: DEMO_REPLY_PARTS.join(''),
+};
+
+/** demo clarify 挂起（英文文案；触发词仍是 CLARIFY / CLARIFY_BATCH） */
+const DEMO_CLARIFY = {
+  single: {
+    question: 'Should the changelog entry go into CHANGELOG.md or docs/?',
+    choices: ['CHANGELOG.md', 'docs/'],
+  },
+  preText: 'Sure — one quick question before I write it up:',
+};
+
+/** demo cron REST 数据：3 个任务（scheduled/paused 各异）+ 运行历史 + 回放消息 */
+function demoCron(nowSec) {
+  const iso = sec => new Date(sec * 1000).toISOString();
+  const day = 86400;
+  return {
+    jobs: [
+      {
+        id: 'cron-demo-001',
+        name: 'Nightly dependency audit',
+        prompt: 'Scan dependencies and summarize advisories',
+        enabled: true,
+        state: 'scheduled',
+        schedule: {kind: 'interval', minutes: 1440},
+        repeat: null,
+        deliver: 'local',
+        next_run_at: iso(nowSec + 6 * 3600),
+        last_run_at: iso(nowSec - 18 * 3600),
+        last_status: 'ok',
+        profile: 'main',
+        profile_name: 'main',
+      },
+      {
+        id: 'cron-demo-002',
+        name: 'Weekly changelog draft',
+        prompt: 'Draft the weekly changelog from recent commits',
+        enabled: true,
+        state: 'paused',
+        schedule: {kind: 'cron', expr: '0 9 * * 1'},
+        repeat: null,
+        deliver: 'local',
+        next_run_at: null,
+        last_run_at: iso(nowSec - 3 * day),
+        last_status: 'ok',
+        profile: 'main',
+        profile_name: 'main',
+      },
+      {
+        id: 'cron-demo-003',
+        name: 'Inbox summary at 8am',
+        prompt: 'Summarize new mail and list replies to draft',
+        enabled: true,
+        state: 'scheduled',
+        schedule: {kind: 'interval', minutes: 720},
+        repeat: null,
+        deliver: 'local',
+        next_run_at: iso(nowSec + 3600),
+        last_run_at: iso(nowSec - 11 * 3600),
+        last_status: 'ok',
+        profile: 'main',
+        profile_name: 'main',
+      },
+    ],
+    runs: [
+      {
+        id: 'cron-demo-run-001',
+        title: 'Nightly dependency audit · today',
+        preview: '3 outdated packages, no advisories',
+        started_at: nowSec - 18 * 3600,
+        last_active: nowSec - 18 * 3600 + 120,
+        message_count: 2,
+        is_active: false,
+        archived: false,
+        profile: 'main',
+        source: 'cron',
+      },
+      {
+        id: 'cron-demo-run-002',
+        title: 'Nightly dependency audit · yesterday',
+        preview: 'All clear — nothing to flag',
+        started_at: nowSec - 18 * 3600 - day,
+        last_active: nowSec - 18 * 3600 - day + 110,
+        message_count: 2,
+        is_active: false,
+        archived: false,
+        profile: 'main',
+        source: 'cron',
+      },
+    ],
+    messages: {
+      'cron-demo-run-001': {
+        session_id: 'cron-demo-run-001',
+        messages: [
+          {
+            id: 1,
+            role: 'user',
+            content: 'Scan dependencies and summarize advisories',
+            timestamp: nowSec - 18 * 3600,
+          },
+          {
+            id: 2,
+            role: 'tool',
+            content: '{"cmd":"pip list --outdated"}',
+            name: 'bash',
+            timestamp: nowSec - 18 * 3600 + 30,
+          },
+          {
+            id: 3,
+            role: 'assistant',
+            content:
+              '**Dependency audit**\n\n3 outdated packages, 0 advisories:\n\n' +
+              '| Package | Current | Latest |\n|---|---|---|\n' +
+              '| markdown-it | 15.0.1 | 15.1.0 |\n' +
+              '| zustand | 5.0.15 | 5.0.16 |\n' +
+              '| vite | 8.2.2 | 8.2.3 |\n\n' +
+              'No action needed this week.',
+            timestamp: nowSec - 18 * 3600 + 60,
+          },
+        ],
+        pagination: {limit: 500, offset: 0, order: 'latest', returned: 3},
+      },
+    },
+  };
+}
+
+/** demo model.options：2 provider × 若干模型（形状照 docs/protocol.md 实测） */
+const DEMO_MODEL_OPTIONS = {
+  providers: [
+    {
+      slug: 'demo',
+      name: 'Demo Cloud',
+      is_current: true,
+      is_user_defined: false,
+      models: ['model-x-large', 'model-x-pro', 'model-x-mini'],
+      total_models: 3,
+      source: 'demo',
+      authenticated: true,
+      auth_type: 'api_key',
+    },
+    {
+      slug: 'demo-local',
+      name: 'Local runtime',
+      is_current: false,
+      is_user_defined: true,
+      models: ['local-8b', 'local-70b'],
+      total_models: 2,
+      source: 'local',
+      authenticated: true,
+      auth_type: 'none',
+    },
+  ],
+  model: DEMO_MODEL,
+  provider: 'demo',
+};
+
 function startMockGateway({
   port = 9199,
   title = MOCK_TITLE,
@@ -146,8 +483,14 @@ function startMockGateway({
    * 切换场景（null = 无挂起交互）。
    */
   pendingClarify = null,
+  /** README 配图模式：换中性英文假数据（见文件头 demo 说明），默认关闭 */
+  demo = false,
 } = {}) {
   const {chunks = 24, intervalMs = 400, rich = false} = stream;
+  const nowSec = Math.floor(Date.now() / 1000);
+  // demo 模式的种子数据（时间戳取启动时刻，保证截图里时间新鲜）
+  const demoSessionsRows = demo ? demoSessions(nowSec) : null;
+  const demoCronData = demo ? demoCron(nowSec) : null;
   const seedHistory = [];
   for (let i = 1; i <= historyCount; i++) {
     seedHistory.push({
@@ -166,7 +509,10 @@ function startMockGateway({
     /** 会话是否 live（session.resume 挂载 / session.close 摘除），delete 4023 判定用 */
     liveActive: false,
     /** 运行期消息投影（prompt 往里追加，resume/history 用） */
-    messages: [...INITIAL_HISTORY, ...seedHistory],
+    messages: [
+      ...(demo ? demoHistory(nowSec) : INITIAL_HISTORY),
+      ...seedHistory,
+    ],
     /** 进行中的流式定时器（close 时清理） */
     timers: new Set(),
     /** 诊断：delta 发送计数 / WS 关闭信息 / 最近一次 send 异常 */
@@ -184,7 +530,7 @@ function startMockGateway({
      */
     liveClarify: null,
     /** 当前思考等级（config.get/set reasoning 的内存态；默认 medium = 服务端回落值） */
-    reasoningEffort: 'medium',
+    reasoningEffort: demo ? 'high' : 'medium',
     // ── 会话生命周期（2026-09-16 发送自愈冒烟用，其余冒烟不触碰）──
     /** seed 会话当前 live sid（被 reap 后冷路径 resume 会换新值） */
     seededLiveSid: LIVE_ID,
@@ -287,12 +633,12 @@ function startMockGateway({
   }
 
   const mockInfo = sessionTitle => ({
-    model: 'mock-model',
+    model: demo ? DEMO_MODEL : 'mock-model',
     provider: 'mock',
     title: sessionTitle,
     reasoning_effort: state.reasoningEffort,
     running: false,
-    profile_name: PROFILE,
+    profile_name: demo ? DEMO_PROFILE : PROFILE,
   });
 
   function dispatch(send, req) {
@@ -302,18 +648,20 @@ function startMockGateway({
       case 'profiles.list':
         send(
           ok(id, {
-            profiles: [
-              {
-                name: PROFILE,
-                path: '/tmp/mock-profile',
-                is_default: true,
-                model: 'mock-model',
-                provider: 'mock',
-                description: 'mock profile',
-                skill_count: 0,
-                last_session: null,
-              },
-            ],
+            profiles: demo
+              ? DEMO_PROFILES
+              : [
+                  {
+                    name: PROFILE,
+                    path: '/tmp/mock-profile',
+                    is_default: true,
+                    model: 'mock-model',
+                    provider: 'mock',
+                    description: 'mock profile',
+                    skill_count: 0,
+                    last_session: null,
+                  },
+                ],
           }),
         );
         return;
@@ -337,11 +685,13 @@ function startMockGateway({
               {
                 id: STORED_ID,
                 title: state.title,
-                preview: 'mock 会话',
+                preview: demo ? 'Three risks found; one needs a follow-up fix' : 'mock 会话',
                 started_at: Math.floor(Date.now() / 1000) - 60,
                 message_count: state.messages.length,
                 source: 'tui',
               },
+              // demo 演示会话行（时间新鲜、标题/预览/来源各异，最近活跃降序）
+              ...(demoSessionsRows ?? []),
             ],
           }),
         );
@@ -469,7 +819,7 @@ function startMockGateway({
           send(err(id, 4001, 'session not found'));
           return;
         }
-        send(ok(id, {...MOCK_USAGE}));
+        send(ok(id, {...MOCK_USAGE, ...(demo ? {model: DEMO_MODEL} : null)}));
         return;
       }
       case 'complete.slash':
@@ -559,7 +909,14 @@ function startMockGateway({
         return;
       }
       case 'model.options':
-        send(ok(id, {providers: [], model: 'mock-model', provider: 'mock'}));
+        send(
+          ok(
+            id,
+            demo
+              ? {...DEMO_MODEL_OPTIONS}
+              : {providers: [], model: 'mock-model', provider: 'mock'},
+          ),
+        );
         return;
       case 'config.get':
         if (params.key === 'reasoning') {
@@ -596,19 +953,19 @@ function startMockGateway({
           JSON.stringify({
             jsonrpc: '2.0',
             method: 'event',
-            params: {
-              type: 'session.info',
-              session_id: LIVE_ID,
-              payload: {
-                model: 'mock-model',
-                provider: 'mock',
-                title: state.title,
-                reasoning_effort: level,
-                running: false,
-                profile_name: PROFILE,
+              params: {
+                type: 'session.info',
+                session_id: LIVE_ID,
+                payload: {
+                  model: demo ? DEMO_MODEL : 'mock-model',
+                  provider: 'mock',
+                  title: state.title,
+                  reasoning_effort: level,
+                  running: false,
+                  profile_name: demo ? DEMO_PROFILE : PROFILE,
                 // 真实 _session_info 带 usage（session.info/usage 事件同构），
                 // 缺了它顶栏的用量段会在 info 整体替换后消失
-                usage: {...MOCK_USAGE},
+                usage: {...MOCK_USAGE, ...(demo ? {model: DEMO_MODEL} : null)},
               },
             },
           }),
@@ -665,23 +1022,42 @@ function startMockGateway({
         if (clarifyMatch) {
           const batch = Boolean(clarifyMatch[1]);
           const payload = batch
-            ? {
-                request_id: `cl-live-${Date.now()}`,
-                questions: [
-                  {
-                    qid: 'q0',
-                    question: '使用哪个数据集？',
-                    choices: ['A数据集', 'B数据集'],
-                  },
-                  {qid: 'q1', question: '时间范围是？', choices: []},
-                ],
-              }
-            : {
-                request_id: `cl-live-${Date.now()}`,
-                question: '要下载 PDF 还是 HTML 版本？',
-                choices: ['PDF', 'HTML'],
-              };
-          const preText = '好的，在动手前先确认：';
+            ? demo
+              ? {
+                  request_id: `cl-live-${Date.now()}`,
+                  questions: [
+                    {
+                      qid: 'q0',
+                      question: 'Which section should the entry go under?',
+                      choices: ['Fixed', 'Changed'],
+                    },
+                    {qid: 'q1', question: 'Mention the PR number?', choices: []},
+                  ],
+                }
+              : {
+                  request_id: `cl-live-${Date.now()}`,
+                  questions: [
+                    {
+                      qid: 'q0',
+                      question: '使用哪个数据集？',
+                      choices: ['A数据集', 'B数据集'],
+                    },
+                    {qid: 'q1', question: '时间范围是？', choices: []},
+                  ],
+                }
+            : demo
+              ? {
+                  request_id: `cl-live-${Date.now()}`,
+                  ...DEMO_CLARIFY.single,
+                }
+              : {
+                  request_id: `cl-live-${Date.now()}`,
+                  question: '要下载 PDF 还是 HTML 版本？',
+                  choices: ['PDF', 'HTML'],
+                };
+          const preText = demo
+            ? DEMO_CLARIFY.preText
+            : '好的，在动手前先确认：';
           state.pendingClarify = payload;
           state.liveClarify = {
             payload,
@@ -706,7 +1082,42 @@ function startMockGateway({
         emit('message.start', {});
         // 首个事件 120ms 即到（客户端尽快看到内容）；rich 前序事件推后正文起点
         let at = 120;
-        if (rich) {
+        if (rich && demo) {
+          // demo 富前序（配图文案）：reasoning 两段 + read_file 工具卡
+          DEMO_STREAM.reasoning.forEach((text, i) =>
+            timer(() => emit('reasoning.delta', {text}), at + i * 450),
+          );
+          at += DEMO_STREAM.reasoning.length * 450;
+          timer(
+            () =>
+              emit('tool.start', {
+                tool_id: DEMO_STREAM.tool.toolId,
+                name: DEMO_STREAM.tool.name,
+                context: DEMO_STREAM.tool.context,
+                args: DEMO_STREAM.tool.args,
+              }),
+            at,
+          );
+          timer(
+            () =>
+              emit('tool.progress', {
+                tool_id: DEMO_STREAM.tool.toolId,
+                preview: DEMO_STREAM.tool.progress,
+              }),
+            (at += 200),
+          );
+          timer(
+            () =>
+              emit('tool.complete', {
+                tool_id: DEMO_STREAM.tool.toolId,
+                name: DEMO_STREAM.tool.name,
+                args: DEMO_STREAM.tool.args,
+                result_text: DEMO_STREAM.tool.result,
+                duration_s: DEMO_STREAM.tool.durationS,
+              }),
+            (at += 300),
+          );
+        } else if (rich) {
           timer(
             () =>
               emit('reasoning.delta', {
@@ -758,25 +1169,34 @@ function startMockGateway({
           );
         }
         const parts = [];
-        for (let i = 0; i < chunks; i++) {
-          const n = i + 1;
-          parts.push(
-            `【第 ${n}/${chunks} 段】流式滚动跟随冒烟测试文本：这一段刻意写得更长，` +
-              `让气泡高度尽早超过视口，供上滑暂停与锚定补偿断言使用。\n\n`,
-          );
-          const text = parts[i];
+        if (demo) {
+          // demo 正文按块流式输出（每块自带分隔符，拼接 = DEMO_STREAM.reply）
+          parts.push(...DEMO_STREAM.replyParts);
+        } else {
+          for (let i = 0; i < chunks; i++) {
+            const n = i + 1;
+            parts.push(
+              `【第 ${n}/${chunks} 段】流式滚动跟随冒烟测试文本：这一段刻意写得更长，` +
+                `让气泡高度尽早超过视口，供上滑暂停与锚定补偿断言使用。\n\n`,
+            );
+          }
+        }
+        for (let i = 0; i < parts.length; i++) {
           // 首段即到，之后按 intervalMs 节奏吐出
-          timer(() => emit('message.delta', {text}), at + i * intervalMs);
+          timer(
+            () => emit('message.delta', {text: parts[i]}),
+            at + i * intervalMs,
+          );
         }
         timer(() => {
-          const fullText = parts.join('');
+          const fullText = demo ? DEMO_STREAM.reply : parts.join('');
           emit('message.complete', {
             text: fullText,
             usage: {
-              model: 'mock-model',
-              context_used: 100,
+              model: demo ? DEMO_MODEL : 'mock-model',
+              context_used: demo ? 3840 : 100,
               context_max: 8000,
-              context_percent: 2,
+              context_percent: demo ? 48 : 2,
             },
           });
           target.messages.push({
@@ -813,21 +1233,41 @@ function startMockGateway({
       res.end(JSON.stringify({ok: true}));
       return;
     }
-    // ─── dashboard REST（cron 冒烟）──────────────────────────────
+    // ─── dashboard REST（cron 冒烟；demo 模式换英文演示数据）──────────
     if (path === '/api/cron/jobs') {
       res.writeHead(200, {'content-type': 'application/json'});
-      res.end(JSON.stringify([MOCK_CRON_JOB]));
+      res.end(
+        JSON.stringify(demoCronData ? demoCronData.jobs : [MOCK_CRON_JOB]),
+      );
       return;
     }
     const runsMatch = path.match(/^\/api\/cron\/jobs\/([^/]+)\/runs$/);
     if (runsMatch) {
       res.writeHead(200, {'content-type': 'application/json'});
-      res.end(JSON.stringify({runs: [MOCK_CRON_RUN], limit: 20}));
+      res.end(
+        JSON.stringify(
+          demoCronData
+            ? {runs: demoCronData.runs, limit: 20}
+            : {runs: [MOCK_CRON_RUN], limit: 20},
+        ),
+      );
       return;
     }
     const msgsMatch = path.match(/^\/api\/sessions\/([^/]+)\/messages$/);
     if (msgsMatch) {
-      if (decodeURIComponent(msgsMatch[1]) !== MOCK_CRON_RUN_ID) {
+      const runId = decodeURIComponent(msgsMatch[1]);
+      if (demoCronData) {
+        const hit = demoCronData.messages[runId];
+        if (!hit) {
+          res.writeHead(404, {'content-type': 'application/json'});
+          res.end(JSON.stringify({detail: 'Session not found'}));
+          return;
+        }
+        res.writeHead(200, {'content-type': 'application/json'});
+        res.end(JSON.stringify(hit));
+        return;
+      }
+      if (runId !== MOCK_CRON_RUN_ID) {
         res.writeHead(404, {'content-type': 'application/json'});
         res.end(JSON.stringify({detail: 'Session not found'}));
         return;

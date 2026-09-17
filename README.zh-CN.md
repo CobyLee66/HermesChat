@@ -10,6 +10,14 @@
 - **自带 SSH 隧道** —— App 内置原生 SSH 模块，自动探测/拉起远端 `hermes serve`、建立本地端口转发、断线指数退避重连并 `session.resume` 恢复进行中的回合。不需要手动开隧道、不需要把服务暴露到公网。
 - **协议零侵入** —— 只使用 Hermes 官方公开协议（WS JSON-RPC + REST），不修改服务端的任何源码、配置或数据。
 
+<p align="center">
+  <a href="#界面速览"><img src="docs/images/readme-chat-hero.png" width="250" alt="聊天：流式回复 + 思考过程 + 工具调用卡片" /></a>
+  &nbsp;&nbsp;
+  <a href="#界面速览"><img src="docs/images/readme-sessions.png" width="250" alt="会话列表：搜索、过滤、排序" /></a>
+  &nbsp;&nbsp;
+  <a href="#界面速览"><img src="docs/images/readme-cron.png" width="250" alt="定时任务：状态徽章" /></a>
+</p>
+
 ---
 
 ## 下载
@@ -40,6 +48,23 @@
 | 检索 | 会话内「查找聊天记录」跳转 + 高亮；会话列表按标题/摘要搜索 |
 | 定时任务 | 任务列表（状态徽章 / 中文计划描述 / 下次运行 / 错误明细）、暂停恢复、立即运行、运行历史、只读运行回放、六模式计划构建器（间隔 / 每天 / 每周 / 每月 / 一次性 / 自定义 cron） |
 | 桌面增强 | 响应式三栏布局（窄 / 中 / 宽断点自适配）、系统文件对话框、粘贴与拖拽附件、失焦完成通知 |
+
+---
+
+## 界面速览
+
+移动端界面，连接 **mock 网关**用演示假数据截取（`node scripts/web-shot-readme.js` 可随时重拍，绝不使用真实会话数据）。
+
+| | |
+|:---:|:---:|
+| **聊天** —— 流式回复、可折叠思考过程、工具调用卡片与 Markdown 渲染；顶栏实时显示模型 · 上下文用量 · 思考等级 | **内联交互** —— 澄清问题（与权限审批）变成对话里可直接点按的卡片，无需输入任何命令 |
+| <img src="docs/images/readme-chat-hero.png" width="360" alt="聊天界面" /> | <img src="docs/images/readme-clarify.png" width="360" alt="澄清卡片" /> |
+| **会话** —— 搜索、分类过滤（聊天 / 自动化 / 全部）与排序；长按可重命名、删除、查找聊天记录 | **Profile** —— 每个 agent 一行：头像、昵称，点一下就能改昵称和头像 |
+| <img src="docs/images/readme-sessions.png" width="360" alt="会话列表" /> | <img src="docs/images/readme-profiles.png" width="360" alt="Profile 列表" /> |
+| **模型切换** —— 按提供商分组的底部弹层选择器，带思考等级；顶栏实时更新 | **定时任务** —— 状态徽章、人性化计划描述与下次运行；暂停、恢复、立即运行、回放历史 |
+| <img src="docs/images/readme-model-picker.png" width="360" alt="模型选择器" /> | <img src="docs/images/readme-cron.png" width="360" alt="定时任务" /> |
+| **连接** —— SSH 隧道配置卡片式管理；一键连接，可设自动连接 | |
+| <img src="docs/images/readme-connections.png" width="360" alt="连接配置" /> | |
 
 ---
 

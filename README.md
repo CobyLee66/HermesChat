@@ -10,6 +10,14 @@ Connect to the [Hermes Agent](#1-set-up-hermes-agent) running on your computer f
 - **Built-in SSH tunnel** — a native SSH module detects or launches `hermes serve` on the remote host, opens a local port forward, and reconnects with exponential backoff, resuming in-flight turns via `session.resume`. No manual tunneling, and no need to expose the service to the internet.
 - **Zero server-side changes** — uses only Hermes' public protocols (WS JSON-RPC + REST). It never modifies the server's source, configuration, or data.
 
+<p align="center">
+  <a href="#screenshots"><img src="docs/images/readme-chat-hero.png" width="250" alt="Chat: streaming reply with reasoning trace and tool-call card" /></a>
+  &nbsp;&nbsp;
+  <a href="#screenshots"><img src="docs/images/readme-sessions.png" width="250" alt="Session list with search, filter and sort" /></a>
+  &nbsp;&nbsp;
+  <a href="#screenshots"><img src="docs/images/readme-cron.png" width="250" alt="Scheduled tasks with status badges" /></a>
+</p>
+
 ---
 
 ## Download
@@ -40,6 +48,23 @@ Prefer building from source? See [Getting Started](#getting-started). All versio
 | Search | "Find in chat" with jump + highlight; session list search by title and preview |
 | Scheduled tasks | Task list (status badge / human-readable schedule / next run / error details), pause & resume, run now, run history, read-only run replay, six-mode schedule builder (interval / daily / weekly / monthly / one-off / custom cron) |
 | Desktop extras | Responsive three-column layout (narrow / medium / wide breakpoints), native file dialogs, paste & drag-and-drop attachments, completion notifications while unfocused |
+
+---
+
+## Screenshots
+
+Mobile UI, captured against a **mock gateway** with demo data (via `node scripts/web-shot-readme.js` — nothing real is ever photographed).
+
+| | |
+|:---:|:---:|
+| **Chat** — streaming replies with collapsible reasoning traces, tool-call cards and Markdown; the header tracks model · context usage · reasoning effort | **Inline prompts** — clarification questions (and permission approvals) turn into tappable cards right in the conversation — no commands to type |
+| <img src="docs/images/readme-chat-hero.png" width="360" alt="Chat screen" /> | <img src="docs/images/readme-clarify.png" width="360" alt="Clarification card" /> |
+| **Sessions** — search, filter (Chats / Automation / All) and sort; long-press to rename, delete or find in chat | **Profiles** — one row per agent: avatar, nickname, one-tap edit of nickname and avatar |
+| <img src="docs/images/readme-sessions.png" width="360" alt="Session list" /> | <img src="docs/images/readme-profiles.png" width="360" alt="Profile list" /> |
+| **Model switching** — bottom-sheet picker grouped by provider, with thinking level; the header updates in real time | **Scheduled tasks** — status badges, human-readable schedules and next runs; pause, resume, run now, or replay past runs |
+| <img src="docs/images/readme-model-picker.png" width="360" alt="Model picker" /> | <img src="docs/images/readme-cron.png" width="360" alt="Scheduled tasks" /> |
+| **Connections** — SSH-tunnel profiles managed as cards; one tap to connect, optional auto-connect on launch | |
+| <img src="docs/images/readme-connections.png" width="360" alt="Connection profiles" /> | |
 
 ---
 
