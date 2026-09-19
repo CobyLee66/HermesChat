@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Streaming thinking/reasoning preview (collapsed) now anchors to the latest
+  output: `thinkingTail` takes the measured preview width and slices a tail
+  window sized to fit exactly two lines (CJK/ASCII aware), so the newest text
+  is always visible at the end of line two. Previously the fixed 200-character
+  window far exceeded two lines and `numberOfLines` tail truncation (the only
+  direction supported by Android multiline and react-native-web line-clamp)
+  ellipsized the newest output away, making the visible text appear to slide
+  left and shrink while showing stale content.
+
 ## [0.1.0] - 2026-09-16
 
 First tagged release of HermesChat — a cross-platform client for Hermes Agent

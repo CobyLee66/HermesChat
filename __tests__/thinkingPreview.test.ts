@@ -44,4 +44,39 @@ describe('thinkingTail（流式中尾部实时窗口）', () => {
     const grown = base + '新输出';
     expect(thinkingTail(grown).endsWith('新输出')).toBe(true);
   });
+
+  it('换行归一化为空格（防强制换行吃掉行数预算）', () => {
+    expect(thinkingTail('第一行\n第二行')).toBe('第一行 第二行');
+  });
+
+  describe('宽度感知窗口（maxWidthPx）', () => {
+    it('CJK 文本按两行宽度预算截尾', () => {
+      // 预算 = 120*2 - 24 = 216px，每字 12px → 恰好 18 字
+      const out = thinkingTail('汉'.repeat(100), 120);
+      expect(out).toHaveLength(18);
+      expect(out.endsWith('汉')).toBe(true);
+    });
+
+    it('ASCII 文本同宽度下窗口更长', () => {
+      // 预算 = 140*2 - 24 = 256px，每字符 7px → 36 字符
+      const out = thinkingTail('a'.repeat(100), 140);
+      expect(out).toHaveLength(36);
+    });
+
+    it('混排文本窗口跟随最新输出', () => {
+      const out = thinkingTail('推'.repeat(50) + 'END', 120);
+      expect(out.endsWith('END')).toBe(true);
+      // 预算 216px：'END' 21px + 16 个宽字 192px = 213px
+      expect(out).toHaveLength(19);
+    });
+
+    it('短文本在预算内原样返回', () => {
+      expect(thinkingTail('短文本', 500)).toBe('短文本');
+    });
+
+    it('宽度为 0/负数时回退固定字符窗口', () => {
+      expect(thinkingTail('x'.repeat(300), 0)).toHaveLength(200);
+      expect(thinkingTail('x'.repeat(300), -1)).toHaveLength(200);
+    });
+  });
 });

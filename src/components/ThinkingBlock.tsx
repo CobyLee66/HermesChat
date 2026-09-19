@@ -18,6 +18,8 @@ interface Props {
  *（流式中显示尾部两行实时刷新，结束后缩略为开头一行），点击展开全文。 */
 export function ThinkingBlock({text, variant, live}: Props) {
   const [expanded, setExpanded] = useState(false);
+  /** 预览区实测宽度：驱动流式尾窗按两行宽度预算精确截尾（见 thinkingTail） */
+  const [previewWidth, setPreviewWidth] = useState(0);
   const t = useT();
   const label = variant === 'thinking' ? t('chat.thinking') : t('chat.reasoning');
   return (
@@ -26,12 +28,16 @@ export function ThinkingBlock({text, variant, live}: Props) {
         {...expandToggleProps(() => setExpanded(v => !v))}
         activeOpacity={0.7}
         style={styles.headerRow}>
-        <View style={styles.headerTextWrap}>
+        <View
+          style={styles.headerTextWrap}
+          onLayout={e =>
+            setPreviewWidth(Math.round(e.nativeEvent.layout.width))
+          }>
           <Text style={styles.label}>{label}</Text>
           {!expanded ? (
             live ? (
               <Text style={styles.liveBody} numberOfLines={2}>
-                {thinkingTail(text)}
+                {thinkingTail(text, previewWidth)}
               </Text>
             ) : (
               <Text style={styles.preview} numberOfLines={1}>
