@@ -35,7 +35,12 @@ if [ "$AHEAD" != "0" ]; then echo "    推送 $AHEAD 个本地提交..."; git pu
 
 echo "==> [2/3] 构建机拉取代码并构建（scripts/build-android.sh）"
 # npm ci 不改 lockfile（npm install 会改动导致下次 pull 失败）；pull 失败时先 reset 自愈
-ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR & (git pull --ff-only origin main || (git reset --hard origin/main >nul & git pull --ff-only origin main)) & \"$REMOTE_BASH\" -l scripts/build-android.sh $FLAVOR"
+# ⚠ 构建的 stdio 必须先落远端日志文件再回显，不能直接连 ssh 通道：
+#   gradle 新孵化的 daemon 会继承其启动时会话的 stdout/stderr 句柄——若是 ssh
+#   通道句柄，daemon 常驻导致通道永远等不到 EOF，表现为「构建早已完成但脚本
+#   卡死」（复用既有 daemon 时无此问题，故该坑时好时坏）。
+REMOTE_LOG_POSIX="${BUILD_TMP_DIR:-C:/Users/Public}/hermes-android-build.log"
+ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR & (git pull --ff-only origin main || (git reset --hard origin/main >nul & git pull --ff-only origin main)) & \"$REMOTE_BASH\" -l -c \"scripts/build-android.sh $FLAVOR > '$REMOTE_LOG_POSIX' 2>&1; RC=\$?; cat '$REMOTE_LOG_POSIX'; exit \$RC\""
 
 echo "==> [3/3] 取回 APK"
 mkdir -p "$DIST_DIR"
