@@ -39,6 +39,16 @@ export interface InflightSnapshot {
   error?: string;
 }
 
+/**
+ * 本地流式尾部快照（重挂迁移用）：tail 为正在流式的助手消息，userText 为
+ * 该尾部所属 turn 的用户消息文本（items 里尾部之前最近一条 user 气泡，
+ * 无则 null）——重进时用它与服务端 inflight.user 比对判断是否同一 turn。
+ */
+export interface LiveTailSnapshot {
+  tail: AssistantMsg;
+  userText: string | null;
+}
+
 let seq = 0;
 function nextId(prefix: string): string {
   seq += 1;
@@ -937,16 +947,29 @@ export class TimelineAggregator {
    *
    * - running=true 但 inflight 为空（如 prompt 排队中）也建空流式尾部，
    *   否则下一次事件快照重算 busy 会闪断；
-   * - previousStreaming：重挂前本地聚合器的流式消息（同一 turn 且服务端
-   *   文本是它的前缀扩展时直接复用——它的工具卡/思考块比服务端纯文本
-   *   快照丰富，对齐桌面端 preserveStructuralParts 的取舍）；
-   * - inflight.user：历史投影通常已含本轮 prompt，尾部重复时不再补；
+   * - previous：重挂前本地聚合器的流式尾部快照。同一 turn 时复用它——
+   *   它的工具卡/思考块比服务端纯文本快照丰富（对齐桌面端
+   *   preserveStructuralParts 的取舍）。复用判定：
+   *   strictPrefix（双方文本非空且服务端是本地前缀扩展）始终有效；
+   *   sameTurn（inflight.user 与本地尾部所属 turn 的 prompt 一致）放宽到
+   *   纯工具 turn——本地还没流出文本（prevText 空）或服务端还没文本
+   *   （serverText 空）也复用，否则「持续调命令、无助手文本」的 turn
+   *   重进会丢全部工具卡。护栏：本地尾部文本已作为完整消息出现在历史里
+   *   说明那个 turn 在离开期间已结束、现在跑的是同文案新 turn（cron
+   *   重复触发），禁止复用；
+   * - inflight.user：历史投影通常已含本轮 prompt（mid-turn 时其后可能
+   *   已跟工具行/助手行）——最近一条 user 消息文本一致即视为已在历史，
+   *   不再补气泡，只看最后一条会把工具行误判成「prompt 不在历史」；
    * - inflight.assistant：已流出的部分文本，作为流式消息的初始 text 块。
+   *
+   * 已知边界：App 重启后聚合器已销毁（previous 为空），只能纯文本投影
+   * 重建，结构块等 turn 结束经 session.history 重拉恢复——服务端
+   * inflight 快照本身只有文本，协议层面拿不到结构。
    */
   restoreLiveTail(
     running: boolean,
     inflight: InflightSnapshot | null | undefined,
-    previousStreaming?: AssistantMsg | null,
+    previous?: LiveTailSnapshot | null,
   ) {
     const hasInflight =
       !!inflight &&
@@ -954,31 +977,56 @@ export class TimelineAggregator {
     if (!running && !hasInflight) {
       return;
     }
-    // 本轮 prompt 不在历史尾部时补一条用户气泡
-    if (inflight?.user?.trim()) {
-      const parsed = parseMessageText(inflight.user);
-      const last = this.items[this.items.length - 1];
-      const alreadyAtTail =
-        last &&
-        last.kind === 'user' &&
-        last.text === parsed.text;
-      if (!alreadyAtTail) {
-        this.appendUserMessage(inflight.user);
+    // 本轮 prompt 不在历史中时补一条用户气泡：按「最近一条 user 消息」匹配
+    // （mid-turn 历史里 prompt 后面可能已跟工具行，不能只看尾部一条）。
+    // 纯图片/文件 prompt 解析文本为空串，与历史里同为空文本的图片行也能匹配。
+    const inflightUserRaw = inflight?.user?.trim() ? inflight.user : '';
+    const inflightUserText = inflightUserRaw
+      ? parseMessageText(inflightUserRaw).text
+      : '';
+    if (inflightUserRaw) {
+      let lastUser: UserMsg | null = null;
+      for (let i = this.items.length - 1; i >= 0; i--) {
+        const it = this.items[i];
+        if (it.kind === 'user') {
+          lastUser = it;
+          break;
+        }
+      }
+      if (!lastUser || lastUser.text !== inflightUserText) {
+        this.appendUserMessage(inflightUserRaw);
       }
     }
     const serverText = typeof inflight?.assistant === 'string' ? inflight.assistant : '';
     let msg: AssistantMsg;
-    const prevText = previousStreaming ? this.concatTextOf(previousStreaming) : '';
-    if (
-      previousStreaming &&
-      serverText &&
-      prevText &&
-      serverText.startsWith(prevText)
-    ) {
+    const prevText = previous ? this.concatTextOf(previous.tail) : '';
+    const sameTurn = !!(
+      previous &&
+      inflightUserText &&
+      previous.userText !== null &&
+      previous.userText === inflightUserText
+    );
+    // 本地尾部文本已完整入历史 = 它所属 turn 已结束（离开期间完成），
+    // 现在跑的是新 turn——旧结构不能复用
+    const committedInHistory =
+      prevText !== '' &&
+      this.items.some(
+        it =>
+          it.kind === 'assistant' &&
+          !it.streaming &&
+          this.concatTextOf(it).includes(prevText),
+      );
+    const strictPrefix =
+      prevText !== '' && serverText !== '' && serverText.startsWith(prevText);
+    const reuse =
+      !!previous &&
+      !committedInHistory &&
+      (strictPrefix || (sameTurn && (prevText === '' || serverText === '')));
+    if (reuse && previous) {
       // 同一 turn：保留本地流式消息（工具卡/思考块都在），文本取更全的一方。
       // serverText 覆盖全部已流出文本：替换首个 text 块、丢弃其余（其内容
       // 已含在 serverText 前缀里，保留会重复），非文本块原位不动。
-      msg = {...previousStreaming, blocks: previousStreaming.blocks.map(b => ({...b}))};
+      msg = {...previous.tail, blocks: previous.tail.blocks.map(b => ({...b}))};
       if (serverText.length > prevText.length) {
         const blocks: AssistantBlock[] = [];
         let textInserted = false;
@@ -998,7 +1046,7 @@ export class TimelineAggregator {
         msg.blocks = blocks;
       }
     } else {
-      // 纯文本投影重建：App 重启后本地结构块已不在（previousStreaming 为空或
+      // 纯文本投影重建：App 重启后本地结构块已不在（previous 为空或
       // 对不上），尾部只有文字没有工具卡/思考块——打标，turn 结束时由
       // chat store 用 session.history 重拉历史重建（见 takeNeedsHistoryRefresh）。
       msg = {
@@ -1017,9 +1065,20 @@ export class TimelineAggregator {
     this.push(msg);
   }
 
-  /** 取当前流式消息（重挂迁移用；无则 null）。 */
-  takeStreamingTail(): AssistantMsg | null {
-    return this.current && this.current.streaming ? this.current : null;
+  /** 取当前流式尾部快照（重挂迁移用；无流式尾部则 null）。 */
+  takeLiveTail(): LiveTailSnapshot | null {
+    if (!this.current || !this.current.streaming) {
+      return null;
+    }
+    let userText: string | null = null;
+    for (let i = this.items.length - 1; i >= 0; i--) {
+      const it = this.items[i];
+      if (it.kind === 'user') {
+        userText = it.text;
+        break;
+      }
+    }
+    return {tail: this.current, userText};
   }
 
   // ─── 工具方法 ─────────────────────────────────────────────

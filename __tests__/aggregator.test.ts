@@ -740,7 +740,7 @@ describe('TimelineAggregator 重进会话恢复（restoreLiveTail）', () => {
       context: 'src/a.ts',
     });
     agg.applyEvent('tool.complete', {tool_id: 't1', name: 'write_file'});
-    const previous = agg.takeStreamingTail();
+    const previous = agg.takeLiveTail();
     // 重挂：hydrate 服务端历史 + 服务端文本是本地文本的严格扩展
     agg.hydrate([{role: 'user', text: '改一下'}]);
     agg.restoreLiveTail(
@@ -764,7 +764,7 @@ describe('TimelineAggregator 重进会话恢复（restoreLiveTail）', () => {
     const agg = new TimelineAggregator();
     agg.applyEvent('message.start', {});
     agg.applyEvent('message.delta', {text: '完全不同的旧 turn'});
-    const previous = agg.takeStreamingTail();
+    const previous = agg.takeLiveTail();
     agg.hydrate([]);
     agg.restoreLiveTail(true, {user: '新问题', assistant: '新文本'}, previous);
     const tail = agg.getItems()[agg.getItems().length - 1] as AssistantMsg;
@@ -783,6 +783,61 @@ describe('TimelineAggregator 重进会话恢复（restoreLiveTail）', () => {
     agg.hydrate([{role: 'user', text: 'q'}]);
     agg.restoreLiveTail(true, null);
     expect(agg.isStreaming()).toBe(true);
+  });
+
+  it('mid-turn 历史已含本轮 prompt + 工具行：不重复补用户气泡', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([
+      {role: 'user', text: '跑一下 lint'},
+      {role: 'tool', name: 'run_command', context: 'npm run lint'},
+    ]);
+    agg.restoreLiveTail(true, {user: '跑一下 lint', assistant: '', streaming: true});
+    const users = agg.getItems().filter(i => i.kind === 'user');
+    expect(users).toHaveLength(1);
+  });
+
+  it('纯工具 turn（本地无文本）重进：同 prompt 复用本地尾部，工具卡不丢', () => {
+    const agg = new TimelineAggregator();
+    agg.appendUserMessage('执行命令');
+    agg.applyEvent('message.start', {});
+    agg.applyEvent('tool.start', {
+      tool_id: 't1',
+      name: 'run_command',
+      context: 'npm test',
+    });
+    const previous = agg.takeLiveTail();
+    agg.hydrate([{role: 'user', text: '执行命令'}]);
+    agg.restoreLiveTail(
+      true,
+      {user: '执行命令', assistant: '', streaming: true},
+      previous,
+    );
+    const tail = agg.getItems()[agg.getItems().length - 1] as AssistantMsg;
+    expect(tail.fromInflightProjection).toBeFalsy();
+    expect(tail.streaming).toBe(true);
+    expect(
+      tail.blocks.some(b => b.type === 'tool' && b.tool.toolId === 't1'),
+    ).toBe(true);
+  });
+
+  it('离开期间旧 turn 已完成（文本已入历史）：同文案新 turn 不复用旧尾部', () => {
+    const agg = new TimelineAggregator();
+    agg.appendUserMessage('每日巡检');
+    agg.applyEvent('message.start', {});
+    agg.applyEvent('message.delta', {text: '旧 turn 报告'});
+    const previous = agg.takeLiveTail();
+    // 旧 turn 在用户离开期间完成并入库，随后 cron 同文案开了新 turn
+    agg.hydrate([
+      {role: 'user', text: '每日巡检'},
+      {role: 'assistant', text: '旧 turn 报告'},
+    ]);
+    agg.restoreLiveTail(
+      true,
+      {user: '每日巡检', assistant: '', streaming: true},
+      previous,
+    );
+    const tail = agg.getItems()[agg.getItems().length - 1] as AssistantMsg;
+    expect(tail.fromInflightProjection).toBe(true);
   });
 });
 

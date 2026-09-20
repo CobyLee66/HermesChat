@@ -127,6 +127,22 @@ describe('chat store attach 重建', () => {
     ).toBe(true);
   });
 
+  it('重进 mid-turn：历史已含本轮 prompt + 工具行时不重复用户气泡', () => {
+    useChatStore.getState().attach('sid1', {
+      messages: [
+        {role: 'user', text: '跑 lint'},
+        {role: 'tool', name: 'run_command', context: 'npm run lint'},
+      ],
+      profile: 'main',
+      storedSessionId: 'stored1',
+      running: true,
+      inflight: {user: '跑 lint', assistant: '', streaming: true},
+    });
+    const st = useChatStore.getState().bySession['sid1'];
+    expect(st.items.filter(i => i.kind === 'user')).toHaveLength(1);
+    expect(st.busy).toBe(true);
+  });
+
   it('reattachAfterResume：live sid 迁移 + running 恢复流式尾部', () => {
     useChatStore.getState().attach('oldSid', {
       messages: history(),

@@ -568,9 +568,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
         // 此前只在聚合器为空时 hydrate——resume 快路径返回同一 live sid，
         // 重进就永远停在首次进入时的旧快照（其它端/断线期间的新消息全丢）。
         // 若重进时本地恰有流式尾部（同一 turn），恢复时保留它的结构块。
-        const previousStreaming = agg.takeStreamingTail();
+        const previousLiveTail = agg.takeLiveTail();
         agg.hydrate(opts.messages);
-        agg.restoreLiveTail(opts.running === true, opts.inflight, previousStreaming);
+        agg.restoreLiveTail(opts.running === true, opts.inflight, previousLiveTail);
       }
       applyPending(agg, opts?.pendingApprovals, opts?.pendingClarifies);
       snapshot(sid, {
@@ -600,11 +600,11 @@ export const useChatStore = create<ChatStore>((set, get) => {
         'INFO',
         `reattach ${oldSid.slice(0, 8)}→${liveSid.slice(0, 8)}：历史 ${opts.messages?.length ?? 0} 条（${countRoles(opts.messages ?? [])}）`,
       );
-      // 断线前若有流式尾部，恢复时尽量保留（同 turn 前缀扩展判断）
-      const previousStreaming = oldAgg ? oldAgg.takeStreamingTail() : null;
+      // 断线前若有流式尾部，恢复时尽量保留（同 turn 判断见 restoreLiveTail）
+      const previousLiveTail = oldAgg ? oldAgg.takeLiveTail() : null;
       const agg = new TimelineAggregator();
       agg.hydrate(opts.messages ?? []);
-      agg.restoreLiveTail(opts.running === true, opts.inflight, previousStreaming);
+      agg.restoreLiveTail(opts.running === true, opts.inflight, previousLiveTail);
       applyPending(agg, opts.pendingApprovals, opts.pendingClarifies);
       if (liveSid !== oldSid) {
         aggregators.delete(oldSid);
