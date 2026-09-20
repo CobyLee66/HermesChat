@@ -160,7 +160,7 @@ export function SessionListPanel({
   const refresh = useSessionsStore(s => s.refresh);
   const sortMode = useSessionsStore(s => s.sortMode);
   const setSortMode = useSessionsStore(s => s.setSortMode);
-  const [filter, setFilter] = useState<SessionFilterCategory>('chats');
+  const [filter, setFilter] = useState<SessionFilterCategory>('all');
   const [menuOpen, setMenuOpen] = useState<OpenMenu>(null);
   // 会话搜索栏（与下拉菜单互斥展开；关闭即清空关键词）
   const [searchOpen, setSearchOpen] = useState(false);

@@ -290,7 +290,7 @@ export const zhCN: Record<MessageKey, string> = {
   'view.sessions': '会话',
   'view.cron': '定时任务',
   'session.filterChats': '聊天',
-  'session.filterAutomation': '自动化',
+  'session.filterAutomation': '自动任务',
   'session.filterAll': '全部',
   'session.sortRecent': '最近消息',
   'session.sortCreated': '创建时间',
