@@ -262,6 +262,7 @@ export const en = {
   'model.reasoningTitle': 'Thinking level',
 
   // ── Markdown 复制菜单（web） ──
+  'md.copySelection': 'Copy selection',
   'md.copyMarkdown': 'Copy Markdown',
   'md.copyPlain': 'Copy plain text',
 

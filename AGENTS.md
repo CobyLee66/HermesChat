@@ -32,6 +32,7 @@
 
 - **代码注释用中文；UI 文案一律经 i18n 词典取词，禁止硬编码**（2026-09-13 i18n 落地，D047 修订本条）：新增/修改用户可见文案 → `src/i18n/locales/en.ts` 登记键 + `zh-CN.ts` 补中文（漏键 tsc 报错），代码里 `t('域.名称')` 取词；组件渲染路径用 `useT()`。框架契约与完整工作流见 `docs/i18n.md`。
 - **提交信息默认用英文**（2026-09-14 起用户指定，CONTRIBUTING.md 同步修订）：格式 `<type>: <one-line summary>`（type 用 feat/fix/docs/refactor/perf/test/chore/build），可选正文说明动机与副作用。
+- **通过测试的变更直接提交并推送到 GitHub 远端，无需逐次询问**（2026-09-20 起用户指定）：本地验证全绿（tsc / lint / i18n-check / jest，有冒烟则冒烟也过）后即 commit + push 到 origin 当前分支；验证未过或有未解决的疑问时仍先停下报告。
 - zustand 选择器必须返回稳定引用（禁止 `?? []` 内联新对象）；原生能力差异收敛在 `src/ssh/`（HermesSsh 契约 + 各平台实现），UI/协议层保持平台无关。
 
 ## 进度与决策文档

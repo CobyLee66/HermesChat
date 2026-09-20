@@ -45,6 +45,31 @@ export function unionLineRange(
   return {start: lo, end: hi};
 }
 
+/** 丢弃被其他范围完整包含（或与之完全等同的后发项），只留最外层块。 */
+export function outermostRanges(ranges: LineRange[]): LineRange[] {
+  return ranges.filter(
+    (r, i) =>
+      !ranges.some(
+        (other, j) =>
+          j !== i &&
+          other.start <= r.start &&
+          other.end >= r.end &&
+          // 严格包含必丢；完全等同（如 blockquote 与其内 p 同 map）只留先出现者
+          (other.start < r.start || other.end > r.end || j < i),
+      ),
+  );
+}
+
+/** 归一化（trim + 连续空白折叠为单个空格）后比较，判定选区是否覆盖整块文本。 */
+export function isWholeBlockSelected(
+  selectedText: string,
+  blockText: string,
+): boolean {
+  const norm = (s: string) => s.replace(/\s+/g, ' ').trim();
+  const sel = norm(selectedText);
+  return sel.length > 0 && sel === norm(blockText);
+}
+
 /** 按行号范围从源文本切片（越界自动收敛，空范围返回空串）。 */
 export function sliceSourceLines(
   text: string,

@@ -4,6 +4,8 @@ import MarkdownIt from 'markdown-it';
 
 import {
   injectSrcMapRule,
+  isWholeBlockSelected,
+  outermostRanges,
   parseMapAttr,
   sliceSourceLines,
   unionLineRange,
@@ -78,6 +80,71 @@ describe('unionLineRange', () => {
       start: 2,
       end: 5,
     });
+  });
+});
+
+describe('outermostRanges', () => {
+  it('丢弃被完整包含的项（li 里的 p）', () => {
+    expect(
+      outermostRanges([
+        {start: 4, end: 6},
+        {start: 4, end: 5},
+      ]),
+    ).toEqual([{start: 4, end: 6}]);
+  });
+
+  it('并列范围都保留', () => {
+    expect(
+      outermostRanges([
+        {start: 0, end: 1},
+        {start: 2, end: 3},
+      ]),
+    ).toEqual([
+      {start: 0, end: 1},
+      {start: 2, end: 3},
+    ]);
+  });
+
+  it('相交但互不包含的两者都保留', () => {
+    expect(
+      outermostRanges([
+        {start: 0, end: 3},
+        {start: 2, end: 5},
+      ]),
+    ).toEqual([
+      {start: 0, end: 3},
+      {start: 2, end: 5},
+    ]);
+  });
+
+  it('完全等同的范围只留先出现者（blockquote 与其内 p 同 map）', () => {
+    expect(
+      outermostRanges([
+        {start: 0, end: 1},
+        {start: 0, end: 1},
+        {start: 4, end: 5},
+      ]),
+    ).toEqual([
+      {start: 0, end: 1},
+      {start: 4, end: 5},
+    ]);
+  });
+});
+
+describe('isWholeBlockSelected', () => {
+  it('选中文本与块文本一致（空白归一化）判整块', () => {
+    expect(isWholeBlockSelected('标题文字', '标题文字')).toBe(true);
+    expect(isWholeBlockSelected('  标题\n文字 ', '标题 文字')).toBe(true);
+  });
+
+  it('截断选区（块内部分选择）判非整块', () => {
+    expect(isWholeBlockSelected('标题', '标题文字')).toBe(false);
+    expect(isWholeBlockSelected('标题文字外加', '标题文字')).toBe(false);
+  });
+
+  it('空选区判非整块', () => {
+    expect(isWholeBlockSelected('', '标题文字')).toBe(false);
+    expect(isWholeBlockSelected('   ', '标题文字')).toBe(false);
   });
 });
 

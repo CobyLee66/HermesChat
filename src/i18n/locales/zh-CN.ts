@@ -239,6 +239,7 @@ export const zhCN: Record<MessageKey, string> = {
   'model.reasoningTitle': '思考等级',
 
   // ── Markdown 复制菜单（web） ──
+  'md.copySelection': '复制选中内容',
   'md.copyMarkdown': '复制 Markdown',
   'md.copyPlain': '复制纯文本',
 

@@ -71,6 +71,25 @@ const INITIAL_HISTORY = [
   {role: 'assistant', text: '收到，我是 mock gateway 的假回复。', timestamp: 1700000001},
 ];
 
+/**
+ * markdown 复制冒烟种子（startMockGateway mdHistory:true 时追加）：标题/段落/
+ * 表格/列表齐全的确定性块结构。标题足够长，真实鼠标拖选前 50px 必然是
+ * 「块内部分选区」（D055 行为分支的判定前提）。
+ */
+const MD_HISTORY_TEXT = [
+  '## 发布清单与本周收尾工作安排',
+  '',
+  '本次发布包含 **三项** 改动，按序执行即可。',
+  '',
+  '| 步骤 | 负责人 | 状态 |',
+  '|---|---|---|',
+  '| 构建 | 甲 | 完成 |',
+  '| 部署 | 乙 | 进行中 |',
+  '',
+  '- 回归测试',
+  '- 通知渠道',
+].join('\n');
+
 /** cron 冒烟种子：一个任务 + 一次运行会话（运行详情被测数据） */
 const MOCK_CRON_JOB = {
   id: 'cronjob-smoke-0001',
@@ -476,6 +495,8 @@ function startMockGateway({
   stream = {},
   /** 额外种子 N 条历史消息（交替 user/assistant），测长历史懒挂载场景 */
   historyCount = 0,
+  /** 追加一条 markdown 结构种子消息（标题+段落+表格+列表），复制冒烟用 */
+  mdHistory = false,
   /**
    * 会话挂起的 clarify 快照（真实服务端 `_live_session_payload` 的
    * `pending_clarify` 是**单个对象**，不是数组）：`session.resume` 带上它，
@@ -512,6 +533,9 @@ function startMockGateway({
     messages: [
       ...(demo ? demoHistory(nowSec) : INITIAL_HISTORY),
       ...seedHistory,
+      ...(mdHistory
+        ? [{role: 'assistant', text: MD_HISTORY_TEXT, timestamp: 1700000002}]
+        : []),
     ],
     /** 进行中的流式定时器（close 时清理） */
     timers: new Set(),

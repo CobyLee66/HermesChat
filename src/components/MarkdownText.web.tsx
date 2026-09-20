@@ -13,6 +13,8 @@ import {Colors} from './theme';
 import {useT} from '../i18n';
 import {
   injectSrcMapRule,
+  isWholeBlockSelected,
+  outermostRanges,
   parseMapAttr,
   sliceSourceLines,
   unionLineRange,
@@ -26,11 +28,14 @@ import {
  * markdown-it 默认 html:false（原文 HTML 转义），并拦截 javascript: 链接。
  *
  * 桌面端文本复制策略（与手机端长按弹层不同）：
- * ① 拖选气泡内文本后 Cmd/Ctrl+C，剪贴板得到所选范围的 Markdown 源码——
- *    块级 token 注入 data-md-map 源行号，copy 事件拦截后按选区覆盖的块
- *    切出源码（块级粒度，不会复制出半截表格/列表；跨消息选择不干预，
- *    浏览器默认复制渲染后文本）；
- * ② 气泡右键菜单：整条复制 Markdown 源码 / 复制渲染后纯文本。
+ * ① 拖选气泡内文本后 Cmd/Ctrl+C——块级 token 注入 data-md-map 源行号，
+ *    copy 事件拦截后分两种粒度（D055 修订 D030）：
+ *    - 块内部分选区（未覆盖整块文本）：剪贴板 = 所选渲染文本，所见即所选；
+ *    - 整块选中 / 跨多块：按选区覆盖块的行范围并集切出 Markdown 源码
+ *      （块级粒度，不会复制出半截表格/列表）。
+ *    跨消息选择不干预，浏览器默认复制渲染后文本；
+ * ② 气泡右键菜单：有选区时多一项「复制选中内容」（右键时刻快照选区文本），
+ *    另有整条复制 Markdown 源码 / 复制渲染后纯文本。
  */
 
 const md = new MarkdownIt({linkify: true, breaks: false});
@@ -124,9 +129,11 @@ interface MdHostNode {
   addEventListener?: (type: string, listener: (e: unknown) => void) => void;
   removeEventListener?: (type: string, listener: (e: unknown) => void) => void;
   contains?: (node: unknown) => boolean;
-  querySelectorAll?: (
-    sel: string,
-  ) => {forEach: (cb: (el: {dataset?: {mdMap?: string}}) => void) => void};
+  querySelectorAll?: (sel: string) => {
+    forEach: (
+      cb: (el: {dataset?: {mdMap?: string}; innerText?: string}) => void,
+    ) => void;
+  };
   innerText?: string;
 }
 
@@ -146,6 +153,7 @@ interface SelectionLike {
   isCollapsed?: boolean;
   rangeCount?: number;
   getRangeAt?: (index: number) => RangeLike;
+  toString?: () => string;
 }
 
 interface ContextMenuEventLike {
@@ -205,18 +213,36 @@ function handleDocumentCopy(raw: unknown) {
   if (!host) {
     return;
   }
-  // 选区覆盖的带行号块取行范围并集，切出源码替换剪贴板
-  const ranges: LineRange[] = [];
+  // 选区覆盖的带行号块取行范围；先去嵌套（<li> 里的 <p> 等只留最外层）
+  const hits: {el: {innerText?: string}; range: LineRange}[] = [];
   host.node.querySelectorAll?.('[data-md-map]')?.forEach(el => {
     if (range.intersectsNode?.(el) !== true) {
       return;
     }
     const r = parseMapAttr(el.dataset?.mdMap ?? null);
     if (r) {
-      ranges.push(r);
+      hits.push({el, range: r});
     }
   });
-  const merged = unionLineRange(ranges);
+  const outer = outermostRanges(hits.map(h => h.range));
+  // 块内部分选区（单个最外层块、选区未覆盖整块文本）→ 剪贴板 = 所选渲染文本
+  if (outer.length === 1) {
+    const selectedText = sel.toString?.() ?? '';
+    const block = hits
+      .filter(h => h.range.start === outer[0].start && h.range.end === outer[0].end)
+      .pop();
+    if (
+      selectedText &&
+      block &&
+      !isWholeBlockSelected(selectedText, block.el.innerText ?? '')
+    ) {
+      e.clipboardData?.setData?.('text/plain', selectedText);
+      e.preventDefault?.();
+      return;
+    }
+  }
+  // 整块选中 / 跨多块：取行范围并集切出源码替换剪贴板（块级粒度保结构完整）
+  const merged = unionLineRange(outer);
   if (!merged) {
     return;
   }
@@ -255,6 +281,8 @@ function writeClipboard(value: string) {
 /** 右键菜单卡估算尺寸（定位 clamp 防溢出窗口用） */
 const MENU_WIDTH = 190;
 const MENU_HEIGHT = 96;
+// 有选区时菜单多一项「复制选中内容」
+const MENU_ITEM_HEIGHT = 44;
 
 interface Props {
   text: string;
@@ -267,6 +295,8 @@ export function MarkdownText({text}: Props) {
   // 流式更新时注册表里的 getText 走 ref 取最新源文本
   const textRef = useRef(text);
   const [menuPos, setMenuPos] = useState<{x: number; y: number} | null>(null);
+  // 右键时刻的快照选中文本（点击菜单项会塌缩选区，必须提前快照）；空串=无选区
+  const [selText, setSelText] = useState('');
   const {width: winW, height: winH} = useWindowDimensions();
 
   useEffect(() => {
@@ -286,6 +316,18 @@ export function MarkdownText({text}: Props) {
     const onContextMenu = (raw: unknown) => {
       const e = raw as ContextMenuEventLike;
       e.preventDefault?.();
+      // 快照落在本气泡内的选中文本，供「复制选中内容」使用
+      const s = (globalThis as {
+        getSelection?: () => SelectionLike | null;
+      }).getSelection?.();
+      let captured = '';
+      if (s && s.isCollapsed === false && s.rangeCount) {
+        const r = s.getRangeAt?.(0);
+        if (r && node.contains?.(r.startContainer) && node.contains?.(r.endContainer)) {
+          captured = s.toString?.() ?? '';
+        }
+      }
+      setSelText(captured);
       setMenuPos({x: e.clientX ?? 0, y: e.clientY ?? 0});
     };
     node.addEventListener('contextmenu', onContextMenu);
@@ -296,6 +338,11 @@ export function MarkdownText({text}: Props) {
   }, []);
 
   const closeMenu = () => setMenuPos(null);
+
+  const onCopySelection = () => {
+    writeClipboard(selText);
+    closeMenu();
+  };
 
   const onCopyMarkdown = () => {
     writeClipboard(textRef.current);
@@ -308,8 +355,9 @@ export function MarkdownText({text}: Props) {
   };
 
   // 菜单贴光标弹出；靠右/靠下时向内收避免溢出窗口
+  const menuHeight = selText ? MENU_HEIGHT + MENU_ITEM_HEIGHT : MENU_HEIGHT;
   const menuLeft = menuPos ? Math.min(menuPos.x, winW - MENU_WIDTH - 8) : 0;
-  const menuTop = menuPos ? Math.min(menuPos.y, winH - MENU_HEIGHT - 8) : 0;
+  const menuTop = menuPos ? Math.min(menuPos.y, winH - menuHeight - 8) : 0;
 
   return (
     <>
@@ -328,6 +376,16 @@ export function MarkdownText({text}: Props) {
             activeOpacity={1}
             onPress={closeMenu}>
             <View style={[styles.menuCard, {left: menuLeft, top: menuTop}]}>
+              {selText ? (
+                <>
+                  <TouchableOpacity
+                    style={styles.menuItem}
+                    onPress={onCopySelection}>
+                    <Text style={styles.menuText}>{t('md.copySelection')}</Text>
+                  </TouchableOpacity>
+                  <View style={styles.menuSep} />
+                </>
+              ) : null}
               <TouchableOpacity style={styles.menuItem} onPress={onCopyMarkdown}>
                 <Text style={styles.menuText}>{t('md.copyMarkdown')}</Text>
               </TouchableOpacity>
