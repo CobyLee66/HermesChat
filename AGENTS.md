@@ -14,7 +14,7 @@
 - 本机（MacBook）无 Android 工具链：JS 改动用 `npx tsc --noEmit`、`npm run lint`、`npm test`、`npm run web`（浏览器调试）验证。
 - **`npm run lint` 现为 0 error**：根因是 eslint **不读 `.gitignore`**，此前把 `dist-web/`、`web/dist/` 等构建产物也扫了（368 errors 假基线）。修复 = `.eslintrc.js` 的 `ignorePatterns` 显式排除产物目录，**新增产物目录必须同步加进去**。历史文档里「全量 lint 有 180 errors 基线、只看单文件」的说法**已作废**。
 - `.github/workflows/ci.yml` 在每次 PR 强制跑 `tsc` / `lint` / `test` / `i18n-check` 四条，本地必须同样全绿再提交。
-- APK 构建在构建机（Windows，SSH 别名由 `BUILD_HOST` 指定）：本机远程驱动用 `scripts/build-android-remote.sh`（推 GitHub → 构建机拉取 → 远端构建 → 取回 dist/ → 检测到手机则自动安装）；构建机本机（Git Bash）构建用 `scripts/build-android.sh`（仅 npm ci + gradlew 构建 + adb 安装，不做 git 同步）。不要在这台 Mac 上装 Android/iOS 工具链。
+- APK 构建在构建机（Windows，SSH 别名由 `BUILD_HOST` 指定）：本机远程驱动用 `scripts/build-android-remote.sh`（推 GitHub → 构建机拉取 → 远端构建 → 取回 dist/ → 检测到手机则自动安装）；构建机本机（Git Bash）构建用 `scripts/build-android.sh`（仅 npm ci + gradlew 构建 + adb 安装，不做 git 同步）；构建机本机补装 APK 用 `scripts/install-android.sh [debug|release|apk路径]`（本机 adb 直装，默认找 gradle 产物，不做远程转发）。不要在这台 Mac 上装 Android/iOS 工具链。
 - 构建机上的工程目录（`BUILD_DIR`）是构建副本，一切修改从 GitHub 拉取，不要在上面手改。
 - 本机私有配置（构建机主机名/路径、adb 路径、设备序列号、内网地址等）统一写在 `scripts/build-env.sh`（已 gitignore，模板 `scripts/build-env.example.sh`），脚本自动 source；**禁止把这类值写进脚本本体或文档**。
 
