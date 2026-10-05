@@ -295,7 +295,7 @@ export const en = {
   'chat.forkingBanner': 'Forking to the current profile…',
   'chat.foreignBanner':
     'QQ-sourced session · sending will fork it into the current profile',
-  'chat.jumpToBottom': '↓ Back to bottom',
+  'chat.jumpToBottom': '↓ Show latest messages',
   'chat.close': 'Close',
   'chat.infoTitle': 'Session info',
   'chat.menuSearch': 'Search chat history',

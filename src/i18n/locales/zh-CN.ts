@@ -268,7 +268,7 @@ export const zhCN: Record<MessageKey, string> = {
   'chat.sessionRecycledBack': '会话已被服务端回收，请返回重新进入',
   'chat.forkingBanner': '正在派生到当前 profile…',
   'chat.foreignBanner': 'QQ 来源会话 · 发送消息将派生到当前 profile 继续',
-  'chat.jumpToBottom': '↓ 回到底部',
+  'chat.jumpToBottom': '↓ 显示最新消息',
   'chat.close': '关闭',
   'chat.infoTitle': '会话信息',
   'chat.menuSearch': '查找聊天记录',
