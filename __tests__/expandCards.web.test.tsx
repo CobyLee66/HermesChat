@@ -19,6 +19,17 @@ import {ThinkingBlock} from '../src/components/ThinkingBlock';
 import {ToolCallCard} from '../src/components/ToolCallCard';
 import {expandToggleProps} from '../src/utils/expandPress';
 
+// ThinkingBlock 展开态改用 MarkdownText（CJK 强调修复），其原生实现引用的
+// react-native-markdown-display 是未编译 JSX，jest 无法解析；本文件只测按压
+// 契约，mock 成纯文本即可。工厂必须自包含（babel-jest-hoist 禁外层引用）。
+jest.mock('../src/components/MarkdownText', () => {
+  const R = require('react');
+  const {Text} = require('react-native');
+  return {
+    MarkdownText: ({text}: {text: string}) => R.createElement(Text, null, text),
+  };
+});
+
 const realOS = Platform.OS;
 beforeEach(() => {
   (Platform as unknown as {OS: string}).OS = 'web';

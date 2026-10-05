@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Bold/italic markers wrapped around quoted text next to CJK characters now
+  render correctly (e.g. `是**"重点"**。` previously stayed literal).
+  CommonMark flanking rules require the char before an opening `**` to be
+  whitespace or punctuation when the char after it is punctuation, but CJK
+  characters are letters, so the delimiter run was rejected. New
+  `fixCjkEmphasis` preprocessing pass (`src/utils/cjkEmphasis.ts`) inserts a
+  zero-width space on the mismatched side before rendering, applied in both
+  `MarkdownText` implementations (native + web/desktop). Code fences and
+  inline code spans are left untouched.
+- Expanded thinking/reasoning cards now render Markdown (previously plain
+  text, so `**bold**` markers were shown verbatim).
 - Streaming thinking/reasoning preview (collapsed) now anchors to the latest
   output: `thinkingTail` takes the measured preview width and slices a tail
   window sized to fit exactly two lines (CJK/ASCII aware), so the newest text

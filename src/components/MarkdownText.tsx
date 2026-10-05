@@ -5,9 +5,12 @@ import {GestureDetector, usePanGesture} from 'react-native-gesture-handler';
 
 import {Colors} from './theme';
 import {rewriteListMarkers} from '../utils/markdownLists';
+import {fixCjkEmphasis} from '../utils/cjkEmphasis';
 
 interface Props {
   text: string;
+  /** 次要内容变体（思考/推理卡展开态）：小字号 + 次要色，对齐折叠预览层级 */
+  compact?: boolean;
 }
 
 /** 惯性滚动的停止速度（points/s）与衰减系数（越大停得越快）。 */
@@ -133,11 +136,34 @@ function TableScroll({
  * - 文本选择复制由 Bubble 长按菜单接管（全选/部分选择），这里不做 selectable
  *   —— RN 的 Text 选择按单个控件走，跨段落/表格会断，交给整条纯文本。
  */
-export function MarkdownText({text}: Props) {
+export function MarkdownText({text, compact = false}: Props) {
   // 量取气泡内容宽度，作为表格的最小宽度基准
   const [width, setWidth] = useState(0);
-  // 列表标记改写（纯文本变换，随消息稳定）
-  const content = useMemo(() => rewriteListMarkers(text), [text]);
+  // 列表标记改写 + CJK 强调修复（纯文本变换，随消息稳定）
+  const content = useMemo(() => rewriteListMarkers(fixCjkEmphasis(text)), [text]);
+  // compact 变体（思考/推理卡展开态）：正文小字号次要色 + 标题/代码缩一档，
+  // 其余元素沿用主样式
+  const mdStyleOverride = useMemo(
+    () =>
+      compact
+        ? {
+            ...mdStyles,
+            body: {
+              ...mdStyles.body,
+              fontSize: 13,
+              lineHeight: 19,
+              color: Colors.textSecondary,
+            },
+            heading1: {...mdStyles.heading1, fontSize: 17},
+            heading2: {...mdStyles.heading2, fontSize: 16},
+            heading3: {...mdStyles.heading3, fontSize: 14},
+            heading4: {...mdStyles.heading4, fontSize: 13},
+            heading5: {...mdStyles.heading5, fontSize: 13},
+            heading6: {...mdStyles.heading6, fontSize: 13},
+          }
+        : mdStyles,
+    [compact],
+  );
   const rules = useMemo(
     () => ({
       // eslint-disable-next-line react/no-unstable-nested-components -- 库的渲染规则是 render prop，返回的是常驻 TableScroll 元素
@@ -157,7 +183,7 @@ export function MarkdownText({text}: Props) {
           setWidth(w);
         }
       }}>
-      <Markdown style={mdStyles} rules={rules}>
+      <Markdown style={mdStyleOverride} rules={rules}>
         {content}
       </Markdown>
     </View>

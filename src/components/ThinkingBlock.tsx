@@ -4,6 +4,7 @@ import {Animated, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {useT} from '../i18n';
 import {expandToggleProps} from '../utils/expandPress';
 import {thinkingHead, thinkingTail} from '../utils/thinkingPreview';
+import {MarkdownText} from './MarkdownText';
 import {Colors} from './theme';
 
 interface Props {
@@ -48,7 +49,11 @@ export function ThinkingBlock({text, variant, live}: Props) {
         </View>
         <Text style={styles.chevron}>{expanded ? '▾' : '▸'}</Text>
       </TouchableOpacity>
-      {expanded ? <Text style={styles.body}>{text}</Text> : null}
+      {expanded ? (
+        <View style={styles.body}>
+          <MarkdownText text={text} compact />
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -95,9 +100,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
     paddingHorizontal: 10,
     paddingBottom: 8,
-    fontSize: 13,
-    lineHeight: 19,
-    color: Colors.textSecondary,
   },
   cursor: {
     fontSize: 16,

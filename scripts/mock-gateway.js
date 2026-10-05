@@ -497,6 +497,8 @@ function startMockGateway({
   historyCount = 0,
   /** 追加一条 markdown 结构种子消息（标题+段落+表格+列表），复制冒烟用 */
   mdHistory = false,
+  /** 追加任意自定义历史消息（[{role, text, timestamp?}]），CJK 强调冒烟等用 */
+  extraHistory = [],
   /**
    * 会话挂起的 clarify 快照（真实服务端 `_live_session_payload` 的
    * `pending_clarify` 是**单个对象**，不是数组）：`session.resume` 带上它，
@@ -536,6 +538,7 @@ function startMockGateway({
       ...(mdHistory
         ? [{role: 'assistant', text: MD_HISTORY_TEXT, timestamp: 1700000002}]
         : []),
+      ...extraHistory.map((m, i) => ({timestamp: 1700000010 + i, ...m})),
     ],
     /** 进行中的流式定时器（close 时清理） */
     timers: new Set(),
@@ -1154,6 +1157,7 @@ function startMockGateway({
               emit('reasoning.delta', {
                 text:
                   `${'甲'.repeat(150)}\n中部 RICH_REASONING_MID 仅此一处。\n` +
+                  `推理**"加粗标记"**测试。\n` +
                   `${'乙'.repeat(150)}\n`,
               }),
             (at += 250),

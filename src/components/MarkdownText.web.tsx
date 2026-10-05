@@ -11,6 +11,7 @@ import MarkdownIt from 'markdown-it';
 
 import {Colors} from './theme';
 import {useT} from '../i18n';
+import {fixCjkEmphasis} from '../utils/cjkEmphasis';
 import {
   injectSrcMapRule,
   isWholeBlockSelected,
@@ -70,6 +71,12 @@ const CSS = `
 .hm-md th, .hm-md td { border: 1px solid #E5E6EB; padding: 5px 8px; min-width: 72px; white-space: nowrap; }
 .hm-md thead tr { background: #F7F8FA; }
 .hm-md img { max-width: 100%; }
+/* 次要内容变体（思考/推理卡展开态）：小字号次要色，标题/代码同步缩一档 */
+.hm-md.hm-md-compact { font-size: 13px; line-height: 19px; color: #8A8F99; }
+.hm-md.hm-md-compact h1 { font-size: 17px; margin: 4px 0; } .hm-md.hm-md-compact h2 { font-size: 16px; margin: 4px 0; }
+.hm-md.hm-md-compact h3 { font-size: 14px; margin: 3px 0; } .hm-md.hm-md-compact h4, .hm-md.hm-md-compact h5, .hm-md.hm-md-compact h6 { font-size: 13px; margin: 2px 0; }
+.hm-md.hm-md-compact code { font-size: 12px; }
+.hm-md.hm-md-compact pre code { font-size: 12px; line-height: 17px; }
 `;
 
 let stylesInjected = false;
@@ -286,11 +293,15 @@ const MENU_ITEM_HEIGHT = 44;
 
 interface Props {
   text: string;
+  /** 次要内容变体（思考/推理卡展开态）：小字号 + 次要色，对齐折叠预览层级 */
+  compact?: boolean;
 }
 
-export function MarkdownText({text}: Props) {
+export function MarkdownText({text, compact = false}: Props) {
   const t = useT();
-  const html = useMemo(() => cachedRender(text), [text]);
+  // CJK 强调修复只插入零宽空格、不改行数，mdSourceMap 的行号映射不受影响；
+  // 复制（拖选/右键）走的是 textRef 里的原始文本，不会带出 ZWSP
+  const html = useMemo(() => cachedRender(fixCjkEmphasis(text)), [text]);
   const hostRef = useRef<MdHostNode | null>(null);
   // 流式更新时注册表里的 getText 走 ref 取最新源文本
   const textRef = useRef(text);
@@ -362,7 +373,7 @@ export function MarkdownText({text}: Props) {
   return (
     <>
       <div
-        className="hm-md"
+        className={compact ? 'hm-md hm-md-compact' : 'hm-md'}
         ref={node => {
           hostRef.current = node as unknown as MdHostNode | null;
         }}

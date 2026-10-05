@@ -220,6 +220,17 @@ async function main() {
       throw new Error('流式中点击「推理过程」始终无法展开（RNW click 契约回归）');
     }
     console.log(`OK 流式中展开推理块（第 ${reasoningAttempts} 次点击生效）`);
+
+    // ─── 1b. 展开态按 Markdown 渲染：CJK 贴边加粗（D056）渲出 <strong> ──
+    const boldOk = await page.evaluate(() =>
+      [...document.querySelectorAll('.hm-md strong')].some(n =>
+        (n.textContent || '').includes('加粗标记'),
+      ),
+    );
+    if (!boldOk) {
+      throw new Error('推理卡展开态未按 Markdown 渲染（推理**"加粗标记"** 未渲出 strong）');
+    }
+    console.log('OK 推理卡展开态 Markdown 渲染（推理**"加粗标记"** → <strong>）');
     await page.screenshot({path: `${OUT}/web-expand-cards-1-stream-reasoning.png`});
 
     // ─── 2. 展开状态跨 delta 保持（无 remount/重置）──────────
