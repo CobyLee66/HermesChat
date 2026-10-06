@@ -275,6 +275,14 @@ export const zhCN: Record<MessageKey, string> = {
   'chat.rename': '重命名会话',
   'chat.contextPercent': '（{percent}%）',
 
+  // ── 时间线 marker（服务端 display_kind 标记行，渲染为系统灰条）──
+  'chat.marker.delegationDone': '后台子任务已完成（{count} 个）',
+  'chat.marker.delegationDoneNoCount': '后台子任务已完成',
+  'chat.marker.internalNotification': '后台通知',
+  'chat.marker.modelSwitch': '已切换模型',
+  'chat.marker.personalitySwitch': '已切换人格',
+  'chat.marker.autoContinue': '已续跑中断的回复',
+
   // ── 输入区 ──
   'input.pickImageFailed': '选择图片失败',
   'input.addFileFailed': '添加文件失败',

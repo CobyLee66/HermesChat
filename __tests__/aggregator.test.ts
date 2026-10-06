@@ -1,4 +1,5 @@
 import {TimelineAggregator} from '../src/rpc/aggregator';
+import {t} from '../src/i18n';
 import type {
   ApprovalCardItem,
   AssistantMsg,
@@ -596,6 +597,150 @@ describe('TimelineAggregator 历史投影', () => {
     agg.applyEvent('message.complete', {text: '新回复'});
     expect(agg.getItems()).toHaveLength(2);
     expect(agg.isStreaming()).toBe(false);
+  });
+});
+
+describe('TimelineAggregator display_kind 标记行', () => {
+  const DELEG_TEXT =
+    '[ASYNC DELEGATION BATCH COMPLETE — deleg_abc123]\n' +
+    'A background fan-out of 3 subagent(s) you dispatched earlier has finished.\n\n' +
+    '- task 1: done';
+
+  function markerItems(agg: TimelineAggregator): SystemEvent[] {
+    return agg
+      .getItems()
+      .filter(
+        i => i.kind === 'system' && i.eventKind === 'marker',
+      ) as SystemEvent[];
+  }
+
+  it('hydrate：async_delegation_complete → 系统灰条（带计数与展开全文），不产生用户气泡', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([
+      {
+        role: 'user',
+        text: DELEG_TEXT,
+        display_kind: 'async_delegation_complete',
+        display_metadata: {task_count: 3},
+      },
+    ]);
+    const items = agg.getItems();
+    expect(items).toHaveLength(1);
+    const marker = items[0] as SystemEvent;
+    expect(marker.kind).toBe('system');
+    expect(marker.eventKind).toBe('marker');
+    expect(marker.text).toBe(t('chat.marker.delegationDone', {count: 3}));
+    expect(marker.fullText).toBe(DELEG_TEXT);
+    expect(items.some(i => i.kind === 'user')).toBe(false);
+  });
+
+  it('hydrate：display_metadata 为 JSON 字符串（旧服务端）也能取计数', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([
+      {
+        role: 'user',
+        text: DELEG_TEXT,
+        display_kind: 'async_delegation_complete',
+        display_metadata: JSON.stringify({
+          task_count: 9,
+        }) as unknown as Record<string, unknown>,
+      },
+    ]);
+    expect(markerItems(agg)[0].text).toBe(
+      t('chat.marker.delegationDone', {count: 9}),
+    );
+  });
+
+  it('hydrate：internal_notification → 系统灰条（带展开全文）', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([
+      {role: 'user', text: '后台 watch 触发：文件变了', display_kind: 'internal_notification'},
+    ]);
+    const marker = markerItems(agg);
+    expect(marker).toHaveLength(1);
+    expect(marker[0].text).toBe(t('chat.marker.internalNotification'));
+    expect(marker[0].fullText).toBe('后台 watch 触发：文件变了');
+  });
+
+  it('hydrate：model_switch/personality_switch/auto_continue → 灰条短标签，无展开全文', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([
+      {role: 'user', text: '模型切到 X', display_kind: 'model_switch'},
+      {role: 'user', text: '人格切换', display_kind: 'personality_switch'},
+      {role: 'user', text: '[auto continue]', display_kind: 'auto_continue'},
+    ]);
+    const markers = markerItems(agg);
+    expect(markers).toHaveLength(3);
+    expect(markers[0].text).toBe(t('chat.marker.modelSwitch'));
+    expect(markers[1].text).toBe(t('chat.marker.personalitySwitch'));
+    expect(markers[2].text).toBe(t('chat.marker.autoContinue'));
+    expect(markers.every(m => m.fullText === undefined)).toBe(true);
+    expect(agg.getItems().some(i => i.kind === 'user')).toBe(false);
+  });
+
+  it('hydrate：无 display_kind 但 [ASYNC DELEGATION 前缀 → 同样归类为 marker', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([{role: 'user', text: DELEG_TEXT}]);
+    const markers = markerItems(agg);
+    expect(markers).toHaveLength(1);
+    expect(markers[0].text).toBe(t('chat.marker.delegationDoneNoCount'));
+    expect(markers[0].fullText).toBe(DELEG_TEXT);
+  });
+
+  it('hydrate：skill_invocation 与普通 user 行不受影响', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([
+      {role: 'user', text: '/review 检查代码', display_kind: 'skill_invocation'},
+      {role: 'user', text: '普通消息'},
+    ]);
+    const users = agg.getItems().filter(i => i.kind === 'user');
+    expect(users).toHaveLength(2);
+    expect(markerItems(agg)).toHaveLength(0);
+  });
+
+  it('restoreLiveTail：inflight.user 是委派通知时不补用户气泡，补 marker 灰条', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([]);
+    agg.restoreLiveTail(true, {
+      user: DELEG_TEXT,
+      assistant: '汇总结果如下',
+      streaming: true,
+    });
+    const items = agg.getItems();
+    expect(items.some(i => i.kind === 'user')).toBe(false);
+    const markers = markerItems(agg);
+    expect(markers).toHaveLength(1);
+    expect(markers[0].fullText).toBe(DELEG_TEXT);
+    // 流式尾部照常重建
+    const tail = items[items.length - 1] as AssistantMsg;
+    expect(tail.kind).toBe('assistant');
+    expect(tail.streaming).toBe(true);
+  });
+
+  it('restoreLiveTail：历史已含同款 marker 时不重复补', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([
+      {role: 'user', text: DELEG_TEXT, display_kind: 'async_delegation_complete'},
+    ]);
+    agg.restoreLiveTail(true, {
+      user: DELEG_TEXT,
+      assistant: '汇总中',
+      streaming: true,
+    });
+    expect(markerItems(agg)).toHaveLength(1);
+  });
+
+  it('restoreLiveTail：普通 prompt 仍补用户气泡', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([]);
+    agg.restoreLiveTail(true, {
+      user: '改一下按钮颜色',
+      assistant: '好',
+      streaming: true,
+    });
+    const users = agg.getItems().filter(i => i.kind === 'user') as UserMsg[];
+    expect(users).toHaveLength(1);
+    expect(users[0].text).toBe('改一下按钮颜色');
   });
 });
 

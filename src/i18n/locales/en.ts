@@ -302,6 +302,14 @@ export const en = {
   'chat.rename': 'Rename session',
   'chat.contextPercent': ' ({percent}%)',
 
+  // ── 时间线 marker（服务端 display_kind 标记行，渲染为系统灰条）──
+  'chat.marker.delegationDone': 'Background agent work finished ({count})',
+  'chat.marker.delegationDoneNoCount': 'Background agent work finished',
+  'chat.marker.internalNotification': 'Background notification',
+  'chat.marker.modelSwitch': 'Model changed',
+  'chat.marker.personalitySwitch': 'Personality changed',
+  'chat.marker.autoContinue': 'Resumed interrupted turn',
+
   // ── 输入区 ──
   'input.pickImageFailed': 'Failed to pick image',
   'input.addFileFailed': 'Failed to add file',

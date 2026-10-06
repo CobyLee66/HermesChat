@@ -25,6 +25,7 @@ import React, {
 import {
   FlatList,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -37,6 +38,7 @@ import {ChatImage} from '../components/ChatImage';
 import {ChatScrollbar} from '../components/ChatScrollbar';
 import {ClarifyCard} from '../components/ClarifyCard';
 import {FileRefCard} from '../components/FileRefCard';
+import {MarkdownText} from '../components/MarkdownText';
 import {Colors} from '../components/theme';
 import {StreamCursor, ThinkingBlock} from '../components/ThinkingBlock';
 import {ToolCallCard} from '../components/ToolCallCard';
@@ -97,6 +99,8 @@ export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
 
     /** 列表滚动状态：驱动自绘滚动条与「回到底部」按钮 */
     const [scroll, setScroll] = useState({offset: 0, content: 0, viewport: 0});
+    /** marker 灰条（display_kind 标记行）点击展开的全文查看层：非空即打开 */
+    const [expandedText, setExpandedText] = useState<string | null>(null);
     const listRef = useRef<FlatList<TimelineItem>>(null);
 
     /** 贴底跟随态（ref 避免流式高频重渲染）：初始与切会话时跟随 */
@@ -232,8 +236,8 @@ export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
                 ) : null}
               </View>
             );
-          case 'system':
-            return (
+          case 'system': {
+            const bar = (
               <View
                 style={[
                   styles.systemBar,
@@ -245,9 +249,23 @@ export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
                     item.eventKind === 'error' ? styles.systemTextError : null,
                   ]}>
                   {item.text}
+                  {item.fullText ? ' ›' : ''}
                 </Text>
               </View>
             );
+            // marker 行带原始全文：灰条可点击，弹出 markdown 全文查看层
+            if (item.fullText) {
+              const fullText = item.fullText;
+              return (
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  onPress={() => setExpandedText(fullText)}>
+                  {bar}
+                </TouchableOpacity>
+              );
+            }
+            return bar;
+          }
           case 'approval':
             return (
               <ApprovalCard
@@ -379,6 +397,23 @@ export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
       ) : null}
       {/* 斜杠补全浮层挂点：贴列表容器底部（即输入框正上方） */}
       {slashOverlay}
+      {/* marker 全文查看层：挂在面板窗口树内（同 ChatScreen 选择层不用
+          Modal 的考量），markdown 渲染，手机/桌面共用 */}
+      {expandedText !== null ? (
+        <View style={styles.markerOverlay}>
+          <View style={styles.markerCard}>
+            <ScrollView style={styles.markerScroll}>
+              <MarkdownText text={expandedText} />
+            </ScrollView>
+            <TouchableOpacity
+              style={styles.markerClose}
+              activeOpacity={0.8}
+              onPress={() => setExpandedText(null)}>
+              <Text style={styles.markerCloseText}>{t('chat.close')}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      ) : null}
     </View>
   );
   },
@@ -502,6 +537,29 @@ const styles = StyleSheet.create({
   systemBarError: {backgroundColor: Colors.dangerBg},
   systemText: {fontSize: 12, color: Colors.textSecondary},
   systemTextError: {color: Colors.danger},
+  /** marker 灰条的全文查看层（点击带 fullText 的系统项打开） */
+  markerOverlay: {
+    ...StyleSheet.absoluteFill,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    padding: 12,
+    zIndex: 10,
+  },
+  markerCard: {
+    flex: 1,
+    backgroundColor: Colors.card,
+    borderRadius: 12,
+    padding: 12,
+  },
+  markerScroll: {flex: 1},
+  markerClose: {
+    alignSelf: 'flex-end',
+    marginTop: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 8,
+    backgroundColor: Colors.bg,
+  },
+  markerCloseText: {fontSize: 13, color: Colors.textSecondary},
   assistantCol: {paddingHorizontal: 12, marginVertical: 3},
   cursorWrap: {paddingHorizontal: 4, paddingTop: 2},
   errorBar: {

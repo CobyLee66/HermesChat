@@ -55,6 +55,72 @@ function nextId(prefix: string): string {
   return `${prefix}-${Date.now()}-${seq}`;
 }
 
+/**
+ * 服务端 display_kind 标记行（role=user 的内部事件：异步委派完成、后台
+ * 通知、模型/人格切换、自动续跑）的分类结果：灰条短标签 + 可选展开全文。
+ * 对齐官方 desktop hydration：这类行渲染为系统时间线条目而非用户气泡。
+ */
+export interface MarkerClassification {
+  label: string;
+  /** 有实质内容的标记（委派完成/内部通知）携带原始全文，供点击展开 */
+  fullText?: string;
+}
+
+/** 异步委派完成通知的固定前缀（process_registry 生成；inflight 快照没有
+ *  display_kind，live 路径只能靠它识别）。 */
+const ASYNC_DELEGATION_PREFIX = '[ASYNC DELEGATION';
+
+/**
+ * 把 user 行分类为 marker 系统项；非标记行返回 null。
+ * display_metadata 对旧服务端可能是 JSON 字符串（desktop 踩过），宽容解析。
+ */
+export function classifyMarkerMessage(
+  displayKind: string | undefined,
+  text: string,
+  displayMetadata?: Record<string, unknown> | string,
+): MarkerClassification | null {
+  let metadata: Record<string, unknown> | undefined;
+  if (typeof displayMetadata === 'string') {
+    try {
+      const parsed: unknown = JSON.parse(displayMetadata);
+      if (parsed && typeof parsed === 'object') {
+        metadata = parsed as Record<string, unknown>;
+      }
+    } catch {
+      metadata = undefined;
+    }
+  } else {
+    metadata = displayMetadata;
+  }
+  const kind =
+    displayKind ||
+    (text.trimStart().startsWith(ASYNC_DELEGATION_PREFIX)
+      ? 'async_delegation_complete'
+      : '');
+  switch (kind) {
+    case 'async_delegation_complete': {
+      const count = metadata?.task_count;
+      return {
+        label:
+          typeof count === 'number' && count > 0
+            ? t('chat.marker.delegationDone', {count})
+            : t('chat.marker.delegationDoneNoCount'),
+        fullText: text,
+      };
+    }
+    case 'internal_notification':
+      return {label: t('chat.marker.internalNotification'), fullText: text};
+    case 'model_switch':
+      return {label: t('chat.marker.modelSwitch')};
+    case 'personality_switch':
+      return {label: t('chat.marker.personalitySwitch')};
+    case 'auto_continue':
+      return {label: t('chat.marker.autoContinue')};
+    default:
+      return null;
+  }
+}
+
 function stringifyResult(result: unknown): string {
   if (result === undefined || result === null) {
     return '';
@@ -177,6 +243,24 @@ export class TimelineAggregator {
         continue;
       }
       if (m.role === 'user') {
+        // display_kind 标记行（委派完成/内部通知/模型切换等）→ 系统灰条，
+        // 不渲染成用户气泡（对齐官方 desktop；fullText 保留原文供展开，
+        // 在 parseMessageText 之前取，不剥任何指令行）
+        const marker = classifyMarkerMessage(
+          m.display_kind,
+          m.text ?? '',
+          m.display_metadata,
+        );
+        if (marker) {
+          this.push({
+            kind: 'system',
+            id: nextId('s'),
+            eventKind: 'marker',
+            text: marker.label,
+            fullText: marker.fullText,
+          });
+          continue;
+        }
         // 历史文本里可能带 @image:/@file: 指令行和内嵌 data URL（图片 turn）
         const parsed = parseMessageText(m.text ?? '');
         if (
@@ -981,20 +1065,48 @@ export class TimelineAggregator {
     // （mid-turn 历史里 prompt 后面可能已跟工具行，不能只看尾部一条）。
     // 纯图片/文件 prompt 解析文本为空串，与历史里同为空文本的图片行也能匹配。
     const inflightUserRaw = inflight?.user?.trim() ? inflight.user : '';
+    // inflight 快照没有 display_kind：委派完成等内部通知 prompt 靠文本前缀
+    // 识别为 marker——不补用户气泡，补系统灰条（hydrate 已含同款时不重复）。
+    // 已知取舍：marker turn 的 sameTurn 结构复用因此退化为 strictPrefix
+    // 路径（marker turn 几乎都有流式文本，影响可忽略）。
+    const inflightMarker = inflightUserRaw
+      ? classifyMarkerMessage(undefined, inflightUserRaw)
+      : null;
     const inflightUserText = inflightUserRaw
-      ? parseMessageText(inflightUserRaw).text
+      ? inflightMarker
+        ? inflightUserRaw
+        : parseMessageText(inflightUserRaw).text
       : '';
     if (inflightUserRaw) {
-      let lastUser: UserMsg | null = null;
-      for (let i = this.items.length - 1; i >= 0; i--) {
-        const it = this.items[i];
-        if (it.kind === 'user') {
-          lastUser = it;
-          break;
+      if (inflightMarker) {
+        const markerKey = (inflightMarker.fullText ?? inflightMarker.label).trim();
+        const exists = this.items.some(
+          it =>
+            it.kind === 'system' &&
+            it.eventKind === 'marker' &&
+            (it.fullText ?? it.text).trim() === markerKey,
+        );
+        if (!exists) {
+          this.push({
+            kind: 'system',
+            id: nextId('s'),
+            eventKind: 'marker',
+            text: inflightMarker.label,
+            fullText: inflightMarker.fullText,
+          });
         }
-      }
-      if (!lastUser || lastUser.text !== inflightUserText) {
-        this.appendUserMessage(inflightUserRaw);
+      } else {
+        let lastUser: UserMsg | null = null;
+        for (let i = this.items.length - 1; i >= 0; i--) {
+          const it = this.items[i];
+          if (it.kind === 'user') {
+            lastUser = it;
+            break;
+          }
+        }
+        if (!lastUser || lastUser.text !== inflightUserText) {
+          this.appendUserMessage(inflightUserRaw);
+        }
       }
     }
     const serverText = typeof inflight?.assistant === 'string' ? inflight.assistant : '';

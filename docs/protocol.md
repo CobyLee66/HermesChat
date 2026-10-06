@@ -120,6 +120,12 @@
 
 - 存储为 OpenAI chat 格式：`{"role":"user|assistant|tool|system","content":<str|parts>,"tool_calls":[...],"timestamp","_row_id","display_kind","reasoning"?...}`。
 - 客户端投影：`{role, text, timestamp?, row_id?, display_kind?, display_metadata?, reasoning?}`；工具行 `{role:"tool", name, context(80字预览), args?}`。
+- **`display_kind` 标记行（2026-10-06 查实，App 已对齐官方 desktop 渲染）**：内部事件（异步委派完成、后台 watch 通知、resume 唤醒、模型/人格切换、自动续跑）以 `role:"user"` 行注入历史并打 `display_kind`，投影原样转发。取值：
+  - `async_delegation_complete`：`[ASYNC DELEGATION BATCH COMPLETE — deleg_*]` 开头的委派批完成通知（tui_gateway server.py:12670 提交时打标），附 `display_metadata {task_count, completed_count, failed_count, duration_seconds?}`（旧服务端可能把 metadata 投成 JSON 字符串，客户端宽容解析）；正文含全部子任务汇总。
+  - `internal_notification`：其余 internal MessageEvent 注入的通知（gateway/run.py:20859 `persist_user_display_kind`）。
+  - `model_switch` / `personality_switch` / `auto_continue`：一行 bookkeeping 标记（auto_continue 服务端对存量无标记行做固定前缀嗅探兜底 `_legacy_display_kind`）。
+  - `skill_invocation`：skill 调用行（text 已被替换为调用行而非展开体）——官方 desktop 按 user 渲染，App 同样保留用户气泡。
+  - **渲染契约**：官方 desktop（`apps/desktop/src/lib/chat-messages/hydration.ts`）把前五种映射为 system 时间线条目（如 "3 background agents finished"）而非用户气泡。App 同口径（`rpc/aggregator.ts classifyMarkerMessage`）：灰条短标签（i18n `chat.marker.*`），委派完成/内部通知带原文可点击展开 markdown 全文；无 display_kind 时按 `[ASYNC DELEGATION` 文本前缀兜底识别（**live 路径必需**——resume 的 inflight 快照没有 display_kind）。
 - 图片消息 content parts：`[{"type":"text","text":...},{"type":"image_url","image_url":{"url":...}}]`；持久化文本为 `@image:<path>` 指令（渲染端还原）。
 - **图片/文件引用的持久化与还原**（已从源码确认，M3 按此实现）：
   - 带图用户消息持久化时，文本部分尾部追加 `@image:<path>` 指令行（每行一张，caption 在前——server.py `_build_persist_message_with_image_refs`；路径含空格时按 `format_reference_value` 加反引号/引号）。

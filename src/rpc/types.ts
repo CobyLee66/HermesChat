@@ -587,6 +587,13 @@ export interface SystemEvent {
   /** status.update 的 kind（status/process/compacting/lifecycle/loop…）或自定义 */
   eventKind: string;
   text: string;
+  /**
+   * marker 类系统项（eventKind='marker'）的原始全文：服务端 display_kind
+   * 标记行（async_delegation_complete/internal_notification）的完整内容，
+   * UI 灰条只显示 text 短标签，点击展开 markdown 渲染全文。仅内容有实质
+   * 信息的标记携带；model_switch 等 bookkeeping 一行标记不带。
+   */
+  fullText?: string;
 }
 
 export type TimelineItem =
