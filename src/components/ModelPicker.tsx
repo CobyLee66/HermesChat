@@ -1,4 +1,4 @@
-import React, {useEffect, useState} from 'react';
+import React, {useEffect, useRef, useState} from 'react';
 import {
   ActivityIndicator,
   Modal,
@@ -40,17 +40,39 @@ export function ModelPicker({visible, onClose, load, onPick, onPickReasoning}: P
   const [loading, setLoading] = useState(false);
   const centered = Platform.OS === 'web';
 
+  // load 经 ref 取最新引用：父级在流式期间高频重渲染会产生新内联引用，
+  // 绝不能让引用变化重触发加载（每次触发 = model.options + config.get 两个
+  // RPC，model.options 服务端是秒级长任务，风暴会把它打到超时）
+  const loadRef = useRef(load);
+  loadRef.current = load;
+  // 代次守卫：只有最新一次加载的结果允许落地（慢响应不覆写、关弹后不 setState）
+  const seqRef = useRef(0);
+
   useEffect(() => {
     if (!visible) {
       return;
     }
+    const seq = ++seqRef.current;
     setLoading(true);
     setError(null);
-    load()
-      .then(setData)
-      .catch(e => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false));
-  }, [visible, load]);
+    loadRef
+      .current()
+      .then(d => {
+        if (seqRef.current === seq) {
+          setData(d);
+        }
+      })
+      .catch(e => {
+        if (seqRef.current === seq) {
+          setError(e instanceof Error ? e.message : String(e));
+        }
+      })
+      .finally(() => {
+        if (seqRef.current === seq) {
+          setLoading(false);
+        }
+      });
+  }, [visible]);
 
   const rows = (data?.models.providers ?? []).filter(
     p => (p.models?.length ?? 0) > 0 || p.is_current,

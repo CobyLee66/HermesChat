@@ -70,7 +70,12 @@ export function ChatInputBar({
 }) {
   const t = useT();
   const chat = useChatStore(s => s.bySession[sessionId]);
-  const {interrupt, attachImages, removeAttachment, attachFile} = useChatStore();
+  // 逐个 action 选择器（引用稳定）：全 store 订阅会让输入框在流式期间
+  // 每 delta 重渲染
+  const interrupt = useChatStore(s => s.interrupt);
+  const attachImages = useChatStore(s => s.attachImages);
+  const removeAttachment = useChatStore(s => s.removeAttachment);
+  const attachFile = useChatStore(s => s.attachFile);
   const connState = useConnectionStore(s => s.state);
 
   const [attaching, setAttaching] = React.useState(false);

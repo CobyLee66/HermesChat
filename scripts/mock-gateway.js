@@ -9,8 +9,8 @@
  * WS `/api/ws` → gateway.ready + profiles.list / session.create / session.list /
  * session.resume（含冷路径换新 live sid）/ session.history / session.usage /
  * complete.slash / slash.exec(title) / session.title / session.delete /
- * session.close / model.options / **prompt.submit（流式回包，只认 live sid，
- * 未知 sid 返 4007）**。
+ * session.close / model.options / config.get / config.set(reasoning|model) /
+ * **prompt.submit（流式回包，只认 live sid，未知 sid 返 4007）**。
  * live clarify 流（D052）：prompt 文本 `CLARIFY`（单问）/`CLARIFY_BATCH`
  * （批量两题）触发挂起，clarify.respond 全题应答后释放（tool.complete 回显
  * → 续写 → complete，历史落 clarify 工具行）。
@@ -941,7 +941,19 @@ function startMockGateway({
             id,
             demo
               ? {...DEMO_MODEL_OPTIONS}
-              : {providers: [], model: 'mock-model', provider: 'mock'},
+              : {
+                  providers: [
+                    {
+                      slug: 'mock',
+                      name: 'Mock Provider',
+                      is_current: true,
+                      models: ['mock-model', 'mock-model-pro'],
+                      total_models: 2,
+                    },
+                  ],
+                  model: 'mock-model',
+                  provider: 'mock',
+                },
           ),
         );
         return;
@@ -953,6 +965,12 @@ function startMockGateway({
         send(err(id, 4002, `mock: 未实现的 config.get key ${params.key}`));
         return;
       case 'config.set': {
+        // 切模型：照真实服务端返回 {key, value, warning, ...}（turn 中真机会
+        // deferred:true，mock 从简直接受理；App 侧只取 warning）
+        if (params.key === 'model') {
+          send(ok(id, {key: 'model', value: String(params.value ?? ''), warning: ''}));
+          return;
+        }
         if (params.key !== 'reasoning') {
           send(err(id, 4002, `mock: 未实现的 config.set key ${params.key}`));
           return;

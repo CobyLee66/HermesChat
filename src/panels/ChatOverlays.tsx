@@ -53,8 +53,12 @@ export function ChatOverlays({
   // foreign 只读会话（未 resume 的 multiplex 大库行）：改名/删除 RPC 都够不到，
   // 菜单里隐藏这两项
   const foreign = useChatStore(s => s.bySession[sessionId]?.foreign ?? null);
-  const {switchModel, fetchModelOptions, setReasoningLevel, fetchReasoningLevel} =
-    useChatStore();
+  // 逐个 action 选择器（引用稳定）：全 store 订阅会让本组件在任意会话流式
+  // 期间每 delta 重渲染，进而把内联回调打成新引用（ModelPicker 风暴根因）
+  const switchModel = useChatStore(s => s.switchModel);
+  const fetchModelOptions = useChatStore(s => s.fetchModelOptions);
+  const setReasoningLevel = useChatStore(s => s.setReasoningLevel);
+  const fetchReasoningLevel = useChatStore(s => s.fetchReasoningLevel);
 
   // 改名弹窗（本地状态：仅本组件渲染）
   const [rename, setRename] = useState<{visible: boolean; text: string}>({
@@ -110,6 +114,18 @@ export function ChatOverlays({
             : ''
         }`
       : null;
+
+  // 稳定引用：ModelPicker 打开期间父级重渲染不能产生新 load（弹层内 effect
+  // 只按 visible 触发，这里再兜一层避免未来重构引入依赖回调的效应）
+  const loadModelPicker = useCallback(
+    () =>
+      // 思考等级读取失败（老服务端无此 key）不拖垮整个面板，仅无当前态高亮
+      Promise.all([
+        fetchModelOptions(sessionId),
+        fetchReasoningLevel(sessionId).catch(() => ''),
+      ]).then(([models, reasoning]) => ({models, reasoning})),
+    [sessionId, fetchModelOptions, fetchReasoningLevel],
+  );
 
   return (
     <>
@@ -173,13 +189,7 @@ export function ChatOverlays({
       <ModelPicker
         visible={state.modelPickerVisible}
         onClose={() => setState({modelPickerVisible: false})}
-        load={() =>
-          // 思考等级读取失败（老服务端无此 key）不拖垮整个面板，仅无当前态高亮
-          Promise.all([
-            fetchModelOptions(sessionId),
-            fetchReasoningLevel(sessionId).catch(() => ''),
-          ]).then(([models, reasoning]) => ({models, reasoning}))
-        }
+        load={loadModelPicker}
         onPick={(model, provider) => {
           switchModel(sessionId, model, provider).catch(e =>
             alertError(t('chat.switchFailed'), e instanceof Error ? e.message : String(e)),
