@@ -39,8 +39,39 @@ echo "==> [2/3] 构建机拉取代码并构建（scripts/build-android.sh）"
 #   gradle 新孵化的 daemon 会继承其启动时会话的 stdout/stderr 句柄——若是 ssh
 #   通道句柄，daemon 常驻导致通道永远等不到 EOF，表现为「构建早已完成但脚本
 #   卡死」（复用既有 daemon 时无此问题，故该坑时好时坏）。
+# ⚠ 但仅重定向 stdio 还不够（2026-10-06 实证）：Windows 下 ssh 通道的管道句柄
+#   会沿进程树被**所有后代**继承（不只是 stdio），新孵化的 adb daemon
+#   （daemon not running; starting now）同样把通道挂死。所以本地侧做看门狗：
+#   远端 cat 完日志后会打一行哨兵（带构建退出码），本地见到哨兵即认为完成，
+#   主动杀掉本地 ssh 进程收通道，绝不依赖通道自己关闭。
 REMOTE_LOG_POSIX="${BUILD_TMP_DIR:-C:/Users/Public}/hermes-android-build.log"
-ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR & (git pull --ff-only origin main || (git reset --hard origin/main >nul & git pull --ff-only origin main)) & \"$REMOTE_BASH\" -l -c \"scripts/build-android.sh $FLAVOR > '$REMOTE_LOG_POSIX' 2>&1; RC=\$?; cat '$REMOTE_LOG_POSIX'; exit \$RC\""
+SENTINEL="HERMES_REMOTE_BUILD_DONE"
+LOCAL_LOG="$(mktemp -t hermes-android-build)"
+trap 'rm -f "$LOCAL_LOG"' EXIT
+
+# 后台起 ssh：远端构建日志经 cat 整体回显到本地日志文件，末尾是哨兵行
+ssh "$REMOTE_HOST" "cd /d $REMOTE_DIR & (git pull --ff-only origin main || (git reset --hard origin/main >nul & git pull --ff-only origin main)) & \"$REMOTE_BASH\" -l -c \"scripts/build-android.sh $FLAVOR > '$REMOTE_LOG_POSIX' 2>&1; RC=\$?; cat '$REMOTE_LOG_POSIX'; echo $SENTINEL rc=\$RC; exit \$RC\"" >"$LOCAL_LOG" 2>&1 &
+SSH_PID=$!
+
+# 等哨兵（完成）或 ssh 自己死掉（网络中断等）
+while ! grep -q "$SENTINEL" "$LOCAL_LOG" 2>/dev/null; do
+  kill -0 "$SSH_PID" 2>/dev/null || break
+  sleep 5
+done
+# 通道可能被 daemon 句柄挂住：主动收掉（此刻远端命令必然已结束）
+kill "$SSH_PID" 2>/dev/null || true
+wait "$SSH_PID" 2>/dev/null || true
+cat "$LOCAL_LOG"
+
+if ! grep -q "$SENTINEL" "$LOCAL_LOG"; then
+  echo "远端构建未跑完（ssh 中断），以上为已收到的日志" >&2
+  exit 1
+fi
+BUILD_RC="$(sed -n "s/.*$SENTINEL rc=\([0-9][0-9]*\).*/\1/p" "$LOCAL_LOG" | tail -1)"
+if [ "$BUILD_RC" != "0" ]; then
+  echo "远端构建失败（rc=$BUILD_RC）" >&2
+  exit "$BUILD_RC"
+fi
 
 echo "==> [3/3] 取回 APK"
 mkdir -p "$DIST_DIR"
