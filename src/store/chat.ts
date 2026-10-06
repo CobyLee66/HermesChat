@@ -34,6 +34,7 @@ import type {
 import {getExecRemote} from '../ssh/execRemote';
 import {fetchRemoteHistory, toSeedMessages} from '../ssh/remoteHistory';
 import {dlog} from '../utils/desktopLog';
+import {useDraftStore} from './drafts';
 import {getFork, setFork} from './forkMap';
 import {useProfilesStore} from './profiles';
 import {useSessionsStore} from './sessions';
@@ -548,6 +549,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
           title: st.title,
           pendingFirstSubmit: true,
         });
+        // 草稿随迁（页面经 migratedTo 换路由后输入框不丢）
+        useDraftStore.getState().migrateDraft(sid, liveSid);
         set(s => ({
           bySession: {
             ...s.bySession,
@@ -702,6 +705,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
       applyPending(agg, opts.pendingApprovals, opts.pendingClarifies);
       if (liveSid !== oldSid) {
         aggregators.delete(oldSid);
+        // 草稿随迁：页面经 migratedTo 换路由后输入框内容不丢（replace 重建
+        // 页面，组件内 state 会清零——2026-10-06 用户报障根因）
+        useDraftStore.getState().migrateDraft(oldSid, liveSid);
         set(s => {
           const next = {...s.bySession};
           const shell = next[oldSid];
@@ -1122,6 +1128,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
           running,
           inflight,
         });
+        // 草稿随迁（页面经 migratedTo 换路由后输入框不丢）
+        useDraftStore.getState().migrateDraft(sid, liveSid);
         set(s => ({
           bySession: {
             ...s.bySession,

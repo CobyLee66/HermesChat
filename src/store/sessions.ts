@@ -35,6 +35,7 @@ import {
   type SessionSortMode,
 } from '../utils/sessionSort';
 import {useChatStore} from './chat';
+import {useDraftStore} from './drafts';
 import {useProfilesStore} from './profiles';
 
 interface SessionsStore {
@@ -300,6 +301,8 @@ export const useSessionsStore = create<SessionsStore>((set, get) => ({
         [profile]: (s.byProfile[profile] ?? []).filter(r => r.id !== storedId),
       },
     }));
+    // 已删会话的输入框草稿一并清理（live/stored 两个 key 都可能挂过聊天页）
+    useDraftStore.getState().pruneDrafts([sessionId, storedId]);
     return true;
   },
 }));

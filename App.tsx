@@ -29,6 +29,7 @@ import {hasDesktopBridge, initDesktopEngine} from './src/ssh/desktopBridge';
 import {initConnectionEngine} from './src/ssh/SshManager';
 import {initWebDirectEngine} from './src/ssh/webDirect';
 import {useConnectionStore} from './src/store/connection';
+import {useDraftStore} from './src/store/drafts';
 import {useSessionsStore} from './src/store/sessions';
 import type {RootStackParamList} from './src/navigation/types';
 
@@ -57,6 +58,8 @@ function App() {
     loadLocalePreference();
     // 排序档位持久化恢复（进会话列表前完成，避免首帧闪默认档）
     useSessionsStore.getState().loadSortModePreference();
+    // 输入框草稿恢复（进会话前完成，避免已输入文本闪空）
+    void useDraftStore.getState().loadPersisted();
     // web 构建按环境装配：Electron 桌面桥（ssh2 隧道）或浏览器直连引擎
     if (Platform.OS === 'web') {
       if (hasDesktopBridge()) {

@@ -1,12 +1,15 @@
 /**
  * useChatComposer — 聊天输入组合逻辑（输入框状态 + 斜杠补全 + 发送分流）。
  * 手机 ChatScreen 与桌面 ChatPane 共用；/model 特判与补全键盘导航也在这里。
+ * 输入文本存 drafts store（按会话 key、AsyncStorage 持久化）：重连 sid 迁移
+ * （navigation.replace 重建页面）、返回重进、进程被杀重启均不丢。
  */
 
-import {useCallback, useState} from 'react';
+import {useCallback} from 'react';
 
 import {useChatStore} from '../store/chat';
 import {useConnectionStore} from '../store/connection';
+import {useDraftStore} from '../store/drafts';
 import {useSlashCompletion} from '../utils/useSlashCompletion';
 
 export function useChatComposer(
@@ -18,7 +21,13 @@ export function useChatComposer(
   const connState = useConnectionStore(s => s.state);
   const sendPrompt = useChatStore(s => s.sendPrompt);
 
-  const [input, setInput] = useState('');
+  // 草稿按会话 key 存（string 原始类型选择器，引用稳定）；页面重建/进程重启
+  // 后由 store 恢复，不再随组件 state 丢失
+  const input = useDraftStore(s => s.drafts[sessionId] ?? '');
+  const setInput = useCallback(
+    (text: string) => useDraftStore.getState().setDraft(sessionId, text),
+    [sessionId],
+  );
   // 行首斜杠命令补全（数据全部来自服务端 complete.slash；/model 不进补全，
   // 提交时直接开 App 内模型面板——TUI 对 /model 的两步选择器同款特判）
   const slash = useSlashCompletion(input, connState === 'ready');
@@ -52,7 +61,7 @@ export function useChatComposer(
           break;
       }
     },
-    [slash],
+    [slash, setInput],
   );
 
   const onSend = useCallback(() => {
@@ -66,7 +75,7 @@ export function useChatComposer(
     sendPrompt(sessionId, input);
     setInput('');
     onAfterSend?.();
-  }, [input, sendPrompt, sessionId, onOpenModelPicker, onAfterSend]);
+  }, [input, setInput, sendPrompt, sessionId, onOpenModelPicker, onAfterSend]);
 
   return {
     input,

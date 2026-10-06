@@ -7,6 +7,7 @@ import com.facebook.react.ReactHost
 import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.defaults.DefaultReactHost.getDefaultReactHost
 import com.hermeschat.keyboard.HermesKeyboardPackage
+import com.hermeschat.keepalive.HermesKeepAlivePackage
 import com.hermeschat.ssh.HermesSshPackage
 
 class MainApplication : Application(), ReactApplication {
@@ -20,6 +21,7 @@ class MainApplication : Application(), ReactApplication {
           // add(MyReactNativePackage())
           add(HermesSshPackage())
           add(HermesKeyboardPackage())
+          add(HermesKeepAlivePackage())
         },
     )
   }

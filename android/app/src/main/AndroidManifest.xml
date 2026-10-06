@@ -3,6 +3,12 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- 语音输入（语音转文字）需要 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- 后台保活前台服务（SSH 隧道切后台不断连，见 docs/ssh-module.md §7） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- API 33+ 通知运行时权限（拒绝时保活服务仍运行，仅通知不可见） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
       android:name=".MainApplication"
@@ -27,5 +33,12 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
       </activity>
+      <!-- 连接存续期间的前台保活服务：stopWithTask=true，划卡杀进程时随进程
+           一起停（SSH 会话在进程内，独活无意义），不留孤儿通知 -->
+      <service
+        android:name=".keepalive.HermesKeepAliveService"
+        android:foregroundServiceType="dataSync"
+        android:exported="false"
+        android:stopWithTask="true" />
     </application>
 </manifest>

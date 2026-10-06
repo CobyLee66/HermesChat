@@ -95,3 +95,35 @@ export interface Transport {
 - `connect` 重复调用会先静默断开旧会话（不触发 `HermesSsh:disconnect`），再建新连接。
 - RN reload（`invalidate()`）时全量清理 channel/forward/session/线程池。
 - `openLocalForward` 绑定 `127.0.0.1:0`，由 JSch PortWatcher 分配实际端口并回传（等价 `ssh -L 127.0.0.1:0:...`）。
+
+## 7. 后台保活模块 HermesKeepAlive（Android，2026-10-06）
+
+**问题**：SSH 会话（JSch）与 WS 都活在 App 进程内。无前台服务时，Android 后台 Doze/App Standby 挂起网络并最终杀进程，JSch keepalive（15s×3）超时即隧道断开——「切后台一会儿回前台必然重连」的根因。
+
+**方案**：连接存续期间拉起前台服务（FGS，`dataSync` 类型）+ partial wake lock，进程与网络在灭屏后台继续存活（Termux/JuiceSSH 同款）。WorkManager/JobScheduler 维持不了长连接，否决；把 SSH 移出 RN 进程改动过大，否决。
+
+### JS API（`src/ssh/HermesKeepAlive.ts` 封装 `NativeModules.HermesKeepAlive`）
+
+```ts
+export const isAvailable: boolean  // 原生模块缺失（web/桌面/Jest）时为 false
+start(title: string, body: string): Promise<void>  // 幂等：重复调用仅刷新通知文案；内部失败静默（不阻塞连接主流程）
+stop(): Promise<void>  // 幂等：服务未运行也成功
+```
+
+- web/桌面由 `HermesKeepAlive.web.ts`（vite `.web.ts` 优先解析）打桩全 no-op——`PermissionsAndroid` 在 react-native-web 无导出，不能进 web 包。
+- 首次 `start` 前在 Android 13+ 请求 `POST_NOTIFICATIONS` 运行时权限；**拒绝也照常启动**（FGS 不依赖通知授权，仅常驻通知不可见）。
+
+### 生命周期接线（`SshManager`）
+
+- `connect()` 成功（隧道+WS 已起）→ `start()`。**必须在 App 前台时启动 FGS**（Android 12+ 禁止后台启动），connect 成功点是唯一合规时机；重连周期内重复 start 幂等。
+- 手动 `disconnect()` → `stop()`；意外掉线的重连周期内**保持运行**（通知常驻，隧道尽快恢复）。
+
+### Android 实现备注
+
+- 文件：`keepalive/HermesKeepAliveService.kt`（FGS + wake lock）、`HermesKeepAliveModule.kt`（JS 桥）、`HermesKeepAlivePackage.kt`（注册进 `MainApplication.kt`）。
+- Manifest：权限 `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_DATA_SYNC`（targetSdk 34+ 必需）+ `WAKE_LOCK` + `POST_NOTIFICATIONS`；service 声明 `foregroundServiceType="dataSync"`、`exported="false"`、**`stopWithTask="true"`**——划卡杀进程时 SSH 本就随进程死，服务一并停，不留孤儿通知。
+- 通知：channel `hermes.keepalive`（IMPORTANCE_LOW 低打扰），点击经 launch intent 回 App（singleTask 复用现有任务）；小图标用应用图标（个别 ROM adaptive icon 取不到时回退 `stat_notify_sync`）。
+- `startForeground`：API 29+ 走带类型的三参重载（`ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC`），以下走两参。
+- wake lock：`PARTIAL_WAKE_LOCK` tag `hermes:ssh-keepalive`，`setReferenceCounted(false)`，`onDestroy` 释放；仅在服务运行（=连接存续）期间持有。
+- 已知取舍：常驻通知是 FGS 的强制代价；灭屏下 keepalive 持续耗电（15s 间隔）；国产 ROM 激进省电策略（自启动白名单）App 侧无法完全对抗。
+- iOS 不在范围：原生 iOS SSH 模块尚未存在（§1「iOS 后续」），且 iOS 后台联网硬上限 ~30s，无等价保活路径。

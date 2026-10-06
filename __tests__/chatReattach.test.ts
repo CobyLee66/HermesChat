@@ -4,6 +4,7 @@
  * 而不是沿用首次进入的旧快照；running/inflight 恢复流式尾部。
  */
 import {_resetChatAggregators, useChatStore} from '../src/store/chat';
+import {_resetDraftsForTests, useDraftStore} from '../src/store/drafts';
 import type {AssistantMsg, ProjectedMessage} from '../src/rpc/types';
 
 const mockCall = jest.fn<Promise<unknown>, [string, Record<string, unknown>?]>();
@@ -24,6 +25,7 @@ function history(): ProjectedMessage[] {
 describe('chat store attach 重建', () => {
   beforeEach(() => {
     _resetChatAggregators();
+    _resetDraftsForTests();
     useChatStore.setState({bySession: {}});
   });
 
@@ -164,6 +166,23 @@ describe('chat store attach 重建', () => {
     expect(s.newSid.busy).toBe(true);
     const tail = s.newSid.items[s.newSid.items.length - 1] as AssistantMsg;
     expect(tail.blocks).toEqual([{type: 'text', text: '半成品'}]);
+  });
+
+  it('reattachAfterResume：live sid 迁移时输入框草稿随迁新 key', () => {
+    useChatStore.getState().attach('oldSid', {
+      messages: history(),
+      profile: 'main',
+      storedSessionId: 'stored1',
+    });
+    // 用户在旧 sid 页面输入了一半（重连成功后页面经 migratedTo replace 重建，
+    // 组件内 state 会清零——草稿必须提前搬到新 key，2026-10-06 报障根因）
+    useDraftStore.getState().setDraft('oldSid', '还没发出去的话');
+    useChatStore.getState().reattachAfterResume('oldSid', 'newSid', {
+      messages: history(),
+    });
+    const {drafts} = useDraftStore.getState();
+    expect(drafts.newSid).toBe('还没发出去的话');
+    expect(drafts).not.toHaveProperty('oldSid');
   });
 });
 

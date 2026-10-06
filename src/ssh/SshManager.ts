@@ -4,6 +4,8 @@
  * - RpcClient 建立与断开回调
  * - AppState 监听：回前台时若处于 reconnecting，立即重试（重置退避）
  * - 重连成功后对活跃会话 session.resume
+ * - 连接存续期间拉起 Android 前台保活服务（切后台不断隧道，契约
+ *   docs/ssh-module.md §7；web/桌面/直连外的环境 no-op）
  *
  * 重连调度（指数退避 1s→30s）在 connection store（backoffDelay），
  * 这里负责"怎么连"与"连上之后恢复什么"。
@@ -11,6 +13,7 @@
 
 import {AppState, type AppStateStatus} from 'react-native';
 
+import {t} from '../i18n';
 import {RpcClient, RpcError} from '../rpc/client';
 import type {SessionResumeResult} from '../rpc/types';
 import type {
@@ -22,6 +25,7 @@ import {useChatStore} from '../store/chat';
 import {dlog} from '../utils/desktopLog';
 import {DirectTransport} from './directTransport';
 import type {ExecRemoteFn} from './execRemote';
+import * as HermesKeepAlive from './HermesKeepAlive';
 import * as HermesSsh from './HermesSsh';
 import {SshTunnelTransport, type Transport} from './transport';
 
@@ -117,6 +121,12 @@ export class SshManager implements Connector {
     });
     await rpc.connect(wsUrl);
     this.rpc = rpc;
+    // 隧道+WS 已起：拉起前台保活（必须在 App 前台时启动 FGS，connect 成功点是
+    // 唯一合规时机；重连周期内重复 start 幂等，仅刷新通知文案）
+    void HermesKeepAlive.start(
+      t('conn.keepAliveTitle'),
+      t('conn.keepAliveText'),
+    );
     return {rpc, wsUrl, httpUrl, token};
   }
 
@@ -177,6 +187,8 @@ export class SshManager implements Connector {
 
   async disconnect(): Promise<void> {
     this.tearingDown = true;
+    // 手动断开才停保活（意外掉线的重连周期内保持运行，隧道尽快恢复）
+    void HermesKeepAlive.stop();
     const rpc = this.rpc;
     this.rpc = null;
     rpc?.disconnect();
@@ -184,12 +196,12 @@ export class SshManager implements Connector {
   }
 
   private async teardownTransport() {
-    const t = this.transport;
+    const transport = this.transport;
     this.transport = null;
-    if (t) {
-      t.onDrop = undefined;
+    if (transport) {
+      transport.onDrop = undefined;
       try {
-        await t.disconnect();
+        await transport.disconnect();
       } catch {
         // ignore
       }

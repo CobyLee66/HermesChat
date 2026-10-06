@@ -146,6 +146,9 @@ export const zhCN: Record<MessageKey, string> = {
   'conn.foregroundProbeFail': '回前台探活失败：隧道无响应',
   'conn.notConnected': '未连接',
   'conn.recoveryTimeout': '连接恢复超时，请稍后重试',
+  // 后台保活常驻通知（Android 前台服务，见 docs/ssh-module.md §7）
+  'conn.keepAliveTitle': 'HermesChat 已连接',
+  'conn.keepAliveText': '正在后台保持连接',
 
   // ── 聊天时间线错误 ──
   'chat.sendFailed': '发送失败: {message}',

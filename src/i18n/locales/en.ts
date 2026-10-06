@@ -156,6 +156,9 @@ export const en = {
     'Foreground health probe failed: tunnel not responding',
   'conn.notConnected': 'Not connected',
   'conn.recoveryTimeout': 'Connection recovery timed out. Try again later.',
+  // 后台保活常驻通知（Android 前台服务，见 docs/ssh-module.md §7）
+  'conn.keepAliveTitle': 'HermesChat connected',
+  'conn.keepAliveText': 'Keeping the connection alive in the background',
 
   // ── 聊天时间线错误 ──
   'chat.sendFailed': 'Send failed: {message}',
