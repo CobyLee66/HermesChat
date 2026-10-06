@@ -68,6 +68,10 @@ class HermesKeepAliveService : Service() {
   // ---------------------------------------------------------------------------
 
   private fun ensureChannel() {
+    // NotificationChannel 系 API 26+；以下版本前台服务通知无需渠道
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+      return
+    }
     val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     if (nm.getNotificationChannel(CHANNEL_ID) != null) {
       return
@@ -97,7 +101,14 @@ class HermesKeepAliveService : Service() {
     // 小图标用应用图标；个别 ROM 上 adaptive icon 取不到时回退系统同步图标
     val icon = applicationInfo.icon.takeIf { it != 0 }
       ?: android.R.drawable.stat_notify_sync
-    return Notification.Builder(this, CHANNEL_ID)
+    // 渠道构造器 API 26+；以下版本用单参构造器（渠道在 ensureChannel 已同版跳过）
+    val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      Notification.Builder(this, CHANNEL_ID)
+    } else {
+      @Suppress("DEPRECATION")
+      Notification.Builder(this)
+    }
+    return builder
       .setSmallIcon(icon)
       .setContentTitle(title)
       .setContentText(body)
