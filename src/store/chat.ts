@@ -3,6 +3,7 @@
  * 聚合器实例放模块级 Map（非响应式），zustand 里存快照引用驱动渲染。
  */
 
+import {AppState} from 'react-native';
 import {create} from 'zustand';
 
 import {TimelineAggregator, type InflightSnapshot} from '../rpc/aggregator';
@@ -115,6 +116,52 @@ function aggFor(sid: string): TimelineAggregator {
     aggregators.set(sid, agg);
   }
   return agg;
+}
+
+// ─── 后台渲染闸门 ─────────────────────────────────────────────
+// 用户报障「流式输出中切后台、回前台偶发崩溃」：Android Fabric（new arch）在
+// activity 停止状态下持续挂载/更新视图是间歇性崩溃类，回前台瞬间的积压挂载
+// 爆发放大触发面。聚合器照常收事件（协议状态机不断流），但 bySession 投影
+// 在后台期间不落 zustand（不驱动渲染），回前台一次性重放（每会话一次 set，
+// 语义等价于现有的 resume 重建）。
+let uiForeground = AppState.currentState !== 'background';
+/** 待按聚合器重算的会话 */
+const deferredSids = new Set<string>();
+/** 各会话待合并的 snapshot patch（同键后写覆盖先写，与时序语义一致） */
+const deferredPatches = new Map<string, Partial<SessionChatState>>();
+/** session.usage 的 1Hz 增量合并：只留最新值，flush 时读当下 info 再合 */
+const deferredUsage = new Map<string, UsageInfo>();
+/** create 闭包内的 flush 实现（模块级 AppState 监听经它触发） */
+let flushImpl: () => void = () => {};
+
+AppState.addEventListener('change', s => {
+  uiForeground = s !== 'background';
+  if (uiForeground) {
+    flushImpl();
+  }
+});
+
+/**
+ * 后台期间的 snapshot 攒批：patch 按键合并。无 patch 的调用表示「按聚合器
+ * 重算 busy」，作废此前攒下的 busy 键——否则 turn 在后台结束后，重放还会
+ * 把过期的 busy:true（doSubmit 的补丁）盖回去。
+ */
+function deferSnapshot(sid: string, patch?: Partial<SessionChatState>) {
+  deferredSids.add(sid);
+  if (patch) {
+    deferredPatches.set(sid, {...deferredPatches.get(sid), ...patch});
+    return;
+  }
+  const pending = deferredPatches.get(sid);
+  if (pending && 'busy' in pending) {
+    const rest: Partial<SessionChatState> = {...pending};
+    delete rest.busy;
+    if (Object.keys(rest).length > 0) {
+      deferredPatches.set(sid, rest);
+    } else {
+      deferredPatches.delete(sid);
+    }
+  }
 }
 
 /**
@@ -300,6 +347,11 @@ interface ChatStore {
 
 export const useChatStore = create<ChatStore>((set, get) => {
   function snapshot(sid: string, patch?: Partial<SessionChatState>) {
+    // 后台渲染闸门：非前台只攒批不发射（见模块级注释）
+    if (!uiForeground) {
+      deferSnapshot(sid, patch);
+      return;
+    }
     const agg = aggFor(sid);
     const prev = get().bySession[sid] ?? EMPTY;
     set(s => ({
@@ -316,6 +368,48 @@ export const useChatStore = create<ChatStore>((set, get) => {
       },
     }));
   }
+
+  /** session.usage / message.complete 的 usage 合并（前后台共用） */
+  function mergeUsage(sid: string, usage: UsageInfo) {
+    const prev = get().bySession[sid] ?? EMPTY;
+    set(s => ({
+      bySession: {
+        ...s.bySession,
+        [sid]: {
+          ...prev,
+          info: {...(prev.info ?? {}), usage},
+        },
+      },
+    }));
+  }
+
+  // 回前台重放：先按聚合器重算各脏会话（一次 set 呈现最新时间线），
+  // 再合 usage（读重放后的当下 info）。已 detach 的会话跳过。
+  flushImpl = () => {
+    if (deferredSids.size === 0 && deferredUsage.size === 0) {
+      return;
+    }
+    dlog(
+      'INFO',
+      `回前台重放攒批：会话快照 ${deferredSids.size} 个、usage ${deferredUsage.size} 个`,
+    );
+    const sids = [...deferredSids];
+    deferredSids.clear();
+    const patches = new Map(deferredPatches);
+    deferredPatches.clear();
+    for (const sid of sids) {
+      if (aggregators.has(sid)) {
+        snapshot(sid, patches.get(sid));
+      }
+    }
+    const usages = [...deferredUsage];
+    deferredUsage.clear();
+    for (const [sid, usage] of usages) {
+      if (get().bySession[sid]) {
+        mergeUsage(sid, usage);
+      }
+    }
+  };
 
   /** chat store ↔ connection store 环依赖：惰性 require（SshManager 同款先例）。 */
   function waitReadyForRpc(): Promise<void> {
@@ -628,14 +722,15 @@ export const useChatStore = create<ChatStore>((set, get) => {
         });
       }
       aggregators.set(liveSid, agg);
+      // 结构/控制字段立即落（后台完成的重连里，resumeActiveSessions 依赖 key、
+      // profile、storedSessionId 迭代重挂）；items/status/thinkingHint 经
+      // snapshot 走后台渲染闸门——后台期间保留旧 items 引用，FlatList data
+      // 不变即零挂载，回前台一次重放到最新。
       set(s => ({
         bySession: {
           ...s.bySession,
           [liveSid]: {
             ...(prev ?? EMPTY),
-            items: agg.getItems(),
-            status: null,
-            thinkingHint: null,
             busy: opts.running ?? false,
             resumeFailed: false,
             staleLive: false,
@@ -646,6 +741,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
           },
         },
       }));
+      snapshot(liveSid, {busy: opts.running ?? false});
     },
 
     markResumeFailed(sid) {
@@ -691,6 +787,10 @@ export const useChatStore = create<ChatStore>((set, get) => {
 
     detach(sid) {
       aggregators.delete(sid);
+      // 后台闸门里可能还攒着该会话的投影，一并清掉（flush 也有聚合器存在性兜底）
+      deferredSids.delete(sid);
+      deferredPatches.delete(sid);
+      deferredUsage.delete(sid);
       set(s => {
         const next = {...s.bySession};
         delete next[sid];
@@ -705,16 +805,12 @@ export const useChatStore = create<ChatStore>((set, get) => {
       if (type === 'session.usage' || type === 'message.complete') {
         const usage = (payload as {usage?: UsageInfo} | null)?.usage;
         if (usage) {
-          const prev = get().bySession[sid] ?? EMPTY;
-          set(s => ({
-            bySession: {
-              ...s.bySession,
-              [sid]: {
-                ...prev,
-                info: {...(prev.info ?? {}), usage},
-              },
-            },
-          }));
+          // 1Hz 增量合并也走闸门：后台期间只留最新值，回前台一次落
+          if (uiForeground) {
+            mergeUsage(sid, usage);
+          } else {
+            deferredUsage.set(sid, usage);
+          }
         }
         if (type === 'session.usage') {
           return;
@@ -1275,7 +1371,19 @@ export const useChatStore = create<ChatStore>((set, get) => {
   };
 });
 
-/** 测试辅助：清空全部聚合器。 */
+/** 测试辅助：清空全部聚合器与后台闸门缓冲（并恢复前台）。 */
 export function _resetChatAggregators() {
   aggregators.clear();
+  deferredSids.clear();
+  deferredPatches.clear();
+  deferredUsage.clear();
+  uiForeground = true;
+}
+
+/** 测试辅助：模拟 App 切后台/回前台（回前台即触发攒批重放）。 */
+export function _setChatUiForeground(v: boolean) {
+  uiForeground = v;
+  if (v) {
+    flushImpl();
+  }
 }

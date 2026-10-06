@@ -19,6 +19,7 @@ import type {
   ConnectionProfile,
 } from '../store/connection';
 import {useChatStore} from '../store/chat';
+import {dlog} from '../utils/desktopLog';
 import {DirectTransport} from './directTransport';
 import type {ExecRemoteFn} from './execRemote';
 import * as HermesSsh from './HermesSsh';
@@ -79,6 +80,9 @@ export class SshManager implements Connector {
     this.appStateSub = AppState.addEventListener(
       'change',
       (s: AppStateStatus) => {
+        // 生命周期留痕：对齐 logcat 里「切后台/回前台/崩溃」时间线（原生端
+        // dlog 回落 console → ReactNativeJS）
+        dlog('INFO', `AppState → ${s}`);
         if (s === 'active') {
           this.foregroundCb?.();
         }
