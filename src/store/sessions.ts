@@ -79,6 +79,13 @@ interface SessionsStore {
 /** 同一次构建只跑一条 exec（并发 refresh 去重）。 */
 let nsMapInflight: Promise<NamespaceMap> | null = null;
 
+/** connection store ↔ sessions store 环依赖：惰性 require（chat.ts 同款先例）。 */
+function waitReadyForRpc(): Promise<void> {
+  const {useConnectionStore} =
+    require('./connection') as typeof import('./connection');
+  return useConnectionStore.getState().waitReady();
+}
+
 export const useSessionsStore = create<SessionsStore>((set, get) => ({
   byProfile: {},
   loading: false,
@@ -179,8 +186,17 @@ export const useSessionsStore = create<SessionsStore>((set, get) => ({
     if (!force && !get().stale && get().byProfile[profile]) {
       return;
     }
+    // 并发去重：mount effect 与连接恢复 effect 可能同时触发；进行中的那次
+    // （可能在 waitReady 里等重连）本身就会拉到最新数据，重复调用直接跳过
+    if (get().loading) {
+      return;
+    }
     set({loading: true, error: null});
     try {
+      // 断线重连窗口内（回前台探活判死 / WS 被后台掐断）先等连接就绪再发
+      // RPC——否则秒败后 byProfile 无数据，列表会假显示「没有任何会话」，
+      // 下拉刷新在重连退避期内也永远刷不出来
+      await waitReadyForRpc();
       const rpc = getRpc();
       const map = await get().ensureNamespaceMap(force);
       const ownRaw = await rpc.call<{sessions?: SessionListRow[]}>(

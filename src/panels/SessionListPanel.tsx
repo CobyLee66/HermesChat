@@ -6,6 +6,7 @@
 
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
+  ActivityIndicator,
   BackHandler,
   FlatList,
   Platform,
@@ -22,6 +23,7 @@ import {SearchBar} from '../components/SearchBar';
 import {useT} from '../i18n';
 import type {MessageKey} from '../i18n/locales/en';
 import {useProfilesStore} from '../store/profiles';
+import {useConnectionStore} from '../store/connection';
 import {useSessionsStore} from '../store/sessions';
 import {alertError} from '../utils/alert';
 import {filterSessionsByQuery} from '../utils/sessionSearch';
@@ -157,6 +159,9 @@ export function SessionListPanel({
   const nicknameText = useProfileNickname(profile);
   const avatarUri = useProfilesStore(s => s.avatars[profile]);
   const sessions = useSessionsStore(s => s.byProfile[profile] ?? EMPTY_SESSIONS);
+  const loading = useSessionsStore(s => s.loading);
+  const loadError = useSessionsStore(s => s.error);
+  const connState = useConnectionStore(s => s.state);
   const refresh = useSessionsStore(s => s.refresh);
   const sortMode = useSessionsStore(s => s.sortMode);
   const setSortMode = useSessionsStore(s => s.setSortMode);
@@ -174,6 +179,15 @@ export function SessionListPanel({
     setSearchOpen(false);
     refresh(profile);
   }, [refresh, profile, refreshTrigger]);
+
+  // 断线恢复后自动重拉：connectInternal 成功时已 markStale，非 force refresh
+  // 必然真实拉取——人停在列表页也能等到数据，不必退出重进（并发由 store 的
+  // loading 守卫去重，mount 时已 ready 不会双跑）
+  React.useEffect(() => {
+    if (connState === 'ready') {
+      refresh(profile);
+    }
+  }, [connState, refresh, profile]);
 
   // 搜索栏开合与下拉互斥（搜索栏插在工具栏与列表之间，避免菜单浮层盖在其上）
   const openSearch = useCallback(() => {
@@ -287,17 +301,34 @@ export function SessionListPanel({
       <FlatList
         data={filteredSessions}
         keyExtractor={s => s.id}
-        refreshing={false}
+        refreshing={loading}
         onRefresh={() => refresh(profile, true)}
         ItemSeparatorComponent={RowSeparator}
         ListEmptyComponent={
-          <Text style={styles.empty}>
-            {sessions.length === 0
-              ? t('session.emptyAll')
-              : searchNoHit
-                ? t('session.emptySearch')
-                : t('session.emptyFilter')}
-          </Text>
+          // 加载中与加载失败绝不能渲染成「没有任何会话」（假空态已踩坑：
+          // 重连窗口内 refresh 秒败、byProfile 无数据，用户误以为会话丢了）
+          loading && sessions.length === 0 ? (
+            <ActivityIndicator style={styles.loading} color={Colors.accent} />
+          ) : loadError && sessions.length === 0 ? (
+            <View style={styles.emptyWrap}>
+              <Text style={styles.errorText}>
+                {t('session.loadFailed', {error: loadError})}
+              </Text>
+              <TouchableOpacity
+                onPress={() => refresh(profile, true)}
+                style={styles.retryBtn}>
+                <Text style={styles.retryText}>{t('profile.retry')}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <Text style={styles.empty}>
+              {sessions.length === 0
+                ? t('session.emptyAll')
+                : searchNoHit
+                  ? t('session.emptySearch')
+                  : t('session.emptyFilter')}
+            </Text>
+          )
         }
         renderItem={({item}) => (
           <SessionRow
@@ -533,4 +564,16 @@ const styles = StyleSheet.create({
     marginTop: 60,
     fontSize: 14,
   },
+  // 加载/错误空态（ProfileListScreen 同款模式）
+  loading: {marginTop: 48},
+  emptyWrap: {alignItems: 'center', marginTop: 48},
+  errorText: {color: Colors.danger, fontSize: 14},
+  retryBtn: {
+    marginTop: 12,
+    backgroundColor: Colors.accent,
+    borderRadius: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+  },
+  retryText: {color: '#FFF', fontSize: 14},
 });

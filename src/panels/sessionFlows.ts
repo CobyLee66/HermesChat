@@ -20,12 +20,44 @@ export interface OpenedSession {
   title: string;
 }
 
+/**
+ * 连接类错误（客户端侧瞬时失败，非服务端 RpcError）：
+ * WS 断开 reject 的 "connection lost: …"、未连接时的 "not connected" /
+ * "rpc not connected"（rpc/client.ts 与 rpc/runtime.ts 的明文约定）。
+ */
+function isConnectionError(e: unknown): boolean {
+  const m = e instanceof Error ? e.message : String(e);
+  return (
+    m.startsWith('connection lost') ||
+    m === 'not connected' ||
+    m === 'rpc not connected'
+  );
+}
+
+/**
+ * 「state=ready 但 WS 恰好死亡」（1006 等异常关闭）竞态：入口 waitReady 放行后
+ * RPC 才撞上断线。等重连就绪重试一次；仍失败才抛给调用方弹错。
+ */
+async function retryOnConnectionLost<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (!isConnectionError(e)) {
+      throw e;
+    }
+    await useConnectionStore.getState().waitReady();
+    return fn();
+  }
+}
+
 /** 新建会话（session.create + chat store attach）。 */
 export async function createSessionFlow(profile: string): Promise<OpenedSession> {
   // 点击瞬间可能正处断线重连窗口（回前台探活判死 / WS 被后台掐断）：
   // 等连接就绪再发 RPC，否则偶发 "rpc not connected"
   await useConnectionStore.getState().waitReady();
-  const result = await useSessionsStore.getState().create(profile);
+  const result = await retryOnConnectionLost(() =>
+    useSessionsStore.getState().create(profile),
+  );
   useChatStore.getState().attach(result.session_id, {
     messages: result.messages ?? [],
     info: result.info,
@@ -58,7 +90,7 @@ export async function openSessionFlow(
   if (row.namespaced && row.hostProfile && row.hostProfile !== profile) {
     const fork = await getFork(row.id, profile);
     if (fork) {
-      const result = await resume(profile, fork.forkId);
+      const result = await retryOnConnectionLost(() => resume(profile, fork.forkId));
       attach(result.session_id, {
         messages: result.messages ?? [],
         info: result.info,
@@ -91,7 +123,7 @@ export async function openSessionFlow(
     return {sessionId: row.id, title};
   }
 
-  const result = await resume(profile, row.id);
+  const result = await retryOnConnectionLost(() => resume(profile, row.id));
   const liveSid = result.session_id;
   attach(liveSid, {
     messages: result.messages ?? [],

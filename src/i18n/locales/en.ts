@@ -334,6 +334,7 @@ export const en = {
   'session.sortRecent': 'Recent activity',
   'session.sortCreated': 'Creation time',
   'session.openFailed': 'Failed to open session',
+  'session.loadFailed': 'Failed to load sessions: {error}',
   'session.searchPlaceholder': 'Search titles / previews',
   'session.emptyAll': 'No sessions yet. Tap \u201CNew chat\u201D to start.',
   'session.emptySearch': 'No sessions match your search',

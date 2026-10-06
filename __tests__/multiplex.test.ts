@@ -29,6 +29,7 @@ import {
 import {setExecRemote} from '../src/ssh/execRemote';
 import {getFork, setFork} from '../src/store/forkMap';
 import {_resetChatAggregators, useChatStore} from '../src/store/chat';
+import {useConnectionStore} from '../src/store/connection';
 import {useProfilesStore} from '../src/store/profiles';
 import {useSessionsStore} from '../src/store/sessions';
 
@@ -101,6 +102,8 @@ function resetAll() {
   setExecRemote(null);
   _resetChatAggregators();
   useChatStore.setState({bySession: {}});
+  // refresh 现在先 waitReady 等连接就绪：测试里保持 ready（hasRpc 已 mock true）
+  useConnectionStore.setState({state: 'ready'});
   useSessionsStore.setState({
     byProfile: {},
     loading: false,

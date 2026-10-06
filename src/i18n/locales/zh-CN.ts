@@ -307,6 +307,7 @@ export const zhCN: Record<MessageKey, string> = {
   'session.sortRecent': '最近消息',
   'session.sortCreated': '创建时间',
   'session.openFailed': '打开会话失败',
+  'session.loadFailed': '加载会话失败：{error}',
   'session.searchPlaceholder': '搜索会话标题 / 摘要',
   'session.emptyAll': '还没有会话，点「新会话」开始',
   'session.emptySearch': '未找到匹配的会话',

@@ -9,6 +9,7 @@ import {HeaderTitleView} from '../components/HeaderTitle';
 import {useT} from '../i18n';
 import {SessionListPanel, useProfileNickname} from '../panels/SessionListPanel';
 import {createSessionFlow, type OpenedSession} from '../panels/sessionFlows';
+import {useConnectionStore} from '../store/connection';
 import {alertError} from '../utils/alert';
 import type {RootStackParamList} from '../navigation/types';
 
@@ -22,6 +23,7 @@ export function SessionListScreen() {
   const {profile} = route.params;
   const insets = useSafeAreaInsets();
   const nicknameText = useProfileNickname(profile);
+  const connState = useConnectionStore(s => s.state);
 
   const onNewSession = useCallback(async () => {
     try {
@@ -63,6 +65,13 @@ export function SessionListScreen() {
 
   return (
     <View style={[styles.container, {paddingBottom: insets.bottom}]}>
+      {/* 断线重连提示（ChatScreen/ProfileListScreen 同款横幅）：
+          重连期间列表加载会等连接就绪，用户需要知道当前处于等待而非无数据 */}
+      {connState === 'reconnecting' ? (
+        <View style={styles.banner}>
+          <Text style={styles.bannerText}>{t('profile.reconnecting')}</Text>
+        </View>
+      ) : null}
       <SessionListPanel profile={profile} onOpenSession={onOpenSession} />
     </View>
   );
@@ -71,4 +80,10 @@ export function SessionListScreen() {
 const styles = StyleSheet.create({
   container: {flex: 1, backgroundColor: Colors.card},
   newSessionText: {fontSize: 15, color: Colors.accent},
+  banner: {
+    backgroundColor: '#FFF7E8',
+    paddingVertical: 6,
+    alignItems: 'center',
+  },
+  bannerText: {fontSize: 12, color: '#FF7D00'},
 });
