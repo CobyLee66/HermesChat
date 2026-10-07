@@ -1,7 +1,7 @@
 # PROGRESS.md — 项目进度（当前状态）
 
 > 记录跨会话的开发进度，确保新会话能快速接续。维护规则见 AGENTS.md「进度与决策文档」段。
-> 版本体系：Semver，当前 **v0.2.0**（2026-10-07 起；package.json / Android versionName+versionCode / iOS MARKETING_VERSION 三处对齐，发布变更记录在 `CHANGELOG.md`，git 打 `vX.Y.Z` tag）；条目仍以日期为锚点；已完成条目 > 25 条或本文件 > 20KB 时，压缩为一行摘要移入 `PROGRESS_ARCHIVE.md`。
+> 版本体系：Semver，当前 **v0.2.1**（2026-10-07 起；package.json / Android versionName+versionCode / iOS MARKETING_VERSION 三处对齐，发布变更记录在 `CHANGELOG.md`，git 打 `vX.Y.Z` tag）；条目仍以日期为锚点；已完成条目 > 25 条或本文件 > 20KB 时，压缩为一行摘要移入 `PROGRESS_ARCHIVE.md`。
 
 ---
 
