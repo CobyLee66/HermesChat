@@ -10,6 +10,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from 'react-native';
 
@@ -249,11 +250,19 @@ export function ChatOverlays({
         transparent
         animationType="fade"
         onRequestClose={closeRename}>
-        <TouchableOpacity
-          style={styles.menuBackdrop}
-          activeOpacity={1}
-          onPress={closeRename}>
-          <View style={styles.infoCard}>
+        <View style={styles.menuBackdrop}>
+          {/*
+           * 点卡片外收起。背景层与卡片做成兄弟节点而非包裹关系：RNW 的
+           * onPress 由 DOM click 冒泡触发（调用于 click 目标的首个
+           * PressResponder 祖先），卡片若嵌在背景 TouchableOpacity 内，
+           * 点 TextInput 会先命中背景的 onPress 直接关弹窗（原生端
+           * TextInput 抢占 responder 无此问题，故仅桌面/web 复现）。
+           * 卡片显式 position 才能稳定压在 absoluteFill 背景层之上。
+           */}
+          <TouchableWithoutFeedback onPress={closeRename}>
+            <View style={StyleSheet.absoluteFill} />
+          </TouchableWithoutFeedback>
+          <View style={[styles.infoCard, styles.modalCardOnTop]}>
             <Text style={styles.infoTitle}>{t('chat.rename')}</Text>
             <TextInput
               style={styles.renameInput}
@@ -283,7 +292,7 @@ export function ChatOverlays({
               </TouchableOpacity>
             </View>
           </View>
-        </TouchableOpacity>
+        </View>
       </Modal>
     </>
   );
@@ -332,6 +341,9 @@ const styles = StyleSheet.create({
   infoRow: {flexDirection: 'row', marginVertical: 3},
   infoLabel: {width: 80, fontSize: 13, color: Colors.textSecondary},
   infoValue: {flex: 1, fontSize: 13, color: Colors.text},
+  // 弹窗卡片与 absoluteFill 背景层是兄弟节点：web 上定位元素绘制层级高于
+  // 普通流内元素，卡片显式 relative 才能稳定压在背景层之上（原生端无差异）
+  modalCardOnTop: {position: 'relative'},
   renameInput: {
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: Colors.border,

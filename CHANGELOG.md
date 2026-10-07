@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Desktop (macOS/Windows) and web: the rename-session dialog no longer closes
+  itself when clicking the session-title text field. The dialog card and its
+  outside-press backdrop are now siblings, so clicks on non-pressable children
+  (text input) no longer bubble into the backdrop's press handler — an
+  react-native-web press-semantics issue; native builds were unaffected.
+
 ## [0.2.0] - 2026-10-07
 
 ### Added
