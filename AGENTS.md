@@ -18,6 +18,12 @@
 - 构建机上的工程目录（`BUILD_DIR`）是构建副本，一切修改从 GitHub 拉取，不要在上面手改。
 - 本机私有配置（构建机主机名/路径、adb 路径、设备序列号、内网地址等）统一写在 `scripts/build-env.sh`（已 gitignore，模板 `scripts/build-env.example.sh`），脚本自动 source；**禁止把这类值写进脚本本体或文档**。
 
+## 版本与发版
+
+- **版本号不随每次提交自动递增**：版本体系（Semver；package.json / Android versionName+versionCode / iOS MARKETING_VERSION 三处同批对齐；CHANGELOG 归档；git 打 `vX.Y.Z` tag）见 PROGRESS.md 头部。
+- **升级触发规则（2026-10-07 起）**：每完成一个功能单元后，对照 CHANGELOG `[Unreleased]` 与上个 tag 评估——若相比上一版本已积累**新功能或重要修复（改动较大）**，**主动建议用户升级版本号并出 Release**，由用户拍板；用户确认后发版流程 = 三处版本号同批修改 + CHANGELOG 归档为新版本段 + 打 tag + 三端出包 + GitHub Release 挂产物 + README 双语下载链接同步更新。
+- 出包串行纪律：两个远程构建脚本（`build-desktop-remote.sh` / `build-android-remote.sh`）共用一台构建机（npm ci 互踩），**必须串行执行**；mac 包本机构建可与远程构建并行。
+
 ## 敏感信息纪律（开源仓库）
 
 本仓库是公开仓库，**任何本机/个人专属信息都不得入库**：

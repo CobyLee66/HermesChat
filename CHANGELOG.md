@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-07
+
 ### Added
 
 - About page (mobile: profile list header + connection home footer; desktop:
@@ -16,9 +18,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Electron goes through a new `desktop:openExternal` IPC (main-process
   `shell.openExternal`, http/https only); native and plain-browser builds use
   `Linking.openURL`.
+- Android background keep-alive: an SSH tunnel connection now survives the app
+  being backgrounded (foreground service with a low-importance persistent
+  notification, started/stopped with the connection).
+- Composer drafts are persisted per session: text survives reconnects
+  (including live-session id migration), leaving and re-entering a session,
+  and process death. Drafts are pruned when the session is deleted.
 
 ### Fixed
 
+- Model picker no longer breaks or crashes the app while another session is
+  streaming: the picker now loads once per open instead of re-fetching on every
+  store update, and an Android native-modal teardown race is avoided.
+- Session list no longer falsely shows "no sessions" after a connection drop:
+  the refresh waits for the connection to be ready, loading/error states are
+  surfaced, and the list re-fetches automatically once reconnected. Opening a
+  session during a flaky window self-heals instead of failing with code 1006.
+- Internal agent events (async-delegation completion, notifications, model /
+  personality switches, auto-continue) are no longer rendered as user bubbles;
+  they render as expandable system marker lines.
+- Occasional crash when returning to the foreground mid-stream: rendering is
+  gated while the app is in the background (events are buffered and replayed
+  once), an error boundary is installed at the native entry, and uncaught JS
+  errors are logged before rethrow.
 - Bold/italic markers wrapped around quoted text next to CJK characters now
   render correctly (e.g. `是**"重点"**。` previously stayed literal).
   CommonMark flanking rules require the char before an opening `**` to be
@@ -164,5 +186,6 @@ of this release: the APK is signed with the public debug keystore, desktop
 packages are unsigned, and LAN tunnel/direct traffic is plaintext HTTP/WS by
 design.
 
-[Unreleased]: https://github.com/CobyLee66/HermesChat/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/CobyLee66/HermesChat/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/CobyLee66/HermesChat/releases/tag/v0.2.0
 [0.1.0]: https://github.com/CobyLee66/HermesChat/releases/tag/v0.1.0
