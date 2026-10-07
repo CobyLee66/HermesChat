@@ -398,6 +398,17 @@ export const en = {
   'nav.cronEdit': 'Cron jobs',
   'nav.cronEditJob': 'Edit cron job',
   'nav.cronNewJob': 'New cron job',
+  'nav.about': 'About',
+
+  // ── 关于页 ──
+  'about.version': 'Version {version}',
+  'about.description': 'A mobile & desktop client for Hermes Agent.',
+  'about.links': 'Links',
+  'about.repo': 'GitHub repository',
+  'about.releases': 'Releases',
+  'about.issues': 'Report an issue',
+  'about.license': 'License',
+  'about.openFailed': 'Failed to open the link',
 
   // ── 连接编辑表单 ──
   'common.save': 'Save',

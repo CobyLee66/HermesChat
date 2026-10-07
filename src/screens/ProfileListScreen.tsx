@@ -61,6 +61,11 @@ export function ProfileListScreen() {
       headerTitleAlign: 'left',
       headerRight: () => (
         <View style={styles.headerRight}>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => navigation.navigate('About')}>
+            <Text style={styles.aboutText}>{t('nav.about')}</Text>
+          </TouchableOpacity>
           <LanguageToggle style={styles.langText} />
           <TouchableOpacity
             activeOpacity={0.7}
@@ -179,6 +184,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   headerRight: {flexDirection: 'row', alignItems: 'center'},
+  aboutText: {fontSize: 15, color: Colors.text, marginRight: 16},
   langText: {fontSize: 15, color: Colors.text, marginRight: 16},
   loading: {marginTop: 48},
   banner: {

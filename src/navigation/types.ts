@@ -16,4 +16,6 @@ export type RootStackParamList = {
   CronEdit: {jobId?: string; profile?: string};
   /** 定时任务运行详情（run = 运行记录行，即 source=cron 会话） */
   CronRunDetail: {run: CronRunRow; name?: string; profile?: string};
+  /** 关于页（版本号 / GitHub 链接） */
+  About: undefined;
 };

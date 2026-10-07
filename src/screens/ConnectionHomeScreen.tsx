@@ -21,6 +21,7 @@ import {hasDesktopBridge} from '../ssh/desktopBridge';
 import {connectWebDirect} from '../ssh/webDirect';
 import {Colors} from '../components/theme';
 import {LanguageToggle} from '../components/LanguageToggle';
+import {APP_NAME, APP_VERSION} from '../constants';
 import {useT} from '../i18n';
 import type {RootStackParamList} from '../navigation/types';
 
@@ -206,6 +207,16 @@ export function ConnectionHomeScreen() {
           onPress={() => navigation.navigate('ConnectionEdit', {})}>
           <Text style={styles.addButtonText}>{t('conn.addProfile')}</Text>
         </TouchableOpacity>
+
+        {/* 版本号页脚：全文显示版本号的位置，点进关于页 */}
+        <TouchableOpacity
+          style={styles.aboutFooter}
+          activeOpacity={0.7}
+          onPress={() => navigation.navigate('About')}>
+          <Text style={styles.aboutFooterText}>
+            {APP_NAME} v{APP_VERSION} · {t('nav.about')}
+          </Text>
+        </TouchableOpacity>
       </ScrollView>
     </View>
   );
@@ -319,6 +330,8 @@ const styles = StyleSheet.create({
     marginTop: 14,
   },
   directButtonText: {color: Colors.accentDark, fontSize: 15, fontWeight: '600'},
+  aboutFooter: {alignItems: 'center', marginTop: 36},
+  aboutFooterText: {fontSize: 12, color: Colors.textSecondary},
   error: {color: Colors.danger, fontSize: 13, marginTop: 4},
   reconnecting: {
     color: Colors.textSecondary,

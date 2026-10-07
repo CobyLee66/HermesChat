@@ -16,6 +16,7 @@ import {enableScreens} from 'react-native-screens';
 import {Colors} from './src/components/theme';
 import {DesktopApp} from './src/desktop/DesktopApp';
 import {loadLocalePreference, t, useT} from './src/i18n';
+import {AboutScreen} from './src/screens/AboutScreen';
 import {ChatScreen} from './src/screens/ChatScreen';
 import {ConnectionEditScreen} from './src/screens/ConnectionEditScreen';
 import {ConnectionHomeScreen} from './src/screens/ConnectionHomeScreen';
@@ -125,6 +126,11 @@ function App() {
               name="CronRunDetail"
               component={CronRunDetailScreen}
               options={{title: t('nav.runDetail')}}
+            />
+            <Stack.Screen
+              name="About"
+              component={AboutScreen}
+              options={{title: t('nav.about')}}
             />
             <Stack.Screen
               name="CronEdit"

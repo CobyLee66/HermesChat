@@ -29,6 +29,7 @@ import {Colors} from '../components/theme';
 import {LanguageToggle} from '../components/LanguageToggle';
 import {ViewSwitcher} from '../components/ViewSwitcher';
 import {useT} from '../i18n';
+import {AboutPanel} from '../panels/AboutPanel';
 import {CronJobForm, useCronJobDraft} from '../panels/CronJobForm';
 import {CronPanel} from '../panels/CronPanel';
 import {CronRunDetailPanel} from '../panels/CronRunDetailPanel';
@@ -72,6 +73,7 @@ function DesktopAppShell() {
   const cronEditOpen = useDesktopUiStore(s => s.cronEditOpen);
   const cronRunsOpen = useDesktopUiStore(s => s.cronRunsOpen);
   const cronRunDetailOpen = useDesktopUiStore(s => s.cronRunDetailOpen);
+  const aboutOpen = useDesktopUiStore(s => s.aboutOpen);
   const homeView = useDesktopUiStore(s => s.homeView);
   const reset = useDesktopUiStore(s => s.reset);
 
@@ -81,8 +83,10 @@ function DesktopAppShell() {
   // documentTitle，不再把 document.title 劫持在「编辑资料」上不恢复）
   const t = useT();
   const nicknameText = useProfileNickname(selectedProfile ?? '');
-  const windowTitle = profileEditOpen
-    ? t('nav.profileEdit')
+  const windowTitle = aboutOpen
+    ? t('nav.about')
+    : profileEditOpen
+      ? t('nav.profileEdit')
     : cronRunDetailOpen
       ? t('nav.runDetail')
       : cronRunsOpen
@@ -168,6 +172,7 @@ function DesktopAppShell() {
         {cronRunDetailOpen ? (
           <CronRunDetailModal detail={cronRunDetailOpen} />
         ) : null}
+        {aboutOpen ? <AboutModal /> : null}
       </View>
     );
   }
@@ -245,12 +250,18 @@ function ProfileListPane() {
   const setProfileEditOpen = useDesktopUiStore(s => s.setProfileEditOpen);
   const setCronEditOpen = useDesktopUiStore(s => s.setCronEditOpen);
   const setCronRunsOpen = useDesktopUiStore(s => s.setCronRunsOpen);
+  const setAboutOpen = useDesktopUiStore(s => s.setAboutOpen);
 
   return (
     <View style={styles.profilePane}>
       <View style={styles.profilePaneHeader}>
         <ViewSwitcher value={homeView} onChange={setHomeView} />
         <View style={styles.profilePaneHeaderRight}>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => setAboutOpen(true)}>
+            <Text style={styles.aboutText}>{t('nav.about')}</Text>
+          </TouchableOpacity>
           <LanguageToggle style={styles.langText} />
           <TouchableOpacity
             activeOpacity={0.7}
@@ -460,6 +471,31 @@ function CronRunsModal({
   );
 }
 
+/** 关于弹层（版本号 / GitHub 链接；面板与手机 AboutScreen 同源）。 */
+function AboutModal() {
+  const setAboutOpen = useDesktopUiStore(s => s.setAboutOpen);
+  const close = () => setAboutOpen(false);
+  const t = useT();
+  return (
+    <Modal visible animationType="slide" onRequestClose={close}>
+      <View style={styles.modalRoot}>
+        <View style={styles.modalHeader}>
+          <TouchableOpacity activeOpacity={0.7} onPress={close} hitSlop={8}>
+            <Text style={styles.backText}>{t('common.back')}</Text>
+          </TouchableOpacity>
+          <Text style={styles.modalTitle}>{t('nav.about')}</Text>
+          <View style={styles.modalHeaderSpacer} />
+        </View>
+        <View style={styles.modalPaneBody}>
+          <View style={styles.modalPaneCenter}>
+            <AboutPanel />
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 /** 定时任务运行详情弹层（只读对话回放）；可跳到该 profile 的聊天区继续对话。 */
 function CronRunDetailModal({
   detail,
@@ -577,6 +613,7 @@ const styles = StyleSheet.create({
   },
   exitText: {fontSize: 14, color: Colors.danger},
   profilePaneHeaderRight: {flexDirection: 'row', alignItems: 'center', gap: 14},
+  aboutText: {fontSize: 14, color: Colors.text},
   langText: {fontSize: 14, color: Colors.text},
   profileListContent: {maxWidth: 720, width: '100%', alignSelf: 'center'},
   profileRow: {

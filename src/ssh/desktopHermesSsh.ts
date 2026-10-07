@@ -58,6 +58,8 @@ export interface DesktopBridge {
   notify(payload: {title: string; body: string}): Promise<boolean>;
   /** 诊断日志：写入主进程 userData/logs/main.log（与主进程日志同一文件） */
   log(level: string, msg: string): Promise<boolean>;
+  /** 外部链接交给系统浏览器（about 页 GitHub 链接等；主进程限 http/https） */
+  openExternal(url: string): Promise<boolean>;
 }
 
 /** Electron 主进程桥是否存在（普通浏览器/Jest 下为 false）。 */

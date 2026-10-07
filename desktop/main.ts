@@ -24,6 +24,7 @@ import {
   Notification,
   powerSaveBlocker,
   session,
+  shell,
   type MenuItemConstructorOptions,
 } from 'electron';
 import * as crypto from 'node:crypto';
@@ -1010,6 +1011,17 @@ function registerDesktopIpc(): void {
       level === 'ERROR' || level === 'WARN' ? level : 'INFO',
       String(msg).slice(0, 4000),
     );
+    return true;
+  });
+
+  // 外部链接交给系统浏览器（about 页 GitHub 链接等）；只放行 http/https，
+  // 防渲染层被注入后借自定义 scheme 调起系统能力
+  ipcMain.handle('desktop:openExternal', async (_e, url: string) => {
+    const target = String(url ?? '');
+    if (!/^https?:\/\//i.test(target)) {
+      return false;
+    }
+    await shell.openExternal(target);
     return true;
   });
 

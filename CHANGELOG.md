@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- About page (mobile: profile list header + connection home footer; desktop:
+  profile home header): shows the app name, version number (sourced from
+  `package.json`), a short description, tappable GitHub repository / Releases /
+  issue links, and the license. External links open via the system browser —
+  Electron goes through a new `desktop:openExternal` IPC (main-process
+  `shell.openExternal`, http/https only); native and plain-browser builds use
+  `Linking.openURL`.
+
 ### Fixed
 
 - Bold/italic markers wrapped around quoted text next to CJK characters now

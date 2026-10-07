@@ -76,4 +76,7 @@ contextBridge.exposeInMainWorld('hermesDesktop', {
   // 诊断日志：写入主进程 userData/logs/main.log
   log: (level: string, msg: string) =>
     ipcRenderer.invoke('desktop:log', level, msg),
+
+  // 外部链接交给系统浏览器（about 页 GitHub 链接等）
+  openExternal: (url: string) => ipcRenderer.invoke('desktop:openExternal', url),
 });

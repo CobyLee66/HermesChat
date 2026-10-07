@@ -30,6 +30,8 @@ interface DesktopUiState {
   cronRunDetailOpen: {run: CronRunRow; name?: string; profile?: string} | null;
   /** 主页首屏视图（Profile 列表 / 定时任务） */
   homeView: 'sessions' | 'cron';
+  /** 关于弹层（版本号 / GitHub 链接；null 关闭） */
+  aboutOpen: boolean;
   selectProfile: (profile: string | null) => void;
   openChat: (chat: DesktopChatRef) => void;
   closeChat: () => void;
@@ -43,6 +45,7 @@ interface DesktopUiState {
     open: {run: CronRunRow; name?: string; profile?: string} | null,
   ) => void;
   setHomeView: (view: 'sessions' | 'cron') => void;
+  setAboutOpen: (open: boolean) => void;
   /** 断线清空（连接重建后壳重新选择） */
   reset: () => void;
 }
@@ -56,6 +59,7 @@ export const useDesktopUiStore = create<DesktopUiState>(set => ({
   cronRunsOpen: null,
   cronRunDetailOpen: null,
   homeView: 'sessions',
+  aboutOpen: false,
   selectProfile: profile =>
     set(state =>
       state.selectedProfile === profile
@@ -71,6 +75,7 @@ export const useDesktopUiStore = create<DesktopUiState>(set => ({
   setCronRunsOpen: cronRunsOpen => set({cronRunsOpen}),
   setCronRunDetailOpen: cronRunDetailOpen => set({cronRunDetailOpen}),
   setHomeView: homeView => set({homeView}),
+  setAboutOpen: aboutOpen => set({aboutOpen}),
   reset: () =>
     set({
       selectedProfile: null,
@@ -81,6 +86,7 @@ export const useDesktopUiStore = create<DesktopUiState>(set => ({
       cronRunsOpen: null,
       cronRunDetailOpen: null,
       homeView: 'sessions',
+      aboutOpen: false,
     }),
 }));
 

@@ -368,6 +368,17 @@ export const zhCN: Record<MessageKey, string> = {
   'nav.cronEdit': '定时任务',
   'nav.cronEditJob': '编辑定时任务',
   'nav.cronNewJob': '新建定时任务',
+  'nav.about': '关于',
+
+  // ── 关于页 ──
+  'about.version': '版本 {version}',
+  'about.description': 'Hermes Agent 的手机与桌面客户端。',
+  'about.links': '链接',
+  'about.repo': 'GitHub 仓库',
+  'about.releases': '发布页',
+  'about.issues': '反馈问题',
+  'about.license': '许可证',
+  'about.openFailed': '无法打开链接',
 
   // ── 连接编辑表单 ──
   'common.save': '保存',
