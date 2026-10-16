@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Android: fixed a crash when the main activity was recreated while returning
+  from the background. `MainActivity` now follows the required
+  react-native-screens setup (`super.onCreate(null)`), preventing the OS from
+  restoring a saved `ScreenStackFragment` and triggering
+  `Screen fragments should never be restored`.
+
 ## [0.2.1] - 2026-10-07
 
 ### Fixed
