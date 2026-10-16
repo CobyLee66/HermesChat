@@ -22,13 +22,13 @@
 
 ## 下载
 
-预编译安装包发布在 [**Releases**](https://github.com/CobyLee66/HermesChat/releases) 页面。当前版本：**[v0.2.1](https://github.com/CobyLee66/HermesChat/releases/tag/v0.2.1)**
+预编译安装包发布在 [**Releases**](https://github.com/CobyLee66/HermesChat/releases) 页面。当前版本：**[v0.2.2](https://github.com/CobyLee66/HermesChat/releases/tag/v0.2.2)**
 
 | 平台 | 下载 | 说明 |
 |---|---|---|
-| Android | [HermesChat-0.2.1.apk](https://github.com/CobyLee66/HermesChat/releases/download/v0.2.1/HermesChat-0.2.1.apk) | 使用公开 debug keystore 签名 —— 见 [SECURITY.md](SECURITY.md) |
-| Windows | [HermesChat-Setup-0.2.1.exe](https://github.com/CobyLee66/HermesChat/releases/download/v0.2.1/HermesChat-Setup-0.2.1.exe) | 未签名 —— SmartScreen 弹窗选「仍要运行」 |
-| macOS（Apple Silicon） | [HermesChat-0.2.1-arm64.dmg](https://github.com/CobyLee66/HermesChat/releases/download/v0.2.1/HermesChat-0.2.1-arm64.dmg) | 未签名 —— 首次打开被 Gatekeeper 拦截时右键 → 打开 |
+| Android | [HermesChat-0.2.2.apk](https://github.com/CobyLee66/HermesChat/releases/download/v0.2.2/HermesChat-0.2.2.apk) | 使用公开 debug keystore 签名 —— 见 [SECURITY.md](SECURITY.md) |
+| Windows | [HermesChat-Setup-0.2.2.exe](https://github.com/CobyLee66/HermesChat/releases/download/v0.2.2/HermesChat-Setup-0.2.2.exe) | 未签名 —— SmartScreen 弹窗选「仍要运行」 |
+| macOS（Apple Silicon） | [HermesChat-0.2.2-arm64.dmg](https://github.com/CobyLee66/HermesChat/releases/download/v0.2.2/HermesChat-0.2.2-arm64.dmg) | 未签名 —— 首次打开被 Gatekeeper 拦截时右键 → 打开 |
 
 也可以[从源码构建](#快速开始)；历史版本见 [Releases 页面](https://github.com/CobyLee66/HermesChat/releases)。
 
