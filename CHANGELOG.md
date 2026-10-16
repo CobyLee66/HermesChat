@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Chat images can be tapped to open a full-screen original-image viewer on
+  mobile, desktop, and web, with close-button, Android back, and Escape support.
+- The attachment panel now has an "Original image" checkbox alongside the single
+  photo picker. It uploads the untouched bytes and original filename extension
+  (up to the server's 25 MB limit) instead of re-encoding to JPEG; compressed
+  upload remains the default, and session-recovery reuploads preserve the mode.
+
 ### Fixed
 
 - Android: fixed a crash when the main activity was recreated while returning

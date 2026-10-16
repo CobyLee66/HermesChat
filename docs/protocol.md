@@ -97,7 +97,7 @@
   - **识别语言完全由服务端决定，接口无 language 参数**（`AudioTranscriptionRequest` 只有 data_url/mime_type）。服务端解析链（transcription_tools.py `_resolve_stt_language`）：`stt.<provider>.language` → `stt.language` → env `HERMES_LOCAL_STT_LANGUAGE` → None=自动检测；但 `local_command` 路径（whisper 二进制）兜底**默认 "en"**。实测（2026-09-05 服务端日志）：faster-whisper `base` 对 ≤7s 的中文录音自动检测**全部误判 `lang=en`** 输出英文；要稳定中文须服务端配置 `stt.local.language: zh`（或换 `small`+ 模型）。App 暂不处理（D020），上游若加 language 参数后客户端再传。
   - **`?profile=` 同时决定 STT 配置作用域**（2026-09-08 排查实锤，D034 修订 D020）：端点内 `_config_profile_scope(profile)` 把 HERMES_HOME 切到**该 profile 的 home** 再 `load_config()`（None/""/"current" = dashboard 自身 profile），语言/模型按「当前会话所属 profile」的 config.yaml 解析——multiplex 下只改 main/default 不够，其余 profile 的语音仍走自动检测误判 en（09-08 21:42 日志 `Transcribed hermes-desktop-voice-*.m4a ... lang=en` 实锤，该文件名前缀即本端点临时文件 `web_server.py:5381`）。`load_config()` 按 (mtime_ns, size) 逐次校验、按路径分键缓存：**改 yaml 即热生效，无需重启**。已把本机 6 个 profile 全量配 `stt.language: zh` + `local.model: small`（经用户授权的服务端配置修改，非代码改动）。
 - REST 文件下载（渲染消息里的图片）：`GET /api/files/download?path=<gateway 绝对路径>&token=<SESSION_TOKEN>`（web_server.py:2630）——path 须为**绝对路径**（无 locked_root 时）；这是**唯一允许 `?token=` 查询参数认证**的路由（`_QUERY_TOKEN_API_PATHS`，desktop `mediaExternalUrl` 同款），RN `<Image>` 用它。⚠️ **不要用 `/api/files/stream`**：它 `media_only=True`，只放行音视频扩展名（.avi/.flac/.m4a/.mkv/.mov/.mp3/.mp4/.ogg/.opus/.wav/.webm），图片会 415。download 路由同样接受 header 认证，上限 100MB（`_MANAGED_FILE_MAX_BYTES`）。
-- WS 帧上限 384MB（`_DESKTOP_ATTACHMENT_WS_MAX_BYTES`）——理论上限而已，客户端应先压缩再传（App：图片长边 2048 JPEG 80，头像 512×512 JPEG 80）。
+- WS 帧上限 384MB（`_DESKTOP_ATTACHMENT_WS_MAX_BYTES`）——理论上限而已。App 默认压缩图片（长边 2048 JPEG 80）；附件面板勾选「原图」时直读原始字节上传，不经过 resizer/canvas，保留原扩展名并预检 decoded bytes ≤25MB；发送自愈重传沿用同一模式。头像仍为 512×512 JPEG 80。
 
 ## 3. 服务端事件（`params.type` → `params.payload`）
 
@@ -131,7 +131,7 @@
   - 带图用户消息持久化时，文本部分尾部追加 `@image:<path>` 指令行（每行一张，caption 在前——server.py `_build_persist_message_with_image_refs`；路径含空格时按 `format_reference_value` 加反引号/引号）。
   - 原生视觉 turn 的 content parts 经 `_coerce_message_text` 拍平成 text 时，每个 image part 的 URL（多为 `data:image/…;base64,…`）以**独立行**追加——投影 text 里会同时出现 `@image:` 指令行和内嵌 data URL 行，两者都要还原成图片（desktop 参考：`apps/desktop/src/components/assistant-ui/directive-text.tsx` + `src/lib/embedded-images.ts`；指令正则 `/@(file|folder|url|image|tool|line|terminal|session):(`…`|"…"|'…'|\S+)/`）。
   - `@file:<ref>` 同理（file.attach 写入历史的引用），渲染成文件卡片即可。
-  - App 端实现：`src/rpc/references.ts` 的 `parseMessageText`（ aggregator hydrate / message.complete / 本地回显三处接入）。
+  - App 端实现：`src/rpc/references.ts` 的 `parseMessageText`（aggregator hydrate / message.complete / 本地回显三处接入）；`ChatImage` 缩略图与全屏 `ImageViewer` 复用同一原始 URI，路径形态仍经上述 download 路由，不另存压缩副本。
 
 ## 5. multiplex_profiles 下的会话 profile 归属分组（客户端方案，2026-09-02 实现）
 

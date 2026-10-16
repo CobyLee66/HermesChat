@@ -23,7 +23,7 @@
 
 | 能力 | 实现 |
 |---|---|
-| 附件选文件 | IPC `desktop:pickFiles`（主进程 dialog）→ `desktop:readFileDataUrl`（主进程 fs）→ data URL；压缩在渲染层 canvas（`utils/media.ts` web 分支，替代 image-resizer）；文本文件（SSH 私钥 PEM）走 `desktopPickTextFile`（readFileText utf8） |
+| 附件选文件 | IPC `desktop:pickFiles`（主进程 dialog）→ `desktop:readFileDataUrl`（主进程 fs）→ data URL；默认在渲染层 canvas 压缩（`utils/media.ts` web 分支，替代 image-resizer），附件面板勾选「原图」则直传 data URL 原始字节；文本文件（SSH 私钥 PEM）走 `desktopPickTextFile`（readFileText utf8） |
 | 粘贴/拖拽 | ChatPane window 级 paste/drop 监听：图片 → 待发附件；文件 → `@file:` 引用 |
 | 语音 | `VoiceButton.web.tsx` 桌面分支：getUserMedia + MediaRecorder（mp4/aac 优先，webm/opus 兜底）→ 转写链路复用；普通浏览器仍是禁用占位 |
 | 头像 | ProfileEditScreen 桌面分支：desktopPickImages + canvas cover 512 |
@@ -41,7 +41,7 @@
 
 ### 8.5 已知边界（后续迭代）
 
-- 悬停（hover）态、图片点击灯箱未做；助手消息 web 侧已随 markdown-it HTML 原生可选中，用户消息选中/复制待统一。会话行右键菜单已做（复制标题/删除），profile 行/聊天气泡区右键未做。
+- 悬停（hover）态待打磨；聊天图片点击灯箱已由共享 `ImageViewer` 实现（原 URI + contain、关闭按钮 / Android 返回 / Escape）；助手消息 web 侧已随 markdown-it HTML 原生可选中，用户消息选中/复制待统一。会话行右键菜单已做（复制标题/删除），profile 行/聊天气泡区右键未做。
 - 语音 webm/opus 是否被服务端 faster-whisper 正常转写待真机验证（mp4/aac 已优先选用）。
 - 未做：深色模式、托盘、自动更新、safeStorage 加密私钥（私钥仍 localStorage 明文，与手机版策略一致）。
 - 真实 SSH 隧道 GUI 全流程（填配置→连接→聊天）待用户在 Electron/Windows 包验收；自动化验证只覆盖壳启动与代理（不碰 live 服务写操作）。

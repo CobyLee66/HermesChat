@@ -1,7 +1,7 @@
 /**
  * desktopMedia — 桌面（Electron）附件来源：主进程对话框选文件 + fs 读字节。
  * 统一输出与手机 picker 兼容的 {uri, name} 形态；图片/文件字节读成 data URL，
- * 上游 media.ts 的 web 分支再做压缩（canvas）。
+ * 上游 media.ts 默认经 canvas 压缩，勾选「原图」时直接透传原始字节。
  */
 
 import {t} from '../i18n';

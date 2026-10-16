@@ -1,7 +1,7 @@
 /**
- * 图片/文件的本地预处理：压缩、base64 读取。
+ * 图片/文件的本地预处理：压缩或原图直读、base64 读取。
  * 原生依赖（image-resizer / RNFS）集中在这一层，store 与 UI 不直接碰。
- * web/桌面构建走 canvas 分支（输入为 data URL，桌面由主进程读字节）。
+ * web/桌面输入为 data URL（桌面由主进程读字节）：压缩走 canvas，原图直接透传。
  */
 
 import {Platform} from 'react-native';
@@ -11,15 +11,16 @@ import RNFS from 'react-native-fs';
 import {t} from '../i18n';
 
 export interface PreparedImage {
-  /** JPEG 字节流的 base64（image.attach_bytes 的 content_base64） */
+  /** 图片字节流的 base64（image.attach_bytes 的 content_base64） */
   base64: string;
-  /** 文件名（统一改成 .jpg —— 内容已是 JPEG，服务端扩展名优先采信文件名） */
+  /** 上传文件名；压缩产物统一为 .jpg，原图保留原扩展名 */
   filename: string;
-  /** 压缩产物的 file:// URI（本地预览用）；web 分支为 data URL */
+  /** 本地预览 URI（压缩产物或原始文件）；web 分支为 data URL */
   localUri: string;
-  width: number;
-  height: number;
-  /** 压缩后字节数 */
+  /** 原图直读不重解码，因此没有尺寸信息 */
+  width?: number;
+  height?: number;
+  /** 实际上传字节数 */
   size: number;
 }
 
@@ -27,6 +28,36 @@ export interface PreparedImage {
 function toJpegName(name: string | null | undefined, fallback: string): string {
   const base = (name || fallback || 'image').trim() || 'image';
   return base.replace(/\.[a-z0-9]+$/i, '') + '.jpg';
+}
+
+const IMAGE_MIME_EXTENSIONS: Record<string, string> = {
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/gif': '.gif',
+  'image/webp': '.webp',
+  'image/bmp': '.bmp',
+};
+
+/** 原图不重编码，文件名必须保留原扩展名（服务端优先按文件名判断格式）。 */
+function toOriginalName(
+  uri: string,
+  name?: string | null,
+  mimeType?: string | null,
+): string {
+  const explicit = name?.trim();
+  if (explicit) {
+    return explicit;
+  }
+  if (!uri.startsWith('data:')) {
+    const clean = uri.split(/[?#]/, 1)[0].replace(/\\/g, '/');
+    const base = clean.slice(clean.lastIndexOf('/') + 1).trim();
+    if (base) {
+      return base;
+    }
+  }
+  const dataMime = uri.startsWith('data:') ? uri.slice(5, uri.indexOf(';')) : '';
+  const ext = IMAGE_MIME_EXTENSIONS[(mimeType || dataMime).toLowerCase()] ?? '';
+  return `image${ext}`;
 }
 
 // ─── web/desktop canvas 分支 ─────────────────────────────────────
@@ -123,7 +154,45 @@ async function webResizeToJpeg(
 }
 
 function base64Size(base64: string): number {
-  return Math.floor((base64.length * 3) / 4);
+  const compact = base64.replace(/\s/g, '');
+  const padding = compact.endsWith('==') ? 2 : compact.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((compact.length * 3) / 4) - padding);
+}
+
+export const IMAGE_ATTACH_MAX_BYTES = 25 * 1024 * 1024;
+
+function assertImageWithinLimit(size: number): void {
+  if (size > IMAGE_ATTACH_MAX_BYTES) {
+    throw new Error(t('media.originalImageTooLarge'));
+  }
+}
+
+/** 原图上传：直接读取原始字节，不做重采样、重编码或格式转换。 */
+export async function prepareOriginalImageForUpload(
+  uri: string,
+  name?: string | null,
+  mimeType?: string | null,
+): Promise<PreparedImage> {
+  const filename = toOriginalName(uri, name, mimeType);
+  if (Platform.OS === 'web') {
+    if (!uri.startsWith('data:')) {
+      throw new Error(t('media.localPathUnsupported'));
+    }
+    const marker = 'base64,';
+    const markerAt = uri.indexOf(marker);
+    if (markerAt < 0) {
+      throw new Error(t('media.decodeFailed'));
+    }
+    const base64 = uri.slice(markerAt + marker.length).replace(/\s/g, '');
+    const size = base64Size(base64);
+    assertImageWithinLimit(size);
+    return {base64, filename, localUri: uri, size};
+  }
+  // Android stat 不解析 file:// scheme（readFile 可以），必须传绝对路径
+  const stat = await RNFS.stat(uri.replace(/^file:\/\//, ''));
+  assertImageWithinLimit(stat.size);
+  const base64 = await RNFS.readFile(uri, 'base64');
+  return {base64, filename, localUri: uri, size: stat.size};
 }
 
 /**

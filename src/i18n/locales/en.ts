@@ -46,6 +46,8 @@ export const en = {
   'media.noCanvasContext': 'canvas 2d context is unavailable',
   'media.localPathUnsupported':
     'Reading files from local paths is not supported on web',
+  'media.originalImageTooLarge':
+    'Original image exceeds the 25 MB upload limit; disable Original image and try again',
 
   // ── 定时任务 ──
   'cron.modeInterval': 'Interval',
@@ -300,6 +302,7 @@ export const en = {
     'QQ-sourced session · sending will fork it into the current profile',
   'chat.jumpToBottom': '↓ Show latest messages',
   'chat.close': 'Close',
+  'chat.viewImage': 'View original image',
   'chat.infoTitle': 'Session info',
   'chat.menuSearch': 'Search chat history',
   'chat.rename': 'Rename session',
@@ -320,6 +323,7 @@ export const en = {
   'input.attachPanelOpen': 'Open attachments panel',
   'input.placeholder': 'Message…',
   'input.sendImage': 'Send image',
+  'input.originalImage': 'Original image',
   'input.sendFile': 'Send file',
   'input.interrupt': 'Interrupt',
   'input.send': 'Send',

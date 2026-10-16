@@ -36,7 +36,9 @@ import {useKeyboardHeight} from '../utils/useKeyboardHeight';
 
 /** 附件来源注入：桌面传对话框实现，缺省用手机 documents-picker 流程。 */
 export interface ChatAttachmentPickers {
-  pickImages(): Promise<{uri: string; name?: string | null}[]>;
+  pickImages(): Promise<
+    {uri: string; name?: string | null; mimeType?: string | null}[]
+  >;
   pickFile(): Promise<{
     uri: string;
     name?: string | null;
@@ -79,6 +81,7 @@ export function ChatInputBar({
   const connState = useConnectionStore(s => s.state);
 
   const [attaching, setAttaching] = React.useState(false);
+  const [originalImage, setOriginalImage] = React.useState(false);
 
   const busy = chat?.busy ?? false;
   const status = chat?.status ?? null;
@@ -136,13 +139,13 @@ export function ChatInputBar({
     [enterToSend, onInputKeyPress, onSend],
   );
 
-  /** 附件面板：相册图片（多选 → 压缩 → image.attach_bytes → 待发横条）。 */
+  /** 附件面板：同一图片入口按“原图”勾选态选择直读或压缩上传。 */
   const onPickImages = useCallback(async () => {
     try {
       setAttaching(true);
       const files = pickers ? await pickers.pickImages() : await pickImagesNative();
       if (files.length > 0) {
-        await attachImages(sessionId, files);
+        await attachImages(sessionId, files, {original: originalImage});
       }
       onAttachPanelChange(false);
     } catch (e) {
@@ -153,7 +156,7 @@ export function ChatInputBar({
     } finally {
       setAttaching(false);
     }
-  }, [attachImages, onAttachPanelChange, pickers, sessionId, t]);
+  }, [attachImages, onAttachPanelChange, originalImage, pickers, sessionId, t]);
 
   /** 附件面板：文件（单选 → file.attach → @file: 引用追加到输入框）。 */
   const onPickFile = useCallback(async () => {
@@ -286,14 +289,33 @@ export function ChatInputBar({
       </View>
       {attachPanelOpen ? (
         <View style={styles.attachPanel}>
-          <TouchableOpacity
-            style={styles.attachTile}
-            onPress={onPickImages}
-            disabled={attaching}
-            activeOpacity={0.7}
-            accessibilityLabel={t('input.sendImage')}>
-            <IconImage name="photo" size={26} />
-          </TouchableOpacity>
+          <View style={styles.imageAttachGroup}>
+            <TouchableOpacity
+              style={[styles.attachTile, styles.imageAttachTile]}
+              onPress={onPickImages}
+              disabled={attaching}
+              activeOpacity={0.7}
+              accessibilityLabel={t('input.sendImage')}>
+              <IconImage name="photo" size={26} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.originalToggle}
+              onPress={() => setOriginalImage(v => !v)}
+              disabled={attaching}
+              activeOpacity={0.7}
+              accessibilityRole="checkbox"
+              accessibilityState={{checked: originalImage}}
+              accessibilityLabel={t('input.originalImage')}>
+              <View
+                style={[
+                  styles.originalCheck,
+                  originalImage ? styles.originalCheckChecked : null,
+                ]}>
+                {originalImage ? <Text style={styles.originalCheckMark}>✓</Text> : null}
+              </View>
+              <Text style={styles.originalText}>{t('input.originalImage')}</Text>
+            </TouchableOpacity>
+          </View>
           <TouchableOpacity
             style={styles.attachTile}
             onPress={onPickFile}
@@ -324,9 +346,21 @@ function appendToInput(
   onInputChange(base ? `${base} ${text}` : text);
 }
 
+function fallbackImageName(uri: string, mimeType: string | null, idx: number): string {
+  const clean = uri.split(/[?#]/, 1)[0].replace(/\\/g, '/');
+  const base = clean.slice(clean.lastIndexOf('/') + 1).trim();
+  if (base && /\.[a-z0-9]+$/i.test(base)) {
+    return base;
+  }
+  const subtype = (mimeType || '').toLowerCase().startsWith('image/')
+    ? (mimeType || '').slice(6).replace(/[^a-z0-9]/gi, '')
+    : '';
+  return `image_${Date.now()}_${idx}${subtype ? `.${subtype}` : ''}`;
+}
+
 /** 手机默认附件来源：documents-picker + 沙盒副本（content:// → file://）。 */
 async function pickImagesNative(): Promise<
-  {uri: string; name?: string | null}[]
+  {uri: string; name?: string | null; mimeType?: string | null}[]
 > {
   const results = await pick({
     type: [types.images],
@@ -335,18 +369,18 @@ async function pickImagesNative(): Promise<
   if (!results || results.length === 0) {
     return [];
   }
-  const files: {uri: string; name?: string | null}[] = [];
+  const files: {uri: string; name?: string | null; mimeType?: string | null}[] = [];
   let idx = 0;
   for (const r of results) {
     idx += 1;
     const [copy] = await keepLocalCopy({
       files: [
-        {uri: r.uri, fileName: r.name ?? `image_${Date.now()}_${idx}.jpg`},
+        {uri: r.uri, fileName: r.name ?? fallbackImageName(r.uri, r.type, idx)},
       ],
       destination: 'cachesDirectory',
     });
     if (copy.status === 'success') {
-      files.push({uri: copy.localUri, name: r.name});
+      files.push({uri: copy.localUri, name: r.name, mimeType: r.type});
     }
   }
   return files;
@@ -467,13 +501,34 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: Colors.border,
   },
-  /** 面板三格统一 56 高（与 VoiceButton 磁贴一致），纯图标无文字 */
+  /** 文件/语音磁贴统一 56 高；图片磁贴下方保留“原图”复选框 */
   attachTile: {
     alignItems: 'center',
     justifyContent: 'center',
     width: 88,
     height: 56,
   },
+  imageAttachGroup: {width: 88, alignItems: 'center'},
+  imageAttachTile: {height: 36},
+  originalToggle: {
+    minHeight: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  originalCheck: {
+    width: 14,
+    height: 14,
+    borderRadius: 3,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  originalCheckChecked: {backgroundColor: Colors.accent, borderColor: Colors.accent},
+  originalCheckMark: {color: '#FFF', fontSize: 10, lineHeight: 12},
+  originalText: {marginLeft: 4, fontSize: 12, color: Colors.textSecondary},
   attachingBar: {
     backgroundColor: Colors.card,
     paddingVertical: 4,

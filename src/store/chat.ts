@@ -38,15 +38,21 @@ import {useDraftStore} from './drafts';
 import {getFork, setFork} from './forkMap';
 import {useProfilesStore} from './profiles';
 import {useSessionsStore} from './sessions';
-import {prepareImageForUpload, readFileAsDataUrl} from '../utils/media';
+import {
+  prepareImageForUpload,
+  prepareOriginalImageForUpload,
+  readFileAsDataUrl,
+} from '../utils/media';
 
 /** 已 attach 到 session、待下一条 prompt 带上的图片。 */
 export interface PendingAttachment {
   /** gateway 侧绝对路径（image.attach_bytes 返回） */
   path: string;
-  /** 压缩产物的本地 file:// URI（待发横条预览） */
+  /** 原始文件或压缩产物的本地 URI（待发横条预览与自愈重传） */
   localUri: string;
   name: string;
+  /** true = 原图直读上传；缺省/false = 2048 JPEG 80 压缩 */
+  original?: boolean;
 }
 
 export interface SessionChatState {
@@ -299,12 +305,13 @@ interface ChatStore {
   forkForeignAndSend(sid: string, trimmed: string): Promise<void>;
   interrupt(sid: string): Promise<void>;
   /**
-   * 选图 → 压缩（长边 2048 JPEG 80）→ image.attach_bytes 逐张上传 → 进待发横条。
-   * 单张失败在时间线记错误条，不影响其余。
+   * 选图 → 原图直读或压缩（长边 2048 JPEG 80）→ image.attach_bytes 逐张上传。
+   * options.original=true 时不重采样/重编码；单张失败记错误条，不影响其余。
    */
   attachImages(
     sid: string,
-    picks: {uri: string; name?: string | null}[],
+    picks: {uri: string; name?: string | null; mimeType?: string | null}[],
+    options?: {original?: boolean},
   ): Promise<void>;
   /** 从待发横条移除（同时 image.detach 从 session 队列里摘除）。 */
   removeAttachment(sid: string, path: string): Promise<void>;
@@ -459,7 +466,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
     const ok: {path: string}[] = [];
     for (const att of images) {
       try {
-        const prep = await prepareImageForUpload(att.localUri, att.name);
+        const prep = att.original
+          ? await prepareOriginalImageForUpload(att.localUri, att.name)
+          : await prepareImageForUpload(att.localUri, att.name);
         const res = await getRpc().call<ImageAttachResult>(
           'image.attach_bytes',
           {
@@ -1158,11 +1167,13 @@ export const useChatStore = create<ChatStore>((set, get) => {
       }
     },
 
-    async attachImages(sid, picks) {
+    async attachImages(sid, picks, options = {}) {
       const rpc = getRpc();
       for (const p of picks) {
         try {
-          const prep = await prepareImageForUpload(p.uri, p.name);
+          const prep = options.original
+            ? await prepareOriginalImageForUpload(p.uri, p.name, p.mimeType)
+            : await prepareImageForUpload(p.uri, p.name);
           const res = await rpc.call<ImageAttachResult>('image.attach_bytes', {
             session_id: sid,
             content_base64: prep.base64,
@@ -1172,6 +1183,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
             path: res.path,
             localUri: prep.localUri,
             name: res.name ?? prep.filename,
+            ...(options.original ? {original: true} : {}),
           };
           set(s => {
             const prev = s.bySession[sid] ?? EMPTY;

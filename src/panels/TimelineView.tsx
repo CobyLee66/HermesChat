@@ -36,6 +36,7 @@ import {ApprovalCard} from '../components/ApprovalCard';
 import {Bubble} from '../components/Bubble';
 import {ChatImage} from '../components/ChatImage';
 import {ChatScrollbar} from '../components/ChatScrollbar';
+import {ImageViewer} from '../components/ImageViewer';
 import {ClarifyCard} from '../components/ClarifyCard';
 import {FileRefCard} from '../components/FileRefCard';
 import {MarkdownText} from '../components/MarkdownText';
@@ -101,6 +102,9 @@ export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
     const [scroll, setScroll] = useState({offset: 0, content: 0, viewport: 0});
     /** marker 灰条（display_kind 标记行）点击展开的全文查看层：非空即打开 */
     const [expandedText, setExpandedText] = useState<string | null>(null);
+    /** 当前全屏查看的原图 URI；null = 关闭 */
+    const [previewUri, setPreviewUri] = useState<string | null>(null);
+    const closePreview = useCallback(() => setPreviewUri(null), []);
     const listRef = useRef<FlatList<TimelineItem>>(null);
 
     /** 贴底跟随态（ref 避免流式高频重渲染）：初始与切会话时跟随 */
@@ -119,6 +123,7 @@ export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
       followRef.current = true;
       lastOffsetRef.current = 0;
       lastContentRef.current = 0;
+      setPreviewUri(null);
     }, [sessionId]);
 
     useEffect(() => {
@@ -220,7 +225,7 @@ export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
                 {item.images && item.images.length > 0 ? (
                   <View style={styles.userImages}>
                     {item.images.map((img, i) => (
-                      <ChatImage key={i} image={img} />
+                      <ChatImage key={i} image={img} onPreview={setPreviewUri} />
                     ))}
                   </View>
                 ) : null}
@@ -289,6 +294,7 @@ export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
                 msg={item}
                 showDetail={showDetail}
                 onSelectText={onSelectText}
+                onPreviewImage={setPreviewUri}
               />
             );
           default:
@@ -414,6 +420,9 @@ export const TimelineView = forwardRef<TimelineViewHandle, TimelineViewProps>(
           </View>
         </View>
       ) : null}
+      {previewUri !== null ? (
+        <ImageViewer uri={previewUri} onClose={closePreview} />
+      ) : null}
     </View>
   );
   },
@@ -430,10 +439,12 @@ const AssistantRow = React.memo(function AssistantRow({
   msg,
   showDetail,
   onSelectText,
+  onPreviewImage,
 }: {
   msg: AssistantMsg;
   showDetail: boolean;
   onSelectText?: (text: string) => void;
+  onPreviewImage: (uri: string) => void;
 }) {
   // showDetail=false 时隐藏工具调用/思考/推理等非对话块
   const blocks = showDetail
@@ -476,7 +487,7 @@ const AssistantRow = React.memo(function AssistantRow({
           case 'tool':
             return <ToolCallCard key={b.tool.toolId} tool={b.tool} />;
           case 'image':
-            return <ChatImage key={i} image={b.image} />;
+            return <ChatImage key={i} image={b.image} onPreview={onPreviewImage} />;
           case 'file':
             return <FileRefCard key={i} file={b.file} />;
           case 'error':

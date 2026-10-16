@@ -42,6 +42,7 @@ export const zhCN: Record<MessageKey, string> = {
   'media.decodeFailed': '图片解码失败（格式不受支持？）',
   'media.noCanvasContext': 'canvas 2d 上下文不可用',
   'media.localPathUnsupported': 'web 构建不支持读取本地路径文件',
+  'media.originalImageTooLarge': '原图超过 25MB 上传上限，请取消勾选「原图」后重试',
 
   // ── 定时任务 ──
   'cron.modeInterval': '间隔',
@@ -273,6 +274,7 @@ export const zhCN: Record<MessageKey, string> = {
   'chat.foreignBanner': 'QQ 来源会话 · 发送消息将派生到当前 profile 继续',
   'chat.jumpToBottom': '↓ 显示最新消息',
   'chat.close': '关闭',
+  'chat.viewImage': '查看原图',
   'chat.infoTitle': '会话信息',
   'chat.menuSearch': '查找聊天记录',
   'chat.rename': '重命名会话',
@@ -293,6 +295,7 @@ export const zhCN: Record<MessageKey, string> = {
   'input.attachPanelOpen': '打开附件面板',
   'input.placeholder': '发消息…',
   'input.sendImage': '发送图片',
+  'input.originalImage': '原图',
   'input.sendFile': '发送文件',
   'input.interrupt': '中断',
   'input.send': '发送',

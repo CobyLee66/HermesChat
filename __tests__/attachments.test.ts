@@ -9,6 +9,7 @@ import RNFS from 'react-native-fs';
 
 import {fileDownloadUrl} from '../src/rpc/rest';
 import {_resetChatAggregators, useChatStore} from '../src/store/chat';
+import {useConnectionStore} from '../src/store/connection';
 import type {UserMsg} from '../src/rpc/types';
 
 const mockCall = jest.fn<Promise<unknown>, [string, Record<string, unknown>?]>();
@@ -21,13 +22,16 @@ jest.mock('../src/rpc/runtime', () => ({
 
 const createResizedImage = ImageResizer.createResizedImage as jest.Mock;
 const readFile = RNFS.readFile as jest.Mock;
+const stat = RNFS.stat as jest.Mock;
 
 function resetState() {
   _resetChatAggregators();
   useChatStore.setState({bySession: {}});
+  useConnectionStore.setState({state: 'ready'});
   mockCall.mockReset();
   createResizedImage.mockClear();
   readFile.mockClear();
+  stat.mockClear();
 }
 
 describe('chat store 附件', () => {
@@ -76,6 +80,120 @@ describe('chat store 附件', () => {
       localUri: 'file:///tmp/caches/resized.jpg',
       name: 'upload_1.jpg',
     });
+  });
+
+  it('attachImages 原图：直读原字节和扩展名，不调用压缩管线', async () => {
+    mockCall.mockImplementation(async (method: string, params) => {
+      if (method === 'image.attach_bytes') {
+        return {
+          attached: true,
+          path: '/p/original.png',
+          count: 1,
+          name: params?.filename,
+        };
+      }
+      throw new Error(`unexpected rpc: ${method}`);
+    });
+    readFile.mockResolvedValue('aGk=');
+
+    await useChatStore.getState().attachImages(
+      's1',
+      [{uri: 'file:///tmp/photo.png', name: 'photo.png', mimeType: 'image/png'}],
+      {original: true},
+    );
+
+    expect(createResizedImage).not.toHaveBeenCalled();
+    expect(stat).toHaveBeenCalledWith('/tmp/photo.png');
+    expect(readFile).toHaveBeenCalledWith('file:///tmp/photo.png', 'base64');
+    expect(mockCall).toHaveBeenCalledWith('image.attach_bytes', {
+      session_id: 's1',
+      content_base64: 'aGk=',
+      filename: 'photo.png',
+    });
+    expect(useChatStore.getState().bySession.s1.pendingAttachments[0]).toEqual({
+      path: '/p/original.png',
+      localUri: 'file:///tmp/photo.png',
+      name: 'photo.png',
+      original: true,
+    });
+  });
+
+  it('attachImages 原图超过 25MB：上传前拒绝并提示，可改用压缩入口', async () => {
+    stat.mockResolvedValueOnce({size: 25 * 1024 * 1024 + 1});
+
+    await useChatStore.getState().attachImages(
+      's1',
+      [{uri: 'file:///tmp/huge.png', name: 'huge.png'}],
+      {original: true},
+    );
+
+    expect(readFile).not.toHaveBeenCalled();
+    expect(mockCall).not.toHaveBeenCalled();
+    const st = useChatStore.getState().bySession.s1;
+    expect(st.pendingAttachments).toEqual([]);
+    expect(
+      st.items.some(i => i.kind === 'system' && i.text.includes('25MB')),
+    ).toBe(true);
+  });
+
+  it('发送自愈重传原图：仍直读原文件，不经过二次压缩', async () => {
+    mockCall.mockImplementation(async (method: string, params) => {
+      if (method === 'image.attach_bytes') {
+        return {
+          attached: true,
+          path: params?.session_id === 's2' ? '/p/reupload.png' : '/p/original.png',
+          count: 1,
+          name: params?.filename,
+        };
+      }
+      if (method === 'session.resume') {
+        return {
+          session_id: 's2',
+          stored_session_id: 'stored1',
+          running: false,
+          messages: [],
+        };
+      }
+      if (method === 'session.usage') {
+        return {calls: 0, input: 0, output: 0, total: 0};
+      }
+      if (method === 'prompt.submit') {
+        return {status: 'streaming'};
+      }
+      throw new Error(`unexpected rpc: ${method}`);
+    });
+    readFile.mockResolvedValue('aGk=');
+    await useChatStore.getState().attachImages(
+      's1',
+      [{uri: 'file:///tmp/photo.png', name: 'photo.png'}],
+      {original: true},
+    );
+    const current = useChatStore.getState().bySession.s1;
+    useChatStore.setState(s => ({
+      bySession: {
+        ...s.bySession,
+        s1: {
+          ...current,
+          profile: 'main',
+          storedSessionId: 'stored1',
+          staleLive: true,
+        },
+      },
+    }));
+
+    await useChatStore.getState().sendPrompt('s1', '原图');
+
+    const uploads = mockCall.mock.calls.filter(c => c[0] === 'image.attach_bytes');
+    expect(uploads).toHaveLength(2);
+    expect(uploads[1][1]).toEqual({
+      session_id: 's2',
+      content_base64: 'aGk=',
+      filename: 'photo.png',
+    });
+    expect(createResizedImage).not.toHaveBeenCalled();
+    expect(readFile).toHaveBeenCalledTimes(2);
+    expect(readFile).toHaveBeenLastCalledWith('file:///tmp/photo.png', 'base64');
+    expect(useChatStore.getState().bySession.s1.migratedTo).toBe('s2');
   });
 
   it('attachImages 单张失败：时间线记错误条，不影响其余', async () => {
