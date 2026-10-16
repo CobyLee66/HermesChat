@@ -36,6 +36,7 @@ import {fetchRemoteHistory, toSeedMessages} from '../ssh/remoteHistory';
 import {dlog} from '../utils/desktopLog';
 import {useDraftStore} from './drafts';
 import {getFork, setFork} from './forkMap';
+import {queuedKeyFor, useQueuedPromptsStore} from './queuedPrompts';
 import {useProfilesStore} from './profiles';
 import {useSessionsStore} from './sessions';
 import {
@@ -269,7 +270,13 @@ interface ChatStore {
     storedId: string,
     reason: string,
   ): void;
-  sendPrompt(sid: string, text: string): Promise<void>;
+  /**
+   * 发送一条 prompt。`opts.queued=true` 是「客户端排队排水」语义：忙态下
+   * 服务端只入队不打断（见 docs/protocol.md §2 `prompt.submit`）。
+   * 返回值 = **本条是否已被尝试发出**（排队引擎据此决定出队）：false 表示
+   * 什么都没提交（空文本 / 自愈失败），条目可安全重试。
+   */
+  sendPrompt(sid: string, text: string, opts?: {queued?: boolean}): Promise<boolean>;
   /**
    * 斜杠命令执行（dashboard 同款客户端流水线）：slash.exec 主通道，
    * 失败回退 command.dispatch（skill/send 型转 prompt.submit）。
@@ -441,6 +448,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
     text: string,
     images: {path: string}[],
     clearAttachments: boolean,
+    queued = false,
   ) {
     const agg = aggFor(sid);
     agg.appendUserMessage(text, images);
@@ -450,7 +458,13 @@ export const useChatStore = create<ChatStore>((set, get) => {
       sid,
       clearAttachments ? {busy: true, pendingAttachments: []} : {busy: true},
     );
-    await getRpc().call('prompt.submit', {session_id: sid, text});
+    await getRpc().call('prompt.submit', {
+      session_id: sid,
+      text,
+      // 客户端排队排水契约：忙态下服务端只入队、不把这条打成当前轮的
+      // correction/interrupt（空闲时该参数被忽略）——见 docs/protocol.md
+      ...(queued ? {queued: true} : null),
+    });
     // 提交成功 = 会话在服务端已真实存在（首条 prompt 才落库），此后 resume
     // 有库行可走，「重建会话」自愈分支不再允许。busy 显式保持 true：
     // snapshot 会从聚合器重算（此刻流式事件还没到，重算会闪断），原有语义
@@ -558,8 +572,19 @@ export const useChatStore = create<ChatStore>((set, get) => {
           title: st.title,
           pendingFirstSubmit: true,
         });
-        // 草稿随迁（页面经 migratedTo 换路由后输入框不丢）
+        // 草稿随迁（页面经 migratedTo 换路由后输入框不丢）；排队消息按会话
+        // 持久身份存，重建后持久身份换了（新库行）→ 整队搬到新 key
         useDraftStore.getState().migrateDraft(sid, liveSid);
+        useQueuedPromptsStore
+          .getState()
+          .migrateQueue(
+            queuedKeyFor(st.profile, sid, storedId),
+            queuedKeyFor(
+              st.profile,
+              liveSid,
+              created.stored_session_id ?? liveSid,
+            ),
+          );
         set(s => ({
           bySession: {
             ...s.bySession,
@@ -591,13 +616,17 @@ export const useChatStore = create<ChatStore>((set, get) => {
   /**
    * 普通 prompt 提交：发送本体 + live sid 失效时的一次性自愈重发。
    * 自愈只在 4007（会话不存在）时触发，且只重试一次，不循环。
+   * 返回「本条是否已被尝试发出」（排队引擎据此判断是否出队）：自愈没能恢复
+   * 会话时返回 false——那时用户气泡都还没回显，条目可安全重试。
    */
   async function submitPlain(
     sid: string,
     text: string,
     images: {path: string}[] = [],
     clearAttachments = false,
-  ) {
+    opts?: {queued?: boolean},
+  ): Promise<boolean> {
+    const queued = opts?.queued === true;
     // 发送前留存待发横条：自愈后旧会话的服务端图片队列已销毁，
     // 要按 localUri 向新会话重传
     const pendingAtts =
@@ -611,27 +640,31 @@ export const useChatStore = create<ChatStore>((set, get) => {
           message: t('chat.sendFailed', {message: healed.reason}),
         });
         snapshot(sid, {busy: false});
-        return;
+        return false;
       }
-      await doSubmit(healed.sid, text, healed.images, true);
-      return;
+      await doSubmit(healed.sid, text, healed.images, true, queued);
+      return true;
     }
     try {
-      await doSubmit(sid, text, images, clearAttachments);
+      await doSubmit(sid, text, images, clearAttachments, queued);
+      return true;
     } catch (e) {
       let failMsg = e instanceof Error ? e.message : String(e);
       if (isSessionMissingError(e)) {
         const healed = await recoverLiveSession(sid, pendingAtts);
         if (healed.ok) {
-          await doSubmit(healed.sid, text, healed.images, true);
-          return;
+          await doSubmit(healed.sid, text, healed.images, true, queued);
+          return true;
         }
         failMsg = healed.reason;
       }
+      // 已尝试（用户气泡已回显）：按「已消费」返回，只留错误红条，不自动重发
+      // ——自动重发会再回显一条气泡，与本端手动发送失败的 UX 也不一致
       aggFor(sid).applyEvent('error', {
         message: t('chat.sendFailed', {message: failMsg}),
       });
       snapshot(sid, {busy: false});
+      return true;
     }
   }
 
@@ -716,6 +749,7 @@ export const useChatStore = create<ChatStore>((set, get) => {
         aggregators.delete(oldSid);
         // 草稿随迁：页面经 migratedTo 换路由后输入框内容不丢（replace 重建
         // 页面，组件内 state 会清零——2026-10-06 用户报障根因）
+        // 注：排队消息按「profile:持久化 id」存，换 live sid 不动它
         useDraftStore.getState().migrateDraft(oldSid, liveSid);
         set(s => {
           const next = {...s.bySession};
@@ -902,30 +936,32 @@ export const useChatStore = create<ChatStore>((set, get) => {
       }
     },
 
-    async sendPrompt(sid, text) {
+    async sendPrompt(sid, text, opts) {
       const trimmed = text.trim();
       const pending =
         get().bySession[sid]?.pendingAttachments ?? EMPTY.pendingAttachments;
       // 有待发图片时允许空文本（服务端会补 "What do you see in this image?"）
       if (!trimmed && pending.length === 0) {
-        return;
+        return false;
       }
       // foreign 只读会话：首次发送先派生到当前 profile，再在派生会话里发
       if (get().bySession[sid]?.foreign) {
         await get().forkForeignAndSend(sid, trimmed);
-        return;
+        return true;
       }
       // 斜杠命令分流：prompt.submit 不拦截 "/" 文本（会当普通消息直达模型），
       // 走 dashboard 同款客户端执行流水线；命令不是消息，不回显气泡、不动待发横条。
       if (looksLikeSlashCommand(trimmed)) {
+        // 命令流水线的失败以系统灰条呈现（不重跑，防副作用重复执行）
         await get().sendSlashCommand(sid, trimmed);
-        return;
+        return true;
       }
-      await submitPlain(
+      return submitPlain(
         sid,
         trimmed,
         pending.map(a => ({path: a.path})),
         true,
+        opts,
       );
     },
 
@@ -971,7 +1007,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
           },
           // skill/send 型指令的最终落点仍是普通 prompt；此处不再做斜杠
           // 判断——dispatch 下发的 message 恰以 / 开头时会无限递归。
-          send: msg => submitPlain(sid, msg),
+          send: async msg => {
+            await submitPlain(sid, msg);
+          },
         },
       });
       // /title 由服务端 slash worker 直接写库（回显 "Session title set: …"），
@@ -1137,7 +1175,8 @@ export const useChatStore = create<ChatStore>((set, get) => {
           running,
           inflight,
         });
-        // 草稿随迁（页面经 migratedTo 换路由后输入框不丢）
+        // 草稿随迁（页面经 migratedTo 换路由后输入框不丢）；foreign 只读视图
+        // 不存在「输出中」状态，排队 store 里不会有它的条目，无需随迁
         useDraftStore.getState().migrateDraft(sid, liveSid);
         set(s => ({
           bySession: {

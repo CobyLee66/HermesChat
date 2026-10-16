@@ -31,6 +31,8 @@ import {initConnectionEngine} from './src/ssh/SshManager';
 import {initWebDirectEngine} from './src/ssh/webDirect';
 import {useConnectionStore} from './src/store/connection';
 import {useDraftStore} from './src/store/drafts';
+import {useQueuedPromptsStore} from './src/store/queuedPrompts';
+import {initQueuedPromptsEngine} from './src/store/queuedPromptsEngine';
 import {useSessionsStore} from './src/store/sessions';
 import type {RootStackParamList} from './src/navigation/types';
 
@@ -61,6 +63,10 @@ function App() {
     useSessionsStore.getState().loadSortModePreference();
     // 输入框草稿恢复（进会话前完成，避免已输入文本闪空）
     void useDraftStore.getState().loadPersisted();
+    // 排队消息恢复 + 排水引擎装配（断线/杀进程/重进会话都不丢；连接就绪、
+    // 会话空闲等外部事件触发逐条补发）
+    useQueuedPromptsStore.getState().loadPersisted();
+    initQueuedPromptsEngine();
     // web 构建按环境装配：Electron 桌面桥（ssh2 隧道）或浏览器直连引擎
     if (Platform.OS === 'web') {
       if (hasDesktopBridge()) {

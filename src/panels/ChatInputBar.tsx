@@ -1,6 +1,6 @@
 /**
- * ChatInputBar — 聊天底部操作区面板：busy 状态条、待发附件横条、输入栏
- * （+按钮 / 多行输入 / 发送或中断）、附件面板、上传中提示。
+ * ChatInputBar — 聊天底部操作区面板：busy 状态条、待发附件横条、排队消息条、
+ * 输入栏（+按钮 / 多行输入 / 发送 或 排队+中断纵向按钮列）、附件面板、上传中提示。
  * 手机 ChatScreen 与桌面聊天列共用。输入内容受控于父级（斜杠补全派生）。
  */
 
@@ -30,9 +30,20 @@ import {VoiceButton} from '../components/VoiceButton';
 import {useT} from '../i18n';
 import {useChatStore} from '../store/chat';
 import {useConnectionStore} from '../store/connection';
+import {
+  queuedKeyFor,
+  useQueuedPromptsStore,
+  type QueuedPrompt,
+} from '../store/queuedPrompts';
+import {forceFlushQueued} from '../store/queuedPromptsEngine';
 import {alertError} from '../utils/alert';
 import {isKawaiiHint} from '../utils/busyTicker';
 import {useKeyboardHeight} from '../utils/useKeyboardHeight';
+
+/** 中断后补发队首排队消息的延迟：先让「busy 翻转」的常规排水路径赢 */
+const INTERRUPT_FLUSH_DELAY_MS = 500;
+/** 无排队条目的稳定空引用（禁止内联新建对象/数组，D009） */
+const EMPTY_QUEUED: QueuedPrompt[] = [];
 
 /** 附件来源注入：桌面传对话框实现，缺省用手机 documents-picker 流程。 */
 export interface ChatAttachmentPickers {
@@ -194,6 +205,30 @@ export function ChatInputBar({
     [input, onAttachPanelChange, onInputChange],
   );
 
+  /** 中断后补发的定时器（卸载时清掉，避免悬挂） */
+  const interruptFlushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (interruptFlushTimer.current !== null) {
+        clearTimeout(interruptFlushTimer.current);
+      }
+    },
+    [],
+  );
+
+  /** 中断当前 turn；随后（延迟一拍）把排队消息的队首补发出去 */
+  const onInterrupt = useCallback(() => {
+    interrupt(sessionId).then(() => {
+      if (interruptFlushTimer.current !== null) {
+        clearTimeout(interruptFlushTimer.current);
+      }
+      interruptFlushTimer.current = setTimeout(() => {
+        interruptFlushTimer.current = null;
+        forceFlushQueued(sessionId);
+      }, INTERRUPT_FLUSH_DELAY_MS);
+    });
+  }, [interrupt, sessionId]);
+
   return (
     // 底部操作区整体包一层：白底 + 底部安全区/输入法高度垫高
     <View style={[styles.bottomBar, {paddingBottom: bottomPad}]}>
@@ -234,6 +269,8 @@ export function ChatInputBar({
           ))}
         </ScrollView>
       ) : null}
+      {/* 已排队尚未实际发送的消息（聊天记录底部 / 输入框上方，逐条可取消） */}
+      <QueuedPromptStrip sessionId={sessionId} />
       <View style={styles.inputBar}>
         <TouchableOpacity
           style={styles.plusBtn}
@@ -264,12 +301,26 @@ export function ChatInputBar({
           editable={connState === 'ready'}
         />
         {busy ? (
-          <TouchableOpacity
-            style={styles.interruptBtn}
-            onPress={() => interrupt(sessionId)}
-            activeOpacity={0.8}>
-            <Text style={styles.interruptText}>{t('input.interrupt')}</Text>
-          </TouchableOpacity>
+          // 动作按钮纵向堆叠（排队在中断正上方）：移动端窄屏下不挤占输入框
+          // 的横向空间；排队按钮仅在输入框有内容时出现
+          <View style={styles.actionColumn}>
+            {input.trim() ? (
+              <TouchableOpacity
+                style={styles.queueBtn}
+                onPress={onSend}
+                activeOpacity={0.8}
+                accessibilityLabel={t('input.queue')}>
+                <Text style={styles.queueBtnText}>{t('input.queue')}</Text>
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity
+              style={styles.interruptBtn}
+              onPress={onInterrupt}
+              activeOpacity={0.8}
+              accessibilityLabel={t('input.interrupt')}>
+              <Text style={styles.interruptText}>{t('input.interrupt')}</Text>
+            </TouchableOpacity>
+          </View>
         ) : (
           <TouchableOpacity
             style={[
@@ -344,6 +395,51 @@ function appendToInput(
 ): void {
   const base = current.trimEnd();
   onInputChange(base ? `${base} ${text}` : text);
+}
+
+/**
+ * 排队消息条 — 显示本会话「已排队、尚未实际发送」的消息内容（聊天记录底部、
+ * 输入框上方）。数据来自 queuedPrompts store（按 profile + 持久化会话 id 存，
+ * 跨重进/杀进程存活），每条可单独取消（本地出队，此刻还没有任何服务端状态
+ * 需要撤销）。
+ */
+function QueuedPromptStrip({sessionId}: {sessionId: string}) {
+  const t = useT();
+  // key 组成与 enqueue 同源（两个 string 选择器，引用稳定）
+  const profile = useChatStore(s => s.bySession[sessionId]?.profile ?? '');
+  const storedId = useChatStore(
+    s => s.bySession[sessionId]?.storedSessionId ?? '',
+  );
+  const key = queuedKeyFor(profile, sessionId, storedId);
+  const queued = useQueuedPromptsStore(s => s.queues[key] ?? EMPTY_QUEUED);
+  const removeQueued = useQueuedPromptsStore(s => s.removeQueued);
+  if (queued.length === 0) {
+    return null;
+  }
+  return (
+    <ScrollView
+      testID="queued-strip"
+      style={styles.queueStrip}
+      contentContainerStyle={styles.queueStripContent}
+      keyboardShouldPersistTaps="handled">
+      {queued.map(item => (
+        <View key={item.id} style={styles.queueRow}>
+          <Text style={styles.queueBadge}>{t('input.queuedBadge')}</Text>
+          <Text style={styles.queueRowText} numberOfLines={2}>
+            {item.text}
+          </Text>
+          <TouchableOpacity
+            style={styles.queueRemove}
+            hitSlop={8}
+            activeOpacity={0.7}
+            accessibilityLabel={t('input.queueRemove')}
+            onPress={() => removeQueued(item.id)}>
+            <Text style={styles.queueRemoveText}>×</Text>
+          </TouchableOpacity>
+        </View>
+      ))}
+    </ScrollView>
+  );
 }
 
 function fallbackImageName(uri: string, mimeType: string | null, idx: number): string {
@@ -482,8 +578,24 @@ const styles = StyleSheet.create({
   },
   sendBtnDisabled: {opacity: 0.4},
   sendText: {color: '#FFF', fontSize: 15, fontWeight: '600'},
-  interruptBtn: {
+  /** busy 时的动作按钮列：排队在上、中断在下（纵向堆叠省横向空间） */
+  actionColumn: {
+    flexDirection: 'column',
     marginLeft: 8,
+    alignItems: 'stretch',
+  },
+  queueBtn: {
+    backgroundColor: Colors.card,
+    borderWidth: 1,
+    borderColor: Colors.accent,
+    borderRadius: 19,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    marginBottom: 6,
+    alignItems: 'center',
+  },
+  queueBtnText: {color: Colors.accentDark, fontSize: 15, fontWeight: '600'},
+  interruptBtn: {
     backgroundColor: '#FFF',
     borderWidth: 1,
     borderColor: Colors.danger,
@@ -491,8 +603,42 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 9,
     justifyContent: 'center',
+    alignItems: 'center',
   },
   interruptText: {color: Colors.danger, fontSize: 15, fontWeight: '600'},
+  /** 排队消息条（聊天记录底部）：限高滚动，超过三行左右可上下翻 */
+  queueStrip: {
+    maxHeight: 132,
+    backgroundColor: Colors.card,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
+  },
+  queueStripContent: {paddingHorizontal: 10, paddingVertical: 6},
+  queueRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.fillSubtle,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    marginVertical: 2,
+  },
+  queueBadge: {
+    fontSize: 11,
+    color: Colors.accentDark,
+    marginRight: 6,
+  },
+  queueRowText: {flex: 1, fontSize: 13, color: Colors.textSecondary},
+  queueRemove: {
+    width: 20,
+    height: 20,
+    marginLeft: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  queueRemoveText: {fontSize: 15, color: Colors.textSecondary, lineHeight: 18},
   attachPanel: {
     flexDirection: 'row',
     backgroundColor: Colors.card,

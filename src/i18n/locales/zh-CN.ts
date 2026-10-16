@@ -299,6 +299,10 @@ export const zhCN: Record<MessageKey, string> = {
   'input.sendFile': '发送文件',
   'input.interrupt': '中断',
   'input.send': '发送',
+  'input.queue': '排队',
+  'input.queuedBadge': '排队中',
+  'input.queueRemove': '取消排队',
+  'input.queueFull': '排队消息过多，请先发送或取消',
   'input.attaching': '附件上传中…',
 
   // ── 会话列表 / 会话流程 ──

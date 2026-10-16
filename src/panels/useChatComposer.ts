@@ -3,23 +3,37 @@
  * 手机 ChatScreen 与桌面 ChatPane 共用；/model 特判与补全键盘导航也在这里。
  * 输入文本存 drafts store（按会话 key、AsyncStorage 持久化）：重连 sid 迁移
  * （navigation.replace 重建页面）、返回重进、进程被杀重启均不丢。
+ * AI 输出中（busy）时发送动作改为「排队」（queuedPrompts store），等当前
+ * 流程结束或用户点中断后由排水引擎逐条送出。
  */
 
 import {useCallback} from 'react';
 
+import {t} from '../i18n';
 import {useChatStore} from '../store/chat';
 import {useConnectionStore} from '../store/connection';
 import {useDraftStore} from '../store/drafts';
+import {queuedKeyFor, useQueuedPromptsStore} from '../store/queuedPrompts';
+import {alertError} from '../utils/alert';
 import {useSlashCompletion} from '../utils/useSlashCompletion';
 
 export function useChatComposer(
   sessionId: string,
   onOpenModelPicker: () => void,
-  /** 消息真正发出后的回调（裸 /model 早退不触发）：发送即回底恢复跟随 */
+  /** 消息真正发出/入队后的回调（裸 /model 早退不触发）：发送即回底恢复跟随 */
   onAfterSend?: () => void,
 ) {
   const connState = useConnectionStore(s => s.state);
   const sendPrompt = useChatStore(s => s.sendPrompt);
+  /** AI 输出中（boolean 原始类型选择器，引用稳定） */
+  const busy = useChatStore(s => s.bySession[sessionId]?.busy ?? false);
+  // 排队 key 的组成（两个 string 选择器，引用稳定）：profile + 持久化会话 id
+  // ——live sid 会在断线回收后变，排队内容要跨 App 退出重进存活
+  const profile = useChatStore(s => s.bySession[sessionId]?.profile ?? '');
+  const storedId = useChatStore(
+    s => s.bySession[sessionId]?.storedSessionId ?? '',
+  );
+  const enqueue = useQueuedPromptsStore(s => s.enqueue);
 
   // 草稿按会话 key 存（string 原始类型选择器，引用稳定）；页面重建/进程重启
   // 后由 store 恢复，不再随组件 state 丢失
@@ -72,10 +86,38 @@ export function useChatComposer(
       onOpenModelPicker();
       return;
     }
+    // AI 还在输出：默认发送动作改成「排队」——不打断当前 turn，等流程结束
+    // （或用户点中断）由排水引擎带 queued 语义逐条送出
+    if (busy) {
+      if (!input.trim()) {
+        // busy 且没有文本：什么都不发（待发图片仍留在服务端队列里，随下一次
+        // 真实提交进上下文）——避免空文本 prompt 去打断/改写当前轮
+        return;
+      }
+      if (!enqueue(queuedKeyFor(profile, sessionId, storedId), input)) {
+        // 单会话排队上限：提示且**保留输入**，不丢用户敲的内容
+        alertError(t('input.queueFull'), '');
+        return;
+      }
+      setInput('');
+      onAfterSend?.();
+      return;
+    }
     sendPrompt(sessionId, input);
     setInput('');
     onAfterSend?.();
-  }, [input, setInput, sendPrompt, sessionId, onOpenModelPicker, onAfterSend]);
+  }, [
+    busy,
+    enqueue,
+    input,
+    setInput,
+    sendPrompt,
+    sessionId,
+    profile,
+    storedId,
+    onOpenModelPicker,
+    onAfterSend,
+  ]);
 
   return {
     input,

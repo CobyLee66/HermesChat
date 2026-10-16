@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Messages typed while a reply is still streaming can now be queued instead of
+  interrupting the current turn: a "Queue" button sits above the interrupt button
+  (stacked vertically so the input keeps its full width on narrow screens), and
+  the input's default send action queues while the AI is busy. Queued messages
+  are shown above the input box with a per-message cancel control, are sent one
+  by one (with the server's `queued` drain semantics) as soon as the current turn
+  ends or the user taps Interrupt, and survive disconnects and app restarts
+  (persisted per profile + durable session id).
+
 ## [0.2.2] - 2026-10-16
 
 ### Added

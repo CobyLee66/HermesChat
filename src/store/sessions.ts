@@ -37,6 +37,7 @@ import {
 import {useChatStore} from './chat';
 import {useDraftStore} from './drafts';
 import {useProfilesStore} from './profiles';
+import {useQueuedPromptsStore} from './queuedPrompts';
 
 interface SessionsStore {
   /**
@@ -317,8 +318,9 @@ export const useSessionsStore = create<SessionsStore>((set, get) => ({
         [profile]: (s.byProfile[profile] ?? []).filter(r => r.id !== storedId),
       },
     }));
-    // 已删会话的输入框草稿一并清理（live/stored 两个 key 都可能挂过聊天页）
+    // 已删会话的输入框草稿与排队消息一并清理（live/stored 两个 key 都可能挂过聊天页）
     useDraftStore.getState().pruneDrafts([sessionId, storedId]);
+    useQueuedPromptsStore.getState().pruneQueues(profile, [sessionId, storedId]);
     return true;
   },
 }));

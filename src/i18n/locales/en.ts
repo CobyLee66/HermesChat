@@ -327,6 +327,10 @@ export const en = {
   'input.sendFile': 'Send file',
   'input.interrupt': 'Interrupt',
   'input.send': 'Send',
+  'input.queue': 'Queue',
+  'input.queuedBadge': 'Queued',
+  'input.queueRemove': 'Remove from queue',
+  'input.queueFull': 'Too many queued messages; send or remove some first',
   'input.attaching': 'Uploading attachment…',
 
   // ── 会话列表 / 会话流程 ──
