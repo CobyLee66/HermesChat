@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Background-process notifications injected by the server no longer render as
+  messages sent by the user. They are shown as centered timeline notices with
+  the notification headline, expandable to the full command/output text, both in
+  the chat timeline and in the cron run detail view. Cron job prompts and skill
+  injections (which share the `[IMPORTANT: ` envelope) keep their user bubbles.
 - Android: fixed a crash when the main activity was recreated while returning
   from the background. `MainActivity` now follows the required
   react-native-screens setup (`super.onCreate(null)`), preventing the OS from

@@ -3,6 +3,7 @@
  * - role 过滤：tool 等行不进只读视图
  * - display_kind='hidden' 跳过；压缩摘要（display_content）转 system 灰条
  * - content JSON parts 数组拍平（coerceContentText 复用）
+ * - 进程通知行（无 display_kind）转 system 灰条、保留全文
  * - 空文本跳过、timestamp 透传
  */
 
@@ -66,5 +67,22 @@ describe('projectRunMessages', () => {
   it('rows 为 null/undefined 时返回空数组', () => {
     expect(projectRunMessages(null as unknown as RawSessionMessageRow[])).toEqual([]);
     expect(projectRunMessages(undefined as unknown as RawSessionMessageRow[])).toEqual([]);
+  });
+
+  it('进程通知行（无 display_kind 的注入 prompt）投影为 system 灰条并保留全文', () => {
+    const notify =
+      '[IMPORTANT: Background process proc_deadbeef1234 completed normally ' +
+      '(exit code 0).\nCommand: npm run build\nOutput:\nbuild ok]';
+    const cronPrompt =
+      '[IMPORTANT: You are running as a scheduled cron job. DELIVERY: Your ' +
+      'final response will be automatically delivered.]';
+    const out = projectRunMessages([
+      {role: 'user', content: notify},
+      {role: 'user', content: cronPrompt},
+      {role: 'assistant', content: '收到'},
+    ]);
+    expect(out[0]).toMatchObject({role: 'system', text: notify});
+    expect(out[1]).toMatchObject({role: 'user', text: cronPrompt});
+    expect(out[2]).toMatchObject({role: 'assistant', text: '收到'});
   });
 });

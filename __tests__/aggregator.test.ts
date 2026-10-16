@@ -744,6 +744,142 @@ describe('TimelineAggregator display_kind 标记行', () => {
   });
 });
 
+describe('TimelineAggregator 进程通知（无 display_kind 的注入行）', () => {
+  /**
+   * 服务端 tools/process_registry.py format_process_notification 的完成回执
+   * 形态（多行）。TUI poller 当普通 prompt 提交、落库无 display_kind——
+   * 客户端只能按正文前缀识别（utils/processNotification.ts）。
+   */
+  const NOTIFY_TEXT =
+    '[IMPORTANT: Background process proc_deadbeef1234 completed normally (exit code 0).\n' +
+    'Command: npm run build\n' +
+    'Output:\nbuild ok]';
+  const HEADLINE =
+    'Background process proc_deadbeef1234 completed normally (exit code 0).';
+  /** cron 任务提示词与 skill 注入：同 `[IMPORTANT: ` 信封前缀，必须保持用户气泡 */
+  const CRON_PROMPT =
+    '[IMPORTANT: You are running as a scheduled cron job. DELIVERY: Your final ' +
+    'response will be automatically delivered.\n\n任务：检查文件冲突]';
+  const SKILL_PROMPT =
+    '[IMPORTANT: The user has invoked the "demo-skill" skill, indicating they ' +
+    'want you to follow its instructions.\n\nskill 正文]';
+
+  function markerItems(agg: TimelineAggregator): SystemEvent[] {
+    return agg
+      .getItems()
+      .filter(i => i.kind === 'system' && i.eventKind === 'marker') as SystemEvent[];
+  }
+
+  function userItems(agg: TimelineAggregator) {
+    return agg.getItems().filter(i => i.kind === 'user');
+  }
+
+  it('hydrate：无 display_kind 的完成回执 → 灰条（首行原文标签 + 展开全文），无用户气泡', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([{role: 'user', text: NOTIFY_TEXT}]);
+    const markers = markerItems(agg);
+    expect(markers).toHaveLength(1);
+    expect(markers[0].text).toBe(HEADLINE);
+    expect(markers[0].fullText).toBe(NOTIFY_TEXT);
+    expect(userItems(agg)).toHaveLength(0);
+  });
+
+  it('hydrate：watch_match / watch_disabled / watch 熔断三形态均识别', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([
+      {
+        role: 'user',
+        text:
+          '[IMPORTANT: Background process proc_cafe0001 matched watch pattern ' +
+          '"ERROR".\nCommand: tail -f app.log\nMatched output:\nERROR boom]',
+      },
+      {
+        role: 'user',
+        text:
+          '[IMPORTANT: Watch patterns disabled for process proc_cafe0002 — ' +
+          '5 consecutive rate-limit windows triggered. Falling back to ' +
+          'notify_on_complete semantics.]',
+      },
+      {
+        role: 'user',
+        text:
+          '[IMPORTANT: Watch-pattern overflow: >30 notifications in 60s across ' +
+          'all processes. Suppressing further watch_match events for 300s.]',
+      },
+    ]);
+    const markers = markerItems(agg);
+    expect(markers).toHaveLength(3);
+    expect(markers[0].text).toBe(
+      'Background process proc_cafe0001 matched watch pattern "ERROR".',
+    );
+    // 单行通知：剥掉收尾 `]`；原文约 150 字符 → 标签按 120 字符截断
+    expect(markers[1].text.startsWith('Watch patterns disabled for process proc_cafe0002')).toBe(
+      true,
+    );
+    expect(markers[1].text.endsWith(']')).toBe(false);
+    expect(markers[1].text.endsWith('…')).toBe(true);
+    expect(markers[1].text.length).toBe(121);
+    expect(markers[1].fullText?.endsWith('semantics.]')).toBe(true);
+    expect(markers[2].text.startsWith('Watch-pattern overflow:')).toBe(true);
+    expect(markers[2].text.endsWith(']')).toBe(false);
+    expect(userItems(agg)).toHaveLength(0);
+  });
+
+  it('hydrate：cron 提示词 / skill 注入 / 中部提及 → 仍是用户气泡（宽口径反例）', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([
+      {role: 'user', text: CRON_PROMPT},
+      {role: 'user', text: SKILL_PROMPT},
+      {role: 'user', text: `这行是什么意思？${NOTIFY_TEXT}`},
+      {role: 'user', text: '普通消息'},
+    ]);
+    expect(markerItems(agg)).toHaveLength(0);
+    expect(userItems(agg)).toHaveLength(4);
+  });
+
+  it('hydrate：display_kind 声明优先——internal_notification 仍走既有 i18n 标签', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([
+      {role: 'user', text: NOTIFY_TEXT, display_kind: 'internal_notification'},
+    ]);
+    const markers = markerItems(agg);
+    expect(markers).toHaveLength(1);
+    expect(markers[0].text).toBe(t('chat.marker.internalNotification'));
+    expect(markers[0].fullText).toBe(NOTIFY_TEXT);
+  });
+
+  it('restoreLiveTail：inflight.user 是进程通知时不补用户气泡，补 marker 灰条', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([]);
+    agg.restoreLiveTail(true, {
+      user: NOTIFY_TEXT,
+      assistant: '收到，这条回执我早前已经消费了',
+      streaming: true,
+    });
+    expect(userItems(agg)).toHaveLength(0);
+    const markers = markerItems(agg);
+    expect(markers).toHaveLength(1);
+    expect(markers[0].text).toBe(HEADLINE);
+    expect(markers[0].fullText).toBe(NOTIFY_TEXT);
+    // 流式尾部照常重建
+    const items = agg.getItems();
+    const tail = items[items.length - 1] as AssistantMsg;
+    expect(tail.kind).toBe('assistant');
+    expect(tail.streaming).toBe(true);
+  });
+
+  it('restoreLiveTail：历史已含同款通知行时不重复补灰条', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([{role: 'user', text: NOTIFY_TEXT}]);
+    agg.restoreLiveTail(true, {
+      user: NOTIFY_TEXT,
+      assistant: '处理中',
+      streaming: true,
+    });
+    expect(markerItems(agg)).toHaveLength(1);
+  });
+});
+
 describe('TimelineAggregator 本地回显', () => {
   it('appendUserMessage 追加用户气泡', () => {
     const agg = new TimelineAggregator();

@@ -6,6 +6,10 @@
 import {diffFromResult} from './diffText';
 import {parseMessageText} from './references';
 import {t} from '../i18n';
+import {
+  isProcessNotificationText,
+  processNotificationHeadline,
+} from '../utils/processNotification';
 import type {
   ApprovalCardItem,
   ApprovalRequestPayload,
@@ -117,6 +121,15 @@ export function classifyMarkerMessage(
     case 'auto_continue':
       return {label: t('chat.marker.autoContinue')};
     default:
+      // 无 display_kind（或未知 kind）的后台进程通知：服务端 TUI poller 把
+      // 这类通知当普通 prompt 提交，落库行不带 display_kind（只有委派通知
+      // 打标），只能按正文前缀家族识别。形状白名单与宽口径反例见
+      // utils/processNotification.ts。
+      // 放 default 而非最前：声明式 display_kind 优先（D058 语义），形状嗅探
+      // 只兜底无声明行；放这里同时让「未来服务端新增未知 kind」不再退回气泡。
+      if (isProcessNotificationText(text)) {
+        return {label: processNotificationHeadline(text), fullText: text};
+      }
       return null;
   }
 }

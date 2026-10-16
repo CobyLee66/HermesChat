@@ -16,6 +16,7 @@
 import {cronFetch} from './cron';
 import type {ProjectedMessage} from './types';
 import {coerceContentText} from '../ssh/remoteHistory';
+import {isProcessNotificationText} from '../utils/processNotification';
 
 /** GET /api/sessions/{id}/messages 返回的原始行（只声明用到的字段）。 */
 export interface RawSessionMessageRow {
@@ -60,6 +61,11 @@ export function getSessionMessages(
  * - display_kind='hidden' 跳过；压缩摘要行取 display_content 作 system 文本；
  * - content 可能是 JSON parts 数组（视觉 turn），经 coerceContentText 拍平；
  * - 空文本跳过。
+ *
+ * ⚠ 进程通知行（`[IMPORTANT: Background process …]`，服务端注入时是普通
+ * user 行、无 display_kind）在本面板投影为 **system** 行——否则只读回放里
+ * 会显示成「用户发的消息」（聊天时间线同因，见 utils/processNotification.ts）。
+ * 这里保留全文（本面板灰条没有聊天那样的展开层，压成首行会丢 Command/Output）。
  */
 export function projectRunMessages(
   rows: RawSessionMessageRow[],
@@ -81,8 +87,12 @@ export function projectRunMessages(
       continue;
     }
     const ts = Number(row.timestamp);
+    // 进程通知行（无 display_kind 的注入 prompt）转 system 灰条，其余按原 role
+    const asSystem =
+      isCompactionSummary ||
+      (role === 'user' && isProcessNotificationText(text));
     out.push({
-      role: isCompactionSummary ? 'system' : role,
+      role: asSystem ? 'system' : role,
       text,
       ...(Number.isFinite(ts) && ts > 0 ? {timestamp: ts} : null),
     });
