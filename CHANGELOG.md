@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-10-17
+
 ### Added
 
 - Messages typed while a reply is still streaming can now be queued instead of
@@ -17,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   by one (with the server's `queued` drain semantics) as soon as the current turn
   ends or the user taps Interrupt, and survive disconnects and app restarts
   (persisted per profile + durable session id).
+
+### Fixed
+
+- Drafts in the message box are now stored under the session's durable identity
+  (profile + stored session id) instead of the live session id. The gateway
+  recycles idle live sessions (orphan reap / idle TTL / restart), and
+  `session.resume` then returns a *new* live id — with the old key the draft was
+  read back from a different entry and appeared lost after restarting the app.
+- The streaming scroll-follow smoke was still clicking the pre-i18n label for the
+  jump-to-bottom button ("↓ 回到底部"), so its first scenario had been failing
+  since the i18n migration renamed it.
 
 ## [0.2.2] - 2026-10-16
 
