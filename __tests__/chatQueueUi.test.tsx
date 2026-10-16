@@ -16,9 +16,9 @@ import {useConnectionStore} from '../src/store/connection';
 import {_resetDraftsForTests} from '../src/store/drafts';
 import {
   _resetQueuedPromptsForTests,
-  queuedKeyFor,
   useQueuedPromptsStore,
 } from '../src/store/queuedPrompts';
+import {sessionIdentityFor} from '../src/store/sessionIdentity';
 
 jest.mock('@react-native-documents/picker', () => ({
   pick: jest.fn(),
@@ -41,7 +41,7 @@ function attachIdle(sid = 's1') {
 }
 
 /** 排队 key = 会话跨重启身份（profile + 持久化会话 id），与组件内解析同源 */
-const KEY = queuedKeyFor('main', 's1', 'stored-s1');
+const KEY = sessionIdentityFor('main', 's1', 'stored-s1');
 
 function setBusy(sid: string, busy: boolean) {
   useChatStore.setState(s => ({

@@ -9,9 +9,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   _flushQueuedPromptsForTests,
   _resetQueuedPromptsForTests,
-  queuedKeyFor,
   useQueuedPromptsStore,
 } from '../src/store/queuedPrompts';
+import {sessionIdentityFor} from '../src/store/sessionIdentity';
 
 const STORAGE_KEY = 'hermes.queuedPrompts.v1';
 
@@ -113,22 +113,22 @@ describe('queuedPrompts store 存取', () => {
 
   it('pruneQueues：按 profile + 候选 id 批量清理（删除会话场景）', () => {
     const {enqueue, pruneQueues} = useQueuedPromptsStore.getState();
-    enqueue(queuedKeyFor('main', 'live1', 'stored1'), 'x');
-    enqueue(queuedKeyFor('main', 'live1b', 'stored1'), 'y');
-    enqueue(queuedKeyFor('main', 'live2', 'stored2'), 'z');
-    enqueue(queuedKeyFor('other', 'live1', 'stored1'), '别的 profile 同 id');
+    enqueue(sessionIdentityFor('main', 'live1', 'stored1'), 'x');
+    enqueue(sessionIdentityFor('main', 'live1b', 'stored1'), 'y');
+    enqueue(sessionIdentityFor('main', 'live2', 'stored2'), 'z');
+    enqueue(sessionIdentityFor('other', 'live1', 'stored1'), '别的 profile 同 id');
     // live + 持久化 id 两个候选都传（页面可能挂过任一形态的 key）
     pruneQueues('main', ['live1', 'stored1']);
     const keys = Object.keys(useQueuedPromptsStore.getState().queues);
-    expect(keys).toEqual([queuedKeyFor('main', 'live2', 'stored2'), queuedKeyFor('other', 'live1', 'stored1')]);
+    expect(keys).toEqual([sessionIdentityFor('main', 'live2', 'stored2'), sessionIdentityFor('other', 'live1', 'stored1')]);
   });
 
   it('queuedKeyFor：key = profile + 持久化 id（缺省退回 live sid）', () => {
-    expect(queuedKeyFor('main', 'live0001', 'stored-1')).toBe('main:stored-1');
-    expect(queuedKeyFor('main', 'live0001')).toBe('main:live0001');
-    expect(queuedKeyFor('main', 'live0001', '')).toBe('main:live0001');
+    expect(sessionIdentityFor('main', 'live0001', 'stored-1')).toBe('main:stored-1');
+    expect(sessionIdentityFor('main', 'live0001')).toBe('main:live0001');
+    expect(sessionIdentityFor('main', 'live0001', '')).toBe('main:live0001');
     // profile 未知时也不塌成空串（避免与其他形态撞 key）
-    expect(queuedKeyFor('', 'live0001', 'stored-1')).toBe('-:stored-1');
+    expect(sessionIdentityFor('', 'live0001', 'stored-1')).toBe('-:stored-1');
   });
 
   it('LRU：超过 200 个会话淘汰最旧触碰，重新触碰可保活', () => {

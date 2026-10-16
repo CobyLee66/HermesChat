@@ -30,11 +30,8 @@ import {VoiceButton} from '../components/VoiceButton';
 import {useT} from '../i18n';
 import {useChatStore} from '../store/chat';
 import {useConnectionStore} from '../store/connection';
-import {
-  queuedKeyFor,
-  useQueuedPromptsStore,
-  type QueuedPrompt,
-} from '../store/queuedPrompts';
+import {useQueuedPromptsStore, type QueuedPrompt} from '../store/queuedPrompts';
+import {sessionIdentityFor} from '../store/sessionIdentity';
 import {forceFlushQueued} from '../store/queuedPromptsEngine';
 import {alertError} from '../utils/alert';
 import {isKawaiiHint} from '../utils/busyTicker';
@@ -410,7 +407,7 @@ function QueuedPromptStrip({sessionId}: {sessionId: string}) {
   const storedId = useChatStore(
     s => s.bySession[sessionId]?.storedSessionId ?? '',
   );
-  const key = queuedKeyFor(profile, sessionId, storedId);
+  const key = sessionIdentityFor(profile, sessionId, storedId);
   const queued = useQueuedPromptsStore(s => s.queues[key] ?? EMPTY_QUEUED);
   const removeQueued = useQueuedPromptsStore(s => s.removeQueued);
   if (queued.length === 0) {

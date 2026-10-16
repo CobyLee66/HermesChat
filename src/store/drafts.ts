@@ -1,13 +1,17 @@
 /**
- * drafts.ts — 聊天输入框草稿（按会话 key 存，AsyncStorage 持久化）。
+ * drafts.ts — 聊天输入框草稿（按「会话跨重启身份」存，AsyncStorage 持久化）。
  *
  * 背景：输入框原先是 useChatComposer 里的组件内 useState，以下路径都会清零——
  * 重连 resume 后 live sid 变化触发 migratedTo → navigation.replace 重建页面、
  * 返回列表再进、切后台进程被杀。草稿因此提升为独立 store：
  * - 不放 chat store 的 bySession：attach/reattachAfterResume 的投影重建会整体
  *   覆盖该 key（这正是原丢失根因之一），独立 store 天然免疫；
- * - 会话 key 迁移（resume 换 sid / 自愈重建 / foreign 派生）由调用方调
- *   migrateDraft 把草稿搬到新 key，页面跟随迁移后输入框内容仍在；
+ * - key 用 `{profile}:{持久化会话 id}`（`sessionIdentityFor`）而**不是 live sid**
+ *   （2026-10-17 修订）：live sid 在 WS 断开超宽限被孤儿回收/闲置 TTL/网关重启
+ *   后会换，用 live sid 当 key 时「App 退出 → 重进会话」读的是另一个 key，
+ *   草稿等于丢了（D060 的复验路径③「杀进程重启后草稿仍在」因此只在 resume
+ *   恰好复用同一 live sid 时成立、是假阳性）。持久化身份全程不变，无需随迁；
+ *   只有「会话重建」（自愈时新建库行，持久身份真的变了）才调 migrateDraft 搬 key；
  * - 持久化整表防抖 300ms 落盘，AppState 进后台立即 flush（覆盖「切后台后
  *   被杀进程」）；LRU 上限 200 条防无限膨胀。
  */
@@ -22,13 +26,20 @@ const MAX_ENTRIES = 200;
 const PERSIST_DEBOUNCE_MS = 300;
 
 interface DraftsStore {
+  /** 归属 key（见 `sessionIdentityFor`）→ 草稿文本 */
   drafts: Record<string, string>;
   /** 写草稿；空串 = 清除该 key（表内不留空条目） */
-  setDraft(sid: string, text: string): void;
-  /** 会话 key 迁移：旧 key 的非空草稿搬到新 key（覆盖新 key 残留），旧 key 删除 */
-  migrateDraft(oldSid: string, newSid: string): void;
-  /** 删除会话等场景批量清理 */
-  pruneDrafts(sids: string[]): void;
+  setDraft(key: string, text: string): void;
+  /**
+   * 会话身份迁移（仅「会话重建」这类持久身份真的变了的场景）：旧 key 的非空
+   * 草稿搬到新 key（覆盖新 key 残留），旧 key 删除。换 live sid 不需要调用。
+   */
+  migrateDraft(oldKey: string, newKey: string): void;
+  /**
+   * 删除会话等场景批量清理：候选 id（live sid / 持久化 id）里任一命中
+   * `{profile}:{id}` 形态的 key 即删（清理是粗粒度操作，宁可多删不可残留）。
+   */
+  pruneDrafts(profile: string, ids: string[]): void;
   /** 启动时恢复（App.tsx 初始化调用） */
   loadPersisted(): Promise<void>;
 }
@@ -97,48 +108,51 @@ AppState.addEventListener('change', s => {
 export const useDraftStore = create<DraftsStore>((set, get) => ({
   drafts: {},
 
-  setDraft(sid, text) {
-    touch(sid);
+  setDraft(key, text) {
+    touch(key);
     const prev = get().drafts;
     const next = {...prev};
     if (text === '') {
-      if (!(sid in next)) {
+      if (!(key in next)) {
         return;
       }
-      delete next[sid];
+      delete next[key];
     } else {
-      next[sid] = text;
+      next[key] = text;
     }
     set({drafts: evictIfNeeded(next)});
     schedulePersist();
   },
 
-  migrateDraft(oldSid, newSid) {
-    if (oldSid === newSid) {
+  migrateDraft(oldKey, newKey) {
+    if (oldKey === newKey) {
       return;
     }
-    const text = get().drafts[oldSid];
+    const text = get().drafts[oldKey];
     if (!text) {
       return;
     }
-    touch(newSid);
-    const next = {...get().drafts, [newSid]: text};
-    delete next[oldSid];
-    lastTouched.delete(oldSid);
+    touch(newKey);
+    const next = {...get().drafts, [newKey]: text};
+    delete next[oldKey];
+    lastTouched.delete(oldKey);
     set({drafts: evictIfNeeded(next)});
     schedulePersist();
   },
 
-  pruneDrafts(sids) {
+  pruneDrafts(profile, ids) {
     const prev = get().drafts;
-    const hit = sids.filter(s => s in prev);
+    const prefix = `${profile || '-'}:`;
+    const hit = Object.keys(prev).filter(
+      k => k.startsWith(prefix) && ids.includes(k.slice(prefix.length)),
+    );
     if (hit.length === 0) {
       return;
     }
     const next = {...prev};
-    for (const s of hit) {
-      delete next[s];
-      lastTouched.delete(s);
+    for (const k of hit) {
+      delete next[k];
+      lastTouched.delete(k);
     }
     set({drafts: next});
     schedulePersist();

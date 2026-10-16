@@ -7,7 +7,7 @@
  * 「客户端队列排水：只入队、绝不被打成 live-turn correction / interrupt」，
  * 因此即便「客户端观测空闲、服务端仍在收尾」也能保证排到当前轮之后。
  *
- * 排队条目按「会话跨重启身份」`{profile}:{持久化会话 id}` 存（queuedKeyFor），
+ * 排队条目按「会话跨重启身份」`{profile}:{持久化会话 id}` 存（sessionIdentityFor），
  * 本引擎负责把 key 还原成「当前挂载的 live sid」再提交——见 liveSidFor。
  *
  * 为什么按「事件」而不是按「任意 store 变更」触发：排水失败会往时间线写错误
@@ -24,7 +24,8 @@
 
 import {useChatStore} from './chat';
 import {useConnectionStore} from './connection';
-import {queuedKeyFor, useQueuedPromptsStore} from './queuedPrompts';
+import {useQueuedPromptsStore} from './queuedPrompts';
+import {sessionIdentityFor} from './sessionIdentity';
 import {dlog} from '../utils/desktopLog';
 
 /** 失败后的最小重试间隔（防同一事件簇内反复尝试） */
@@ -57,7 +58,7 @@ function liveSidFor(key: string): string | null {
     candidates.push(key);
   }
   for (const [sid, st] of Object.entries(bySession)) {
-    if (sid !== key && queuedKeyFor(st.profile, sid, st.storedSessionId) === key) {
+    if (sid !== key && sessionIdentityFor(st.profile, sid, st.storedSessionId) === key) {
       candidates.push(sid);
     }
   }
@@ -144,7 +145,7 @@ function pumpAll(): void {
 /** 中断后立即补发队首（跳过 busy 门；仅一条，剩余仍按空闲翻转逐条走）。 */
 export function forceFlushQueued(liveSid: string): void {
   const st = useChatStore.getState().bySession[liveSid];
-  pump(queuedKeyFor(st?.profile ?? '', liveSid, st?.storedSessionId), {
+  pump(sessionIdentityFor(st?.profile ?? '', liveSid, st?.storedSessionId), {
     force: true,
   });
 }

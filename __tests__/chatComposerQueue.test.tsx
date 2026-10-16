@@ -12,9 +12,9 @@ import {useConnectionStore} from '../src/store/connection';
 import {_resetDraftsForTests, useDraftStore} from '../src/store/drafts';
 import {
   _resetQueuedPromptsForTests,
-  queuedKeyFor,
   useQueuedPromptsStore,
 } from '../src/store/queuedPrompts';
+import {sessionIdentityFor} from '../src/store/sessionIdentity';
 
 const mockCall = jest.fn<Promise<unknown>, [string, Record<string, unknown>?]>();
 
@@ -66,7 +66,7 @@ function setBusy(sid: string, busy: boolean) {
 }
 
 /** 排队 key = 会话跨重启身份（profile + 持久化会话 id） */
-const KEY = queuedKeyFor('main', 's1', 'stored-s1');
+const KEY = sessionIdentityFor('main', 's1', 'stored-s1');
 
 const mounted: ReactTestRenderer[] = [];
 
@@ -137,8 +137,8 @@ describe('busy 期间发送 = 排队', () => {
     expect(
       (useQueuedPromptsStore.getState().queues[KEY] ?? []).map(it => it.text),
     ).toEqual(['排队内容']);
-    // 草稿清空（排队条接管显示）
-    expect(useDraftStore.getState().drafts.s1).toBeUndefined();
+    // 草稿清空（排队条接管显示）；key = 会话跨重启身份
+    expect(useDraftStore.getState().drafts[KEY]).toBeUndefined();
     expect(onAfterSend).toHaveBeenCalledTimes(1);
     expect(mockCall).not.toHaveBeenCalled();
   });
@@ -167,7 +167,8 @@ describe('busy 期间发送 = 排队', () => {
       press(tree, 'send')();
     });
     expect(useQueuedPromptsStore.getState().queues[KEY]).toHaveLength(20);
-    expect(useDraftStore.getState().drafts.s1).toBe('排队内容');
+    // 草稿按「会话跨重启身份」存（KEY 即该身份），上限拒绝时不得清空
+    expect(useDraftStore.getState().drafts[KEY]).toBe('排队内容');
     expect(onAfterSend).not.toHaveBeenCalled();
   });
 
@@ -178,9 +179,9 @@ describe('busy 期间发送 = 排队', () => {
     act(() => {
       press(tree, 'type')();
     });
-    // 换成 /model
+    // 换成 /model（草稿 key = 会话跨重启身份）
     act(() => {
-      useDraftStore.getState().setDraft('s1', '/model');
+      useDraftStore.getState().setDraft(KEY, '/model');
     });
     await act(async () => {
       press(tree, 'send')();
@@ -205,7 +206,7 @@ describe('空闲时发送 = 原路径', () => {
       text: '排队内容',
     });
     expect(useQueuedPromptsStore.getState().queues).toEqual({});
-    expect(useDraftStore.getState().drafts.s1).toBeUndefined();
+    expect(useDraftStore.getState().drafts[KEY]).toBeUndefined();
     expect(onAfterSend).toHaveBeenCalledTimes(1);
   });
 });

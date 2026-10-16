@@ -14,8 +14,10 @@
  * - 持久化整表防抖 300ms 落盘，AppState 进后台立即 flush（覆盖「切后台后
  *   被杀进程」）；LRU 上限 200 个会话防无限膨胀，单会话上限 20 条。
  *
- * key 用 `{profile}:{持久化会话 id}`（queuedKeyFor）而不是 live sid：后者在
- * 断线回收/网关重启后会换，App 退出重进就再也认不回旧队列（详见 queuedKeyFor）。
+ * key 用 `{profile}:{持久化会话 id}`（`./sessionIdentity.ts` 的
+ * `sessionIdentityFor`，与草稿 store 同一口径）而**不是 live sid**：后者在
+ * 断线回收/网关重启后会换，App 退出重进就再也认不回旧队列（详见该模块注释）。
+ * 本 store 自身对 key 无感知，只要求调用方（composer / 排水引擎）用同一口径算。
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -36,26 +38,8 @@ export interface QueuedPrompt {
   createdAt: number;
 }
 
-/**
- * 排队 key = 会话的**跨重启身份**：`{profile}:{持久化会话 id}`。
- *
- * 为什么不用 live sid：live sid 是易逝的（WS 断开超宽限被孤儿回收、闲置 TTL、
- * LRU 淘汰、网关进程退出都会换一个新的），而排队内容必须跨「App 退出 → 重进
- * 会话」存活——用 live sid 做 key，重进后就再也认不回旧队列（既不显示也不补发）。
- * 带上 profile 是防 multiplex 场景下两个 profile 库里恰好同 id 的会话串队
- * （串队的后果是把消息发进错的会话，不只是显示问题）。
- * storedSessionId 未知时退回 live sid（退化，但不会误串会话）。
- */
-export function queuedKeyFor(
-  profile: string,
-  liveSid: string,
-  storedId?: string | null,
-): string {
-  return `${profile || '-'}:${storedId || liveSid}`;
-}
-
 interface QueuedPromptsStore {
-  /** 排队 key（见 queuedKeyFor）→ FIFO 队列 */
+  /** 排队 key（见 sessionIdentityFor）→ FIFO 队列 */
   queues: Record<string, QueuedPrompt[]>;
   /** 入队（尾部）。空文本或超出单会话上限返回 false（调用方提示，不改 state） */
   enqueue(key: string, text: string): boolean;

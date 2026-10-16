@@ -10,6 +10,7 @@ import {
   _resetDraftsForTests,
   useDraftStore,
 } from '../src/store/drafts';
+import {sessionIdentityFor} from '../src/store/sessionIdentity';
 
 const STORAGE_KEY = 'hermes.drafts.v1';
 
@@ -57,13 +58,19 @@ describe('drafts store 存取', () => {
     expect(useDraftStore.getState().drafts).toEqual({a: '保留'});
   });
 
-  it('pruneDrafts：批量清理（删除会话场景）', () => {
+  it('pruneDrafts：按 profile + 候选 id 批量清理（删除会话场景）', () => {
     const {setDraft, pruneDrafts} = useDraftStore.getState();
-    setDraft('live1', 'x');
-    setDraft('stored1', 'y');
-    setDraft('keep', 'z');
-    pruneDrafts(['live1', 'stored1', 'missing']);
-    expect(useDraftStore.getState().drafts).toEqual({keep: 'z'});
+    setDraft(sessionIdentityFor('main', 'live1', 'stored1'), 'x');
+    setDraft(sessionIdentityFor('main', 'live2', 'stored2'), 'z');
+    setDraft(sessionIdentityFor('other', 'live1', 'stored1'), '别的 profile 同 id');
+    // live + 持久化 id 两个候选都传（历史数据可能落在任一形态）
+    pruneDrafts('main', ['live1', 'stored1', 'missing']);
+    const {drafts} = useDraftStore.getState();
+    expect(drafts[sessionIdentityFor('main', 'live2', 'stored2')]).toBe('z');
+    expect(drafts[sessionIdentityFor('other', 'live1', 'stored1')]).toBe(
+      '别的 profile 同 id',
+    );
+    expect(Object.keys(drafts)).toHaveLength(2);
   });
 
   it('LRU：超过 200 条淘汰最旧触碰', () => {
@@ -133,8 +140,23 @@ describe('drafts store 持久化', () => {
     _flushDraftsForTests();
     expect(await persistedRaw()).toBe(JSON.stringify({b: 'x'}));
 
-    pruneDrafts(['b']);
+    // key 形态是 `{profile}:{持久化 id}`，清理按该形态匹配
+    setDraft(sessionIdentityFor('main', 'live9', 'stored9'), 'y');
     _flushDraftsForTests();
-    expect(await persistedRaw()).toBe(JSON.stringify({}));
+    pruneDrafts('main', ['stored9']);
+    _flushDraftsForTests();
+    expect(await persistedRaw()).toBe(JSON.stringify({b: 'x'}));
+  });
+
+  it('身份 key：换 live sid（App 退出重进拿新 sid）不换 key，草稿仍在', () => {
+    const {setDraft} = useDraftStore.getState();
+    // 会话重建前：在 liveOLD 下输入
+    setDraft(sessionIdentityFor('main', 'liveOLD', 'stored1'), '写到一半');
+    // 重进拿到新 live sid，但持久化身份不变 → 同一 key 读回旧草稿
+    const identity = sessionIdentityFor('main', 'liveNEW', 'stored1');
+    expect(useDraftStore.getState().drafts[identity]).toBe('写到一半');
+    // live sid 形态的 key 不再参与读写
+    expect(useDraftStore.getState().drafts).not.toHaveProperty('liveNEW');
+    expect(useDraftStore.getState().drafts).not.toHaveProperty('liveOLD');
   });
 });

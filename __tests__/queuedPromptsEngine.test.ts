@@ -13,9 +13,9 @@ import {useConnectionStore} from '../src/store/connection';
 import {_resetDraftsForTests} from '../src/store/drafts';
 import {
   _resetQueuedPromptsForTests,
-  queuedKeyFor,
   useQueuedPromptsStore,
 } from '../src/store/queuedPrompts';
+import {sessionIdentityFor} from '../src/store/sessionIdentity';
 import {
   _resetQueuedPromptsEngineForTests,
   forceFlushQueued,
@@ -39,7 +39,7 @@ async function flush(times = 6): Promise<void> {
 
 /** 排队 key = 会话跨重启身份（profile + 持久化会话 id） */
 function keyOf(liveSid = 's1', storedId = 'stored-s1'): string {
-  return queuedKeyFor('main', liveSid, storedId);
+  return sessionIdentityFor('main', liveSid, storedId);
 }
 
 function queuedTexts(key: string): string[] {

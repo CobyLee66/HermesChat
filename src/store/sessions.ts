@@ -318,8 +318,10 @@ export const useSessionsStore = create<SessionsStore>((set, get) => ({
         [profile]: (s.byProfile[profile] ?? []).filter(r => r.id !== storedId),
       },
     }));
-    // 已删会话的输入框草稿与排队消息一并清理（live/stored 两个 key 都可能挂过聊天页）
-    useDraftStore.getState().pruneDrafts([sessionId, storedId]);
+    // 已删会话的输入框草稿与排队消息一并清理。两者都按
+    // `sessionIdentityFor(profile, liveSid, storedId)` 存，此处把两个候选 id
+    // 都传过去（老数据可能落在任一种形态的 key 上）
+    useDraftStore.getState().pruneDrafts(profile, [sessionId, storedId]);
     useQueuedPromptsStore.getState().pruneQueues(profile, [sessionId, storedId]);
     return true;
   },

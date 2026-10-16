@@ -36,7 +36,8 @@ import {fetchRemoteHistory, toSeedMessages} from '../ssh/remoteHistory';
 import {dlog} from '../utils/desktopLog';
 import {useDraftStore} from './drafts';
 import {getFork, setFork} from './forkMap';
-import {queuedKeyFor, useQueuedPromptsStore} from './queuedPrompts';
+import {useQueuedPromptsStore} from './queuedPrompts';
+import {sessionIdentityFor} from './sessionIdentity';
 import {useProfilesStore} from './profiles';
 import {useSessionsStore} from './sessions';
 import {
@@ -572,19 +573,17 @@ export const useChatStore = create<ChatStore>((set, get) => {
           title: st.title,
           pendingFirstSubmit: true,
         });
-        // 草稿随迁（页面经 migratedTo 换路由后输入框不丢）；排队消息按会话
-        // 持久身份存，重建后持久身份换了（新库行）→ 整队搬到新 key
-        useDraftStore.getState().migrateDraft(sid, liveSid);
-        useQueuedPromptsStore
-          .getState()
-          .migrateQueue(
-            queuedKeyFor(st.profile, sid, storedId),
-            queuedKeyFor(
-              st.profile,
-              liveSid,
-              created.stored_session_id ?? liveSid,
-            ),
-          );
+        // 草稿与排队消息都按「会话跨重启身份」存（sessionIdentityFor）。换
+        // live sid 不动 key；但这里是**重建会话**——持久身份真的换了（新库
+        // 行），两者都要整表搬到新 key，页面经 migratedTo 换路由后才读得到。
+        const oldIdentity = sessionIdentityFor(st.profile, sid, storedId);
+        const newIdentity = sessionIdentityFor(
+          st.profile,
+          liveSid,
+          created.stored_session_id ?? liveSid,
+        );
+        useDraftStore.getState().migrateDraft(oldIdentity, newIdentity);
+        useQueuedPromptsStore.getState().migrateQueue(oldIdentity, newIdentity);
         set(s => ({
           bySession: {
             ...s.bySession,
@@ -747,10 +746,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
       applyPending(agg, opts.pendingApprovals, opts.pendingClarifies);
       if (liveSid !== oldSid) {
         aggregators.delete(oldSid);
-        // 草稿随迁：页面经 migratedTo 换路由后输入框内容不丢（replace 重建
-        // 页面，组件内 state 会清零——2026-10-06 用户报障根因）
-        // 注：排队消息按「profile:持久化 id」存，换 live sid 不动它
-        useDraftStore.getState().migrateDraft(oldSid, liveSid);
+        // 注：草稿与排队消息都按「profile:持久化 id」存（sessionIdentityFor），
+        // 换 live sid 不动 key——页面经 migratedTo 换路由（replace 重建页面、
+        // 组件内 state 清零）后，输入框/排队条从同一 key 读回，天然不丢
         set(s => {
           const next = {...s.bySession};
           const shell = next[oldSid];
@@ -1175,9 +1173,9 @@ export const useChatStore = create<ChatStore>((set, get) => {
           running,
           inflight,
         });
-        // 草稿随迁（页面经 migratedTo 换路由后输入框不丢）；foreign 只读视图
-        // 不存在「输出中」状态，排队 store 里不会有它的条目，无需随迁
-        useDraftStore.getState().migrateDraft(sid, liveSid);
+        // 注：foreign 视图的草稿在点发送时已被 composer 清空（本函数只由发送
+        // 触发），且 foreign 不存在「输出中」状态、排队 store 里没有它的条目，
+        // 因此源会话的本地数据无需随迁到派生会话
         set(s => ({
           bySession: {
             ...s.bySession,

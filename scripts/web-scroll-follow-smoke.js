@@ -14,7 +14,9 @@
  *   1. 贴底发消息：流式全程视图钉底（scrollTop≈0，最新段可见）；
  *   2. 流式中途上滑：记录视口顶部可见段，后续多个 delta 到达后它仍在视口
  *      （阅读位置不被内容增长拖走）；
- *   3. 点「↓ 回到底部」：恢复跟随，剩余输出保持钉底；
+ *   3. 点「↓ 显示最新消息」（i18n 键 chat.jumpToBottom，勿写死旧文案：
+ *      2026-09-13 的 i18n 迁移把「↓ 回到底部」改成了当前文案，本冒烟当时
+ *      漏改，此后场景 0 一直挂在找不到按钮上）：恢复跟随，剩余输出保持钉底；
  *   4. 上滑状态下自己发消息：视图立即回底并跟随新 turn 全程。
  *
  * 前置：npx playwright-core install chromium（脚本自起 vite 与 mock gateway）。
@@ -270,7 +272,7 @@ async function main() {
         `OK 长历史首滚：懒挂载触发（scrollHeight 增至 ${observedH}），scrollTop 未见补偿跳变`,
       );
       // 滚回底部，后续流式场景从贴底开始（按钮是动画滚动，长距离需轮询等稳）
-      await page.getByText('↓ 回到底部').click();
+      await page.getByText('↓ 显示最新消息').click();
       await eventually(
         async () => ((await readScroll())?.scrollTop ?? Infinity) <= 40,
         8000,
@@ -334,7 +336,7 @@ async function main() {
     console.log(`OK 上滑暂停：第 ${anchor} 段稳定可见（scrollTop=${Math.round(paused2.scrollTop)}）`);
 
     // ─── 6. 「↓ 回到底部」：恢复跟随 ─────────────────────────────
-    await page.getByText('↓ 回到底部').click();
+    await page.getByText('↓ 显示最新消息').click();
     await page.waitForTimeout(500);
     const resumed = await readScroll();
     if (!resumed || resumed.scrollTop > 40) {

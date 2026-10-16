@@ -5,6 +5,7 @@
  */
 import {_resetChatAggregators, useChatStore} from '../src/store/chat';
 import {_resetDraftsForTests, useDraftStore} from '../src/store/drafts';
+import {sessionIdentityFor} from '../src/store/sessionIdentity';
 import type {AssistantMsg, ProjectedMessage} from '../src/rpc/types';
 
 const mockCall = jest.fn<Promise<unknown>, [string, Record<string, unknown>?]>();
@@ -168,21 +169,26 @@ describe('chat store attach 重建', () => {
     expect(tail.blocks).toEqual([{type: 'text', text: '半成品'}]);
   });
 
-  it('reattachAfterResume：live sid 迁移时输入框草稿随迁新 key', () => {
+  it('reattachAfterResume：换 live sid 不动草稿 key（持久身份不变，草稿不丢）', () => {
     useChatStore.getState().attach('oldSid', {
       messages: history(),
       profile: 'main',
       storedSessionId: 'stored1',
     });
-    // 用户在旧 sid 页面输入了一半（重连成功后页面经 migratedTo replace 重建，
-    // 组件内 state 会清零——草稿必须提前搬到新 key，2026-10-06 报障根因）
-    useDraftStore.getState().setDraft('oldSid', '还没发出去的话');
+    // 用户在旧 sid 页面输入了一半。草稿按「profile:持久化 id」存（2026-10-17
+    // 修订：live sid 在断线回收/网关重启后会换，拿它当 key 时 App 退出重进就
+    // 读不到旧草稿）——换 live sid 不再需要随迁，composer 从同一 key 读回
+    const identity = sessionIdentityFor('main', 'oldSid', 'stored1');
+    useDraftStore.getState().setDraft(identity, '还没发出去的话');
     useChatStore.getState().reattachAfterResume('oldSid', 'newSid', {
       messages: history(),
     });
     const {drafts} = useDraftStore.getState();
-    expect(drafts.newSid).toBe('还没发出去的话');
+    // 新 live sid 下仍是同一个身份 key（重进/重连后页面读得到）
+    expect(sessionIdentityFor('main', 'newSid', 'stored1')).toBe(identity);
+    expect(drafts[identity]).toBe('还没发出去的话');
     expect(drafts).not.toHaveProperty('oldSid');
+    expect(drafts).not.toHaveProperty('newSid');
   });
 });
 
