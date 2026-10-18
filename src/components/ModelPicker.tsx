@@ -22,20 +22,35 @@ export interface ModelPickerData {
   reasoning: string;
 }
 
+/** 待确认的选择：点选只改这里，点「确定」才回调（config.set 由调用方发）。 */
+interface PendingSelection {
+  model: string;
+  provider: string;
+  reasoning: string;
+}
+
 interface Props {
   visible: boolean;
   onClose: () => void;
   /** 拉取 model.options + 当前思考等级（由调用方接 RPC） */
   load: () => Promise<ModelPickerData>;
-  /** 选择模型后回调（config.set 由调用方发） */
+  /** 确认且模型/Provider 有变化后回调（config.set 由调用方发） */
   onPick: (model: string, provider: string) => void;
-  /** 选择思考等级后回调（config.set 由调用方发） */
+  /** 确认且思考等级有变化后回调（config.set 由调用方发） */
   onPickReasoning: (level: string) => void;
 }
 
-/** 模型切换弹层：原生 bottom sheet；web/桌面为居中对话框。按 provider 分组，顶部带思考等级区。 */
+/**
+ * 模型切换弹层：原生 bottom sheet；web/桌面为居中对话框。按 provider 分组，
+ * 顶部带思考等级区。
+ *
+ * 两步交互（2026-10-18 用户要求）：点模型行 / 思考等级只改本地选择（✓ 与
+ * accent 高亮随之移动），弹窗不关、不发 RPC；点底部「确定」才按实际改动项
+ * 回调并关窗，「取消」/ 点背景 / Android 返回只关窗不写入。
+ */
 export function ModelPicker({visible, onClose, load, onPick, onPickReasoning}: Props) {
   const [data, setData] = useState<ModelPickerData | null>(null);
+  const [pending, setPending] = useState<PendingSelection | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const centered = Platform.OS === 'web';
@@ -47,11 +62,14 @@ export function ModelPicker({visible, onClose, load, onPick, onPickReasoning}: P
   loadRef.current = load;
   // 代次守卫：只有最新一次加载的结果允许落地（慢响应不覆写、关弹后不 setState）
   const seqRef = useRef(0);
+  // 确认守卫：连点「确定」不重复下发；每次打开弹窗时复位
+  const committedRef = useRef(false);
 
   useEffect(() => {
     if (!visible) {
       return;
     }
+    committedRef.current = false;
     const seq = ++seqRef.current;
     setLoading(true);
     setError(null);
@@ -60,6 +78,12 @@ export function ModelPicker({visible, onClose, load, onPick, onPickReasoning}: P
       .then(d => {
         if (seqRef.current === seq) {
           setData(d);
+          // 每次打开都从服务端当前值重置选择（上次未确认的选择不保留）
+          setPending({
+            model: d.models.model ?? '',
+            provider: d.models.provider ?? '',
+            reasoning: d.reasoning,
+          });
         }
       })
       .catch(e => {
@@ -83,6 +107,47 @@ export function ModelPicker({visible, onClose, load, onPick, onPickReasoning}: P
     ...rows.filter(p => !p.is_user_defined),
   ];
 
+  // 选择只改本地 pending，不发 RPC、不关窗
+  const selectModel = (model: string, provider: string) =>
+    setPending(p => (p ? {...p, model, provider} : p));
+  const selectReasoning = (reasoning: string) =>
+    setPending(p => (p ? {...p, reasoning} : p));
+
+  // 加载中/失败时禁用确认，避免用上一次打开残留的数据误提交
+  const canConfirm = !loading && !error && data !== null && pending !== null;
+
+  const confirm = () => {
+    if (committedRef.current || !data || !pending) {
+      return;
+    }
+    committedRef.current = true;
+    // 比较含 provider：同名模型换 provider 也算改动；各项只在真有变化时下发
+    const modelChanged =
+      pending.model !== (data.models.model ?? '') ||
+      pending.provider !== (data.models.provider ?? '');
+    if (modelChanged) {
+      onPick(pending.model, pending.provider);
+    }
+    if (pending.reasoning !== data.reasoning) {
+      onPickReasoning(pending.reasoning);
+    }
+    onClose();
+  };
+
+  const body = (
+    <ListBody
+      providers={providers}
+      pending={pending}
+      loading={loading}
+      error={error}
+      canConfirm={canConfirm}
+      onSelectModel={selectModel}
+      onSelectReasoning={selectReasoning}
+      onConfirm={confirm}
+      onCancel={onClose}
+    />
+  );
+
   return (
     <Modal
       visible={visible}
@@ -91,42 +156,14 @@ export function ModelPicker({visible, onClose, load, onPick, onPickReasoning}: P
       onRequestClose={onClose}>
       {centered ? (
         <TouchableOpacity style={styles.centerBackdrop} activeOpacity={1} onPress={onClose}>
-          <View style={[styles.card, styles.centerCard]}>
-            <ListBody
-              providers={providers}
-              data={data}
-              loading={loading}
-              error={error}
-              onPickModel={(m, p) => {
-                onPick(m, p);
-                onClose();
-              }}
-              onPickReasoning={lv => {
-                onPickReasoning(lv);
-                onClose();
-              }}
-            />
-          </View>
+          <View style={[styles.card, styles.centerCard]}>{body}</View>
         </TouchableOpacity>
       ) : (
         <>
           <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} />
           <View style={styles.sheet}>
             <View style={styles.handle} />
-            <ListBody
-              providers={providers}
-              data={data}
-              loading={loading}
-              error={error}
-              onPickModel={(m, p) => {
-                onPick(m, p);
-                onClose();
-              }}
-              onPickReasoning={lv => {
-                onPickReasoning(lv);
-                onClose();
-              }}
-            />
+            {body}
           </View>
         </>
       )}
@@ -134,21 +171,27 @@ export function ModelPicker({visible, onClose, load, onPick, onPickReasoning}: P
   );
 }
 
-/** 弹层内容（列表/加载/错误），sheet 与居中卡共用。 */
+/** 弹层内容（列表/加载/错误 + 底部取消/确定），sheet 与居中卡共用。 */
 function ListBody({
   providers,
-  data,
+  pending,
   loading,
   error,
-  onPickModel,
-  onPickReasoning,
+  canConfirm,
+  onSelectModel,
+  onSelectReasoning,
+  onConfirm,
+  onCancel,
 }: {
   providers: ModelProviderRow[];
-  data: ModelPickerData | null;
+  pending: PendingSelection | null;
   loading: boolean;
   error: string | null;
-  onPickModel: (model: string, provider: string) => void;
-  onPickReasoning: (level: string) => void;
+  canConfirm: boolean;
+  onSelectModel: (model: string, provider: string) => void;
+  onSelectReasoning: (level: string) => void;
+  onConfirm: () => void;
+  onCancel: () => void;
 }) {
   const t = useT();
   return (
@@ -159,17 +202,20 @@ function ListBody({
       ) : error ? (
         <Text style={styles.error}>{t('model.loadFailed', {error})}</Text>
       ) : (
+        // RN/RNW 的 ScrollView 基础样式自带 flexShrink:1：长列表在此收缩滚动，
+        // 底部按钮作为兄弟节点始终钉在卡底（长列表视口断言见 web 冒烟）
         <ScrollView style={styles.list}>
           <Text style={styles.providerHeader}>{t('model.reasoningTitle')}</Text>
           <View style={styles.chipRow}>
             {REASONING_LEVELS.map(lv => {
               // 等级名是协议词，原文展示（与顶栏 reasoning_effort 口径一致）
-              const active = lv === data?.reasoning;
+              const active = lv === pending?.reasoning;
               return (
                 <TouchableOpacity
                   key={lv}
+                  testID={`reasoning-chip-${lv}`}
                   style={[styles.chip, active ? styles.chipActive : null]}
-                  onPress={() => onPickReasoning(lv)}>
+                  onPress={() => onSelectReasoning(lv)}>
                   <Text
                     style={[styles.chipText, active ? styles.chipTextActive : null]}>
                     {lv}
@@ -185,20 +231,23 @@ function ListBody({
                 {p.is_current ? t('chat.currentModel') : ''}
               </Text>
               {(p.models ?? []).slice(0, 30).map(m => {
-                const isCurrent = p.is_current && m === data?.models.model;
+                // ✓ 跟随待确认的选择（初始值 = 服务端当前模型），而「（当前）」
+                // 标签仍表示服务端当前生效值
+                const selected = pending?.model === m && pending?.provider === p.slug;
                 return (
                   <TouchableOpacity
                     key={`${p.slug}/${m}`}
-                    style={styles.modelRow}
-                    onPress={() => onPickModel(m, p.slug)}>
+                    testID={`model-row-${p.slug}/${m}`}
+                    style={[styles.modelRow, selected ? styles.modelRowSelected : null]}
+                    onPress={() => onSelectModel(m, p.slug)}>
                     <Text
                       style={[
                         styles.modelName,
-                        isCurrent ? styles.modelCurrent : null,
+                        selected ? styles.modelSelected : null,
                       ]}>
                       {m}
                     </Text>
-                    {isCurrent ? <Text style={styles.check}>✓</Text> : null}
+                    {selected ? <Text style={styles.check}>✓</Text> : null}
                   </TouchableOpacity>
                 );
               })}
@@ -214,6 +263,26 @@ function ListBody({
           ) : null}
         </ScrollView>
       )}
+      <View style={styles.footer}>
+        <TouchableOpacity
+          testID="model-picker-cancel"
+          style={styles.footerBtn}
+          activeOpacity={0.8}
+          onPress={onCancel}>
+          <Text style={styles.footerBtnText}>{t('common.cancel')}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          testID="model-picker-confirm"
+          style={[
+            styles.footerBtnPrimary,
+            canConfirm ? null : styles.footerBtnPrimaryDisabled,
+          ]}
+          activeOpacity={0.8}
+          disabled={!canConfirm}
+          onPress={onConfirm}>
+          <Text style={styles.footerBtnPrimaryText}>{t('common.ok')}</Text>
+        </TouchableOpacity>
+      </View>
     </>
   );
 }
@@ -298,8 +367,35 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     borderRadius: 8,
   },
+  modelRowSelected: {backgroundColor: Colors.fill},
   modelName: {fontSize: 15, color: Colors.text, flex: 1},
-  modelCurrent: {color: Colors.accent, fontWeight: '600'},
+  modelSelected: {color: Colors.accent, fontWeight: '600'},
   check: {color: Colors.accent, fontSize: 15},
   more: {fontSize: 12, color: Colors.textSecondary, paddingHorizontal: 8},
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    marginTop: 4,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: Colors.border,
+  },
+  footerBtn: {
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+  },
+  footerBtnText: {fontSize: 14, color: Colors.textSecondary},
+  footerBtnPrimary: {
+    borderRadius: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 18,
+    backgroundColor: Colors.accent,
+  },
+  footerBtnPrimaryDisabled: {opacity: 0.45},
+  footerBtnPrimaryText: {fontSize: 14, color: '#FFFFFF', fontWeight: '600'},
 });

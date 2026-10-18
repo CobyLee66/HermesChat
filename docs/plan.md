@@ -11,7 +11,7 @@ React Native (TS) 手机 App（Android 优先，iOS 后续），通过 **App 内
 - 多会话：新建 / 切换 / 恢复历史 / 删除 / 重开（reset）
 - 聊天渲染：流式文本、思考/推理过程、工具调用过程（可折叠卡片）、报错信息
 - 权限审批：事件驱动的弹窗按钮（once / session / always / deny），不手输指令
-- 模型切换：底部弹出选择器（`model.options` + `config.set`）
+- 模型切换：底部弹出选择器（`model.options` + `config.set`；选中模型/思考等级后点「确定」才写入，取消/背景关闭不写入）
 - 连接持久化：SSH 断线自动重连 + WS 断线 `session.resume` 恢复
 
 **v2 预留**（已于 M3 提前实现）：图片（`image.attach_bytes`）、文件（`file.attach`）、语音（`/api/audio/transcribe` STT + 手机录音）、profile 昵称/头像编辑（`profiles.configure` ui_meta / `profiles.set_asset`）。

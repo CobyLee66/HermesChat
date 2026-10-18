@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The model picker is now confirm-based. Tapping a model or a thinking level
+  only moves the selection (checkmark / highlight) instead of writing the
+  config and closing the sheet immediately. A new Cancel/OK footer applies the
+  changes with the existing `config.set` calls — each one only when its value
+  actually differs, so a model and a thinking level can be switched in one
+  confirmed step — and then closes the sheet. Cancelling, tapping the backdrop,
+  or pressing Android back writes nothing.
+
 ## [0.2.3] - 2026-10-17
 
 ### Added

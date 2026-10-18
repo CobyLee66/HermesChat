@@ -508,6 +508,11 @@ function startMockGateway({
   pendingClarify = null,
   /** README 配图模式：换中性英文假数据（见文件头 demo 说明），默认关闭 */
   demo = false,
+  /**
+   * 非 demo 的 model.options 返回 20+ 个填充模型：模型弹窗冒烟用它验证
+   * 「长列表下底部取消/确定仍固定在卡底、不被顶出视口」；默认关闭。
+   */
+  longModelList = false,
 } = {}) {
   const {chunks = 24, intervalMs = 400, rich = false} = stream;
   const nowSec = Math.floor(Date.now() / 1000);
@@ -947,8 +952,17 @@ function startMockGateway({
                       slug: 'mock',
                       name: 'Mock Provider',
                       is_current: true,
-                      models: ['mock-model', 'mock-model-pro'],
-                      total_models: 2,
+                      models: longModelList
+                        ? [
+                            'mock-model',
+                            'mock-model-pro',
+                            ...Array.from(
+                              {length: 20},
+                              (_, i) => `mock-model-extra-${i + 1}`,
+                            ),
+                          ]
+                        : ['mock-model', 'mock-model-pro'],
+                      total_models: longModelList ? 22 : 2,
                     },
                   ],
                   model: 'mock-model',

@@ -1,12 +1,16 @@
 /**
- * web-model-picker-smoke.js — 流式期间模型弹窗回归冒烟。
+ * web-model-picker-smoke.js — 模型弹窗回归冒烟（加载守卫 + 两步确认）。
  *
- * 被测行为（修复「流式期间弹窗失灵 + 流式中切模型崩溃」）：
+ * 被测行为：
  *   1. 会话 A 流式输出中，回列表新建空会话 B 并进入；
  *   2. B 中打开「切换模型」弹窗：列表须一次加载完成（不等流式结束）；
  *   3. 弹窗打开期间（流式仍在继续）：model.options / config.get(reasoning)
  *      各恰好收到 1 次（修复前每个 delta 重发一对 RPC，此处会飙到几十）；
- *   4. 流式中点选模型：config.set(model) 发出一次、弹窗关闭、页面无异常。
+ *   4. 两步确认（2026-10-18 用户要求）：点模型 / 思考等级只改本地选择
+ *      （不发 config.set、弹窗不关），点「确定」才按改动项各写一次并关窗，
+ *      「取消」/ 背景关闭不写入；
+ *   5. 非 demo 模型列表拉长到 20+（mock longModelList），验证长列表下底部
+ *      取消/确定仍固定在卡底、不被顶出视口。
  *
  * 前置：npx playwright-core install chromium（脚本自起 vite build+preview 与 mock）。
  * 用法：node scripts/web-model-picker-smoke.js
@@ -49,7 +53,13 @@ function check(ok, label) {
 
 async function main() {
   // ─── 1. mock gateway + vite（上游指向 mock）─────────────────────
-  gw = await startMockGateway({port: MOCK_PORT, title: TITLE, stream: STREAM});
+  gw = await startMockGateway({
+    port: MOCK_PORT,
+    title: TITLE,
+    stream: STREAM,
+    // 长模型列表：验证弹窗底部按钮在 20+ 行列表下仍固定可见
+    longModelList: true,
+  });
   console.log(`mock gateway: http://127.0.0.1:${gw.port}`);
 
   const viteBin = path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js');
@@ -183,21 +193,99 @@ async function main() {
       `弹窗打开期间 config.get(reasoning) 恰好 1 次（实际 ${reasoningGetCount}）`,
     );
 
-    // ─── 5. 流式中点选模型：config.set(model) 一次 + 弹窗关闭 + 页面无恙
-    await page.getByText('mock-model-pro', {exact: true}).click();
+    // ─── 5. 两步确认：点选只选择（不发 RPC、不关窗），确定才写入 ──────
+    const pickerOpen = async () =>
+      (await page.getByText('Mock Provider').count()) > 0;
+    const modelSetCount = () =>
+      gw.state.calls.filter(
+        c => c.method === 'config.set' && c.params?.key === 'model',
+      ).length;
+    const reasoningSetCount = () =>
+      gw.state.calls.filter(
+        c => c.method === 'config.set' && c.params?.key === 'reasoning',
+      ).length;
+    const modelSetBefore = modelSetCount();
+    const reasoningSetBefore = reasoningSetCount();
+
+    // 长列表（20+ 填充模型）下底部按钮仍须在视口内（不被列表顶出卡底）
+    const confirmBox = await page
+      .locator('[data-testid="model-picker-confirm"]')
+      .boundingBox();
+    check(
+      !!confirmBox &&
+        confirmBox.y >= 0 &&
+        confirmBox.y + confirmBox.height <= VIEW.height,
+      `长列表下「确定」仍在视口内（y=${Math.round(confirmBox?.y ?? -1)}）`,
+    );
+
+    // 点模型：只选中（✓ 移到该行），不发 config.set、弹窗不关
+    await page
+      .locator('[data-testid="model-row-mock/mock-model-pro"]')
+      .click();
+    await page.waitForTimeout(500);
+    check(modelSetCount() === modelSetBefore, '点选模型不发 config.set');
+    check(await pickerOpen(), '点选模型后弹窗仍打开');
+    check(
+      (await page
+        .locator('[data-testid="model-row-mock/mock-model-pro"]')
+        .getByText('✓')
+        .count()) === 1,
+      '✓ 移到待确认的模型行',
+    );
+
+    // 点思考等级：只选中，不发 config.set、弹窗不关
+    await page.locator('[data-testid="reasoning-chip-high"]').click();
+    await page.waitForTimeout(300);
+    check(
+      reasoningSetCount() === reasoningSetBefore,
+      '点选思考等级不发 config.set',
+    );
+    check(await pickerOpen(), '点选思考等级后弹窗仍打开');
+
+    // 确定：模型与思考等级各写一次，然后关窗
+    await page.locator('[data-testid="model-picker-confirm"]').click();
     await page.waitForTimeout(800);
     const modelSets = gw.state.calls.filter(
       c => c.method === 'config.set' && c.params?.key === 'model',
     );
     check(
-      modelSets.length === 1 &&
-        String(modelSets[0].params?.value ?? '').includes('mock-model-pro'),
-      `流式中切模型 config.set(model) 一次（实际 ${modelSets.length}）`,
+      modelSets.length === modelSetBefore + 1 &&
+        String(modelSets[modelSets.length - 1].params?.value ?? '').includes(
+          'mock-model-pro',
+        ),
+      `确定后 config.set(model) 一次（实际 ${modelSets.length - modelSetBefore}）`,
+    );
+    const reasoningSets = gw.state.calls.filter(
+      c => c.method === 'config.set' && c.params?.key === 'reasoning',
     );
     check(
-      (await page.getByText('Mock Provider').count()) === 0,
-      '点选后弹窗关闭',
+      reasoningSets.length === reasoningSetBefore + 1 &&
+        String(reasoningSets[reasoningSets.length - 1].params?.value ?? '') ===
+          'high',
+      `确定后 config.set(reasoning:high) 一次（实际 ${
+        reasoningSets.length - reasoningSetBefore
+      }）`,
     );
+    check(!(await pickerOpen()), '确定后弹窗关闭');
+
+    // ─── 6. 取消路径：重开 → 选模型 → 取消 → 不写入 ─────────────────
+    await page.getByText('⋯').click();
+    await page.getByText('切换模型', {exact: true}).first().click();
+    await page.getByText('Mock Provider').waitFor({timeout: 8000});
+    const modelSetBeforeCancel = modelSetCount();
+    const reasoningSetBeforeCancel = reasoningSetCount();
+    await page
+      .locator('[data-testid="model-row-mock/mock-model-pro"]')
+      .click();
+    await page.locator('[data-testid="model-picker-cancel"]').click();
+    await page.waitForTimeout(600);
+    check(
+      modelSetCount() === modelSetBeforeCancel &&
+        reasoningSetCount() === reasoningSetBeforeCancel,
+      '取消不写入任何配置',
+    );
+    check(!(await pickerOpen()), '取消后弹窗关闭');
+
     await page.getByPlaceholder('发消息…').waitFor({timeout: 5000});
     check(pageErrors.length === 0, `无 pageerror（实际 ${pageErrors.length}）`);
   } finally {
