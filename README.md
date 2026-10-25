@@ -22,13 +22,13 @@ Connect to the [Hermes Agent](#1-set-up-hermes-agent) running on your computer f
 
 ## Download
 
-Prebuilt packages are published on the [**Releases**](https://github.com/CobyLee66/HermesChat/releases) page. Current release: **[v0.2.4](https://github.com/CobyLee66/HermesChat/releases/tag/v0.2.4)**
+Prebuilt packages are published on the [**Releases**](https://github.com/CobyLee66/HermesChat/releases) page. Current release: **[v0.2.5](https://github.com/CobyLee66/HermesChat/releases/tag/v0.2.5)**
 
 | Platform | Download | Notes |
 |---|---|---|
-| Android | [HermesChat-0.2.4.apk](https://github.com/CobyLee66/HermesChat/releases/download/v0.2.4/HermesChat-0.2.4.apk) | Signed with a public debug keystore — see [SECURITY.md](SECURITY.md) |
-| Windows | [HermesChat-Setup-0.2.4.exe](https://github.com/CobyLee66/HermesChat/releases/download/v0.2.4/HermesChat-Setup-0.2.4.exe) | Unsigned — choose **Run anyway** at the SmartScreen prompt |
-| macOS (Apple Silicon) | [HermesChat-0.2.4-arm64.dmg](https://github.com/CobyLee66/HermesChat/releases/download/v0.2.4/HermesChat-0.2.4-arm64.dmg) | Unsigned — right-click → **Open** on first launch (Gatekeeper) |
+| Android | [HermesChat-0.2.5.apk](https://github.com/CobyLee66/HermesChat/releases/download/v0.2.5/HermesChat-0.2.5.apk) | Signed with a public debug keystore — see [SECURITY.md](SECURITY.md) |
+| Windows | [HermesChat-Setup-0.2.5.exe](https://github.com/CobyLee66/HermesChat/releases/download/v0.2.5/HermesChat-Setup-0.2.5.exe) | Unsigned — choose **Run anyway** at the SmartScreen prompt |
+| macOS (Apple Silicon) | [HermesChat-0.2.5-arm64.dmg](https://github.com/CobyLee66/HermesChat/releases/download/v0.2.5/HermesChat-0.2.5-arm64.dmg) | Unsigned — right-click → **Open** on first launch (Gatekeeper) |
 
 Prefer building from source? See [Getting Started](#getting-started). All versions are listed on the [Releases page](https://github.com/CobyLee66/HermesChat/releases).
 
