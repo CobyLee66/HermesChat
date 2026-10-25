@@ -1,14 +1,18 @@
 /**
  * web-process-notification-smoke.js — 后台进程通知归属修复（时间线系统灰条）端到端冒烟。
  *
- * 背景（修复的 bug）：服务端 `tools/process_registry.py format_process_notification`
- * 产出的 `[IMPORTANT: Background process …]` 通知由 tui_gateway 的 notification
- * poller 当**普通 prompt** 提交（不传 display_kind，只有委派通知打标），落库行是
- * `role=user`、无 display_kind；客户端分类器只认 display_kind / `[ASYNC DELEGATION`
- * 前缀 → 该行渲染成用户气泡，看起来像用户自己发的消息。
- * 修复 = utils/processNotification 前缀家族识别 + aggregator 分类器兜底分支 →
- * 灰条（首行原文 + 点击展开 Command/Output 全文）。cron 任务提示词与 skill 注入
- * 同 `[IMPORTANT: ` 信封前缀，必须仍是用户气泡（宽口径反例）。
+ * 背景（修复的 bug）：服务端 `tools/process_registry_notifications.py
+ * format_process_notification` 产出的 `[IMPORTANT: Background process …]` 通知由
+ * tui_gateway 的 notification poller 当 prompt 提交；**单条完成不带 display_kind**
+ * （只有 async_delegation / heartbeat 打标），落库行 `role=user` 且无声明——
+ * 客户端只认 display_kind / `[ASYNC DELEGATION` 前缀 → 渲染成用户气泡。
+ * 修复 = utils/processNotification 前缀家族识别 + 聚合器分类器兜底分支 →
+ * 灰条（首行原文 + 点击展开 Command/Output 全文）。
+ * **批量完成（≥2 条）另带 display_kind="process_complete"**（头部
+ * `[IMPORTANT: {n} background processes completed. …`）——分类器曾无该分支、
+ * 形状白名单也不认批量头 → 同样落用户气泡（本脚本 PASS 6/7 覆盖）。
+ * cron 任务提示词与 skill 注入同 `[IMPORTANT: ` 信封前缀，必须仍是用户气泡
+ * （宽口径反例）。
  *
  * 前置：npx playwright-core install chromium（脚本自起 vite build/preview 与
  * mock gateway，全程不打 live 9119，无写操作）。
@@ -38,6 +42,31 @@ const NOTIFY_TEXT = [
 const NOTIFY_TEXT_FULL = `${NOTIFY_TEXT}]`;
 const NOTIFY_HEADLINE =
   'Background process proc_deadbeef1234 completed normally (exit code 0).';
+/**
+ * 批量完成形态（服务端 ProcessNotificationBatch.render()）：头部 + 各条通知。
+ * tui_gateway `_notif_dispatch_completions` 提交这批时带
+ * display_kind="process_complete" + display_metadata.display_text。
+ */
+const BATCH_HEADER =
+  '[IMPORTANT: 2 background processes completed. Treat these results as one ' +
+  'batch and give one consolidated response; preserve failures and actionable ' +
+  'results.]';
+const BATCH_TEXT = [
+  BATCH_HEADER,
+  '',
+  '[IMPORTANT: Background process proc_batch0001 completed normally (exit code 0).',
+  'Command: node scripts/batch-a.js',
+  'Output:',
+  'a ok]',
+  '',
+  '[IMPORTANT: Background process proc_batch0002 completed normally (exit code 0).',
+  'Command: node scripts/batch-b.js',
+  'Output:',
+  'b ok]',
+].join('\n');
+/** 批量灰条标签（脚本已钉死 zh-CN locale） */
+const BATCH_LABEL = '后台进程已完成（2 个）';
+const BATCH_METADATA = {display_text: '2 Background Processes Finished'};
 /** cron 任务提示词：同 `[IMPORTANT: ` 信封前缀，必须保持用户气泡 */
 const CRON_PROMPT =
   '[IMPORTANT: You are running as a scheduled cron job. DELIVERY: Your final ' +
@@ -92,6 +121,12 @@ async function main() {
     title: SESSION_TITLE,
     extraHistory: [
       {role: 'user', text: NOTIFY_TEXT_FULL},
+      {
+        role: 'user',
+        text: BATCH_TEXT,
+        display_kind: 'process_complete',
+        display_metadata: BATCH_METADATA,
+      },
       {role: 'user', text: CRON_PROMPT},
       {role: 'user', text: PLAIN_USER},
       {role: 'assistant', text: '收到，这条回执我早前已经消费过了。'},
@@ -232,6 +267,41 @@ async function main() {
       );
     }
     console.log('PASS 5: 普通用户消息仍是用户气泡');
+
+    // ---- 6. 声明 process_complete 的批量完成行也落在系统灰条 ----
+    const batch = await page.evaluate(PROBE_FN, BATCH_LABEL);
+    if (!batch.found) {
+      throw new Error(`时间线里找不到批量完成灰条标签：${BATCH_LABEL}`);
+    }
+    if (batch.bg !== SYSTEM_BG) {
+      throw new Error(
+        `批量完成行容器底色异常：${batch.bg}（期望灰条 ${SYSTEM_BG}，用户气泡 ${BUBBLE_BG}）`,
+      );
+    }
+    const batchEnvelopeShown = await page.evaluate(
+      needle => (document.body.textContent || '').includes(needle),
+      'Treat these results as one batch',
+    );
+    if (batchEnvelopeShown) {
+      throw new Error('批量完成通知原文整段出现在时间线里：仍被当普通用户消息渲染');
+    }
+    console.log('PASS 6: 批量完成通知（process_complete）渲染为计数灰条，原文未整段渲染');
+
+    // ---- 7. 点批量灰条 → 展开层含各条通知全文 ----
+    await page.locator('[data-smoke-hit="1"]').click();
+    await page
+      .getByText('Command: node scripts/batch-b.js')
+      .first()
+      .waitFor({timeout: 5000});
+    const batchDetail = await page.evaluate(() =>
+      (document.body.textContent || '').includes('b ok'),
+    );
+    if (!batchDetail) {
+      throw new Error('批量展开层没有第二条通知正文（b ok）');
+    }
+    await page.getByText('关闭', {exact: true}).last().click();
+    await page.waitForTimeout(400);
+    console.log('PASS 7: 点击批量灰条展开各条通知全文，关闭按钮收起');
 
     if (pageErrors.length > 0) {
       throw new Error(`页面异常：${pageErrors.join('\n')}`);

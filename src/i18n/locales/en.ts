@@ -315,6 +315,8 @@ export const en = {
   'chat.marker.modelSwitch': 'Model changed',
   'chat.marker.personalitySwitch': 'Personality changed',
   'chat.marker.autoContinue': 'Resumed interrupted turn',
+  'chat.marker.processDone': 'Background processes finished ({count})',
+  'chat.marker.processFinished': 'Background process finished',
 
   // ── 输入区 ──
   'input.pickImageFailed': 'Failed to pick image',

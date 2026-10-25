@@ -880,6 +880,182 @@ describe('TimelineAggregator 进程通知（无 display_kind 的注入行）', (
   });
 });
 
+describe('TimelineAggregator 后台进程批量完成通知', () => {
+  /**
+   * 服务端 ProcessNotificationBatch.render() 的批量完成形态（≥2 条）：
+   * 头部 + 各条 format_process_notification 通知。tui_gateway
+   * `_notif_dispatch_completions` 提交时**带** display_kind="process_complete"
+   * + display_metadata.display_text（单条完成仍不带声明，见上一个 describe）。
+   */
+  const BATCH_TEXT = [
+    '[IMPORTANT: 2 background processes completed. Treat these results as one ' +
+      'batch and give one consolidated response; preserve failures and ' +
+      'actionable results.]',
+    '',
+    '[IMPORTANT: Background process proc_batch0001 completed normally (exit code 0).',
+    'Command: node scripts/batch-a.js',
+    'Output:',
+    'a ok]',
+    '',
+    '[IMPORTANT: Background process proc_batch0002 completed normally (exit code 0).',
+    'Command: node scripts/batch-b.js',
+    'Output:',
+    'b ok]',
+  ].join('\n');
+  /** 标签按当前 locale 现算（t() 在「模块求值 → 测试执行」之间可能切 locale） */
+  const batchLabel = () => t('chat.marker.processDone', {count: 2});
+  const BATCH_METADATA = {display_text: '2 Background Processes Finished'};
+  const SINGLE_TEXT =
+    '[IMPORTANT: Background process proc_single01 completed normally (exit code 0).\n' +
+    'Command: npm run build\n' +
+    'Output:\nbuild ok]';
+
+  function markerItems(agg: TimelineAggregator): SystemEvent[] {
+    return agg
+      .getItems()
+      .filter(i => i.kind === 'system' && i.eventKind === 'marker') as SystemEvent[];
+  }
+
+  function userItems(agg: TimelineAggregator) {
+    return agg.getItems().filter(i => i.kind === 'user');
+  }
+
+  it('hydrate：声明 process_complete 的批量行 → 计数灰条 + 展开全文，无用户气泡', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([
+      {
+        role: 'user',
+        text: BATCH_TEXT,
+        display_kind: 'process_complete',
+        display_metadata: BATCH_METADATA,
+      },
+    ]);
+    const markers = markerItems(agg);
+    expect(markers).toHaveLength(1);
+    expect(markers[0].text).toBe(batchLabel());
+    expect(markers[0].fullText).toBe(BATCH_TEXT);
+    expect(userItems(agg)).toHaveLength(0);
+  });
+
+  it('hydrate：声明 process_complete 的单条行 → 服务端首行原文标签（D063 口径）', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([
+      {
+        role: 'user',
+        text: SINGLE_TEXT,
+        display_kind: 'process_complete',
+        display_metadata: {display_text: 'Background Process Finished: npm run build'},
+      },
+    ]);
+    const markers = markerItems(agg);
+    expect(markers).toHaveLength(1);
+    expect(markers[0].text).toBe(
+      'Background process proc_single01 completed normally (exit code 0).',
+    );
+    expect(markers[0].fullText).toBe(SINGLE_TEXT);
+    expect(userItems(agg)).toHaveLength(0);
+  });
+
+  it('hydrate：正文形状不认识时退服务端 display_text（JSON 字符串 metadata 也认）', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([
+      {
+        role: 'user',
+        text: '后台进程结果已被截断（未来措辞）',
+        display_kind: 'process_complete',
+        display_metadata: JSON.stringify({
+          display_text: '2 Background Processes Finished',
+        }) as unknown as Record<string, unknown>,
+      },
+    ]);
+    const markers = markerItems(agg);
+    expect(markers).toHaveLength(1);
+    expect(markers[0].text).toBe('2 Background Processes Finished');
+    expect(markers[0].fullText).toBe('后台进程结果已被截断（未来措辞）');
+  });
+
+  it('hydrate：形状不认识且无 metadata → i18n 短标签', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([
+      {role: 'user', text: '后台进程结果已被截断', display_kind: 'process_complete'},
+    ]);
+    const markers = markerItems(agg);
+    expect(markers).toHaveLength(1);
+    expect(markers[0].text).toBe(t('chat.marker.processFinished'));
+    expect(userItems(agg)).toHaveLength(0);
+  });
+
+  it('hydrate：无声明（存量行/旧服务端）的批量头 → 计数灰条', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([{role: 'user', text: BATCH_TEXT}]);
+    const markers = markerItems(agg);
+    expect(markers).toHaveLength(1);
+    expect(markers[0].text).toBe(batchLabel());
+    expect(markers[0].fullText).toBe(BATCH_TEXT);
+    expect(userItems(agg)).toHaveLength(0);
+  });
+
+  it('restoreLiveTail：inflight 是批量头时不补用户气泡，补计数灰条', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([]);
+    agg.restoreLiveTail(true, {
+      user: BATCH_TEXT,
+      assistant: '两条都成功了',
+      streaming: true,
+    });
+    expect(userItems(agg)).toHaveLength(0);
+    const markers = markerItems(agg);
+    expect(markers).toHaveLength(1);
+    expect(markers[0].text).toBe(batchLabel());
+    expect(markers[0].fullText).toBe(BATCH_TEXT);
+    const tail = agg.getItems()[agg.getItems().length - 1] as AssistantMsg;
+    expect(tail.kind).toBe('assistant');
+    expect(tail.streaming).toBe(true);
+  });
+
+  it('restoreLiveTail：历史已含同一批量行时不重复补灰条', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([
+      {
+        role: 'user',
+        text: BATCH_TEXT,
+        display_kind: 'process_complete',
+        display_metadata: BATCH_METADATA,
+      },
+    ]);
+    agg.restoreLiveTail(true, {
+      user: BATCH_TEXT,
+      assistant: '汇总中',
+      streaming: true,
+    });
+    expect(markerItems(agg)).toHaveLength(1);
+  });
+
+  it('所有 role=user 的声明式机器通知 kind 都不落用户气泡', () => {
+    const agg = new TimelineAggregator();
+    agg.hydrate([
+      {
+        role: 'user',
+        text: '[ASYNC DELEGATION COMPLETE — deleg_abc]\n子任务完成',
+        display_kind: 'async_delegation_complete',
+        display_metadata: {task_count: 2},
+      },
+      {
+        role: 'user',
+        text: BATCH_TEXT,
+        display_kind: 'process_complete',
+        display_metadata: BATCH_METADATA,
+      },
+      {role: 'user', text: '后台通知正文', display_kind: 'internal_notification'},
+      {role: 'user', text: '模型切到 X', display_kind: 'model_switch'},
+      {role: 'user', text: '人格切换', display_kind: 'personality_switch'},
+      {role: 'user', text: '[auto continue]', display_kind: 'auto_continue'},
+    ]);
+    expect(userItems(agg)).toHaveLength(0);
+    expect(markerItems(agg)).toHaveLength(6);
+  });
+});
+
 describe('TimelineAggregator 本地回显', () => {
   it('appendUserMessage 追加用户气泡', () => {
     const agg = new TimelineAggregator();

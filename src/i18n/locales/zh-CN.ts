@@ -287,6 +287,8 @@ export const zhCN: Record<MessageKey, string> = {
   'chat.marker.modelSwitch': '已切换模型',
   'chat.marker.personalitySwitch': '已切换人格',
   'chat.marker.autoContinue': '已续跑中断的回复',
+  'chat.marker.processDone': '后台进程已完成（{count} 个）',
+  'chat.marker.processFinished': '后台进程已结束',
 
   // ── 输入区 ──
   'input.pickImageFailed': '选择图片失败',

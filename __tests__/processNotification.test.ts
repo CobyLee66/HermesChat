@@ -1,12 +1,14 @@
 /**
  * 后台进程通知文本形状识别（utils/processNotification）纯函数测试：
  * - 前缀家族白名单命中三种服务端产出形态（完成回执 / watch 关闭 / watch 熔断）
+ * - 批量完成头（≥2 条）识别与条数提取（ProcessNotificationBatch / gateway coalesced）
  * - 宽口径反例：cron 任务提示词、skill 注入、正文中部提及一律不命中
  * - 灰条标签：剥 [IMPORTANT: 信封与收尾 ]、取首行、空白压平、超长截断
  */
 
 import {
   isProcessNotificationText,
+  processNotificationBatchCount,
   processNotificationHeadline,
 } from '../src/utils/processNotification';
 
@@ -22,6 +24,17 @@ const WATCH_DISABLED =
 const WATCH_OVERFLOW =
   '[IMPORTANT: Watch-pattern overflow: >30 notifications in 60s across all ' +
   'processes. Suppressing further watch_match events for 300s.]';
+/** ProcessNotificationBatch.render() 的批量完成形态：头部 + 各条通知 */
+const BATCH_COMPLETION =
+  '[IMPORTANT: 2 background processes completed. Treat these results as one ' +
+  'batch and give one consolidated response; preserve failures and actionable ' +
+  'results.]\n\n' +
+  COMPLETION;
+/** gateway _format_coalesced_process_completions 的措辞（同一前缀族） */
+const BATCH_SESSION =
+  '[IMPORTANT: 3 background processes completed for this session.\n' +
+  'Treat these results as one completion batch and send at most one ' +
+  'consolidated user-facing response.]';
 
 describe('isProcessNotificationText（前缀家族白名单）', () => {
   it('命中三种通知形态（含首部空白）', () => {
@@ -58,6 +71,62 @@ describe('isProcessNotificationText（前缀家族白名单）', () => {
     expect(isProcessNotificationText('普通消息 [IMPORTANT: Background process x]')).toBe(
       false,
     );
+  });
+});
+
+describe('批量完成通知（processNotificationBatchCount）', () => {
+  it('两种服务端措辞都识别并取到条数', () => {
+    expect(processNotificationBatchCount(BATCH_COMPLETION)).toBe(2);
+    expect(processNotificationBatchCount(BATCH_SESSION)).toBe(3);
+    expect(processNotificationBatchCount(`\n  ${BATCH_COMPLETION}`)).toBe(2);
+  });
+
+  it('无句号/无收尾的简写形态仍识别', () => {
+    expect(
+      processNotificationBatchCount('[IMPORTANT: 2 background processes completed]'),
+    ).toBe(2);
+  });
+
+  it('非批量头返回 null（单条通知 / cron 提示词 / skill 注入 / 中部提及 / 空）', () => {
+    expect(processNotificationBatchCount(COMPLETION)).toBeNull();
+    expect(processNotificationBatchCount(WATCH_MATCH)).toBeNull();
+    expect(
+      processNotificationBatchCount(
+        '[IMPORTANT: You are running as a scheduled cron job. DELIVERY: 3 ' +
+          'background processes completed will be delivered.]',
+      ),
+    ).toBeNull();
+    expect(
+      processNotificationBatchCount(
+        '[IMPORTANT: The user has invoked the "demo-skill" skill, indicating ' +
+          'they want you to follow its instructions.]',
+      ),
+    ).toBeNull();
+    expect(
+      processNotificationBatchCount(`看这条：${BATCH_COMPLETION}`),
+    ).toBeNull();
+    expect(
+      processNotificationBatchCount('[IMPORTANT: Background processes finished]'),
+    ).toBeNull();
+    expect(processNotificationBatchCount('')).toBeNull();
+  });
+
+  it('isProcessNotificationText 把批量头一并算作进程通知', () => {
+    expect(isProcessNotificationText(BATCH_COMPLETION)).toBe(true);
+    expect(isProcessNotificationText(BATCH_SESSION)).toBe(true);
+    expect(
+      isProcessNotificationText('[IMPORTANT: 2 background processes completed]'),
+    ).toBe(true);
+    // 宽口径反例仍不命中
+    expect(
+      isProcessNotificationText(
+        '[IMPORTANT: You are running as a scheduled cron job. DELIVERY: Your ' +
+          'final response will be automatically delivered.]',
+      ),
+    ).toBe(false);
+    expect(
+      isProcessNotificationText('[IMPORTANT: Background processes finished]'),
+    ).toBe(false);
   });
 });
 

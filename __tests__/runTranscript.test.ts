@@ -3,7 +3,7 @@
  * - role 过滤：tool 等行不进只读视图
  * - display_kind='hidden' 跳过；压缩摘要（display_content）转 system 灰条
  * - content JSON parts 数组拍平（coerceContentText 复用）
- * - 进程通知行（无 display_kind）转 system 灰条、保留全文
+ * - 进程通知行（无 display_kind）与声明式机器通知行转 system 灰条、保留全文
  * - 空文本跳过、timestamp 透传
  */
 
@@ -84,5 +84,30 @@ describe('projectRunMessages', () => {
     expect(out[0]).toMatchObject({role: 'system', text: notify});
     expect(out[1]).toMatchObject({role: 'user', text: cronPrompt});
     expect(out[2]).toMatchObject({role: 'assistant', text: '收到'});
+  });
+
+  it('声明式机器通知行（process_complete 批量 / 委派完成）投影为 system；skill 调用仍是 user', () => {
+    const batch =
+      '[IMPORTANT: 2 background processes completed. Treat these results as one ' +
+      'batch and give one consolidated response; preserve failures and ' +
+      'actionable results.]\n\n' +
+      '[IMPORTANT: Background process proc_deadbeef1234 completed normally ' +
+      '(exit code 0).\nCommand: npm run build\nOutput:\nbuild ok]';
+    const delegation =
+      '[ASYNC DELEGATION BATCH COMPLETE — deleg_abc123]\n- task 1: done';
+    const out = projectRunMessages([
+      {role: 'user', content: batch, display_kind: 'process_complete'},
+      {
+        role: 'user',
+        content: delegation,
+        display_kind: 'async_delegation_complete',
+      },
+      {role: 'user', content: '/review 检查代码', display_kind: 'skill_invocation'},
+      {role: 'user', content: '普通消息'},
+    ]);
+    expect(out.map(m => m.role)).toEqual(['system', 'system', 'user', 'user']);
+    // 只读面板保留全文（灰条没有展开层）
+    expect(out[0].text).toBe(batch);
+    expect(out[1].text).toBe(delegation);
   });
 });

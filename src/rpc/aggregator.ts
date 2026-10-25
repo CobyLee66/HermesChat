@@ -8,6 +8,7 @@ import {parseMessageText} from './references';
 import {t} from '../i18n';
 import {
   isProcessNotificationText,
+  processNotificationBatchCount,
   processNotificationHeadline,
 } from '../utils/processNotification';
 import type {
@@ -74,6 +75,54 @@ export interface MarkerClassification {
  *  display_kind，live 路径只能靠它识别）。 */
 const ASYNC_DELEGATION_PREFIX = '[ASYNC DELEGATION';
 
+/** 灰条标签上限（对齐 processNotificationHeadline 的 120）：
+ * 服务端 display_metadata.display_text 是单行标题，超长时同口径截断。 */
+const METADATA_LABEL_MAX = 120;
+
+/**
+ * 进程通知正文 → marker 分类（单点，声明式/形状嗅探两条路共用）：
+ * - 批量完成头 → i18n 计数标签（批量头首行是给模型的指令 "Treat these
+ *   results as one batch…"，不能当标签；用户需要的就是条数，进程 id / 退出码
+ *   在展开全文里）；
+ * - 单条通知 → 服务端首行原文（D063 口径：proc id 与退出码一眼可见）。
+ * 非进程通知文本返回 null。
+ */
+function processMarkerClassification(
+  text: string,
+): MarkerClassification | null {
+  const batchCount = processNotificationBatchCount(text);
+  if (batchCount !== null) {
+    return {
+      label: t('chat.marker.processDone', {count: batchCount}),
+      fullText: text,
+    };
+  }
+  if (isProcessNotificationText(text)) {
+    return {label: processNotificationHeadline(text), fullText: text};
+  }
+  return null;
+}
+
+/**
+ * display_metadata.display_text（服务端紧凑标题）→ 灰条标签；无则空串。
+ * 只用于「声明了 process_complete 但正文形状不认识」的兜底（未来措辞/截断）。
+ */
+function metadataMarkerLabel(
+  metadata: Record<string, unknown> | undefined,
+): string {
+  const raw = metadata?.display_text;
+  if (typeof raw !== 'string') {
+    return '';
+  }
+  const label = raw.replace(/\s+/g, ' ').trim();
+  if (!label) {
+    return '';
+  }
+  return label.length > METADATA_LABEL_MAX
+    ? label.slice(0, METADATA_LABEL_MAX).trimEnd() + '…'
+    : label;
+}
+
 /**
  * 把 user 行分类为 marker 系统项；非标记行返回 null。
  * display_metadata 对旧服务端可能是 JSON 字符串（desktop 踩过），宽容解析。
@@ -120,17 +169,29 @@ export function classifyMarkerMessage(
       return {label: t('chat.marker.personalitySwitch')};
     case 'auto_continue':
       return {label: t('chat.marker.autoContinue')};
+    case 'process_complete': {
+      // 后台进程完成行。批量完成（≥2）由服务端声明（tui_gateway
+      // `_notif_dispatch_completions` 提交时带 display_kind + display_metadata），
+      // 单条完成仍不带声明（走 default 嗅探）。声明优先，但标签仍按正文形状
+      // 取：批量头 → 计数标签、单条 → 首行原文；正文形状不认识（未来措辞/
+      // 截断）才退服务端标题，最后退 i18n 短标签。
+      const marker = processMarkerClassification(text);
+      if (marker) {
+        return marker;
+      }
+      return {
+        label: metadataMarkerLabel(metadata) || t('chat.marker.processFinished'),
+        ...(text ? {fullText: text} : null),
+      };
+    }
     default:
-      // 无 display_kind（或未知 kind）的后台进程通知：服务端 TUI poller 把
-      // 这类通知当普通 prompt 提交，落库行不带 display_kind（只有委派通知
-      // 打标），只能按正文前缀家族识别。形状白名单与宽口径反例见
+      // 无 display_kind（或未知 kind）的后台进程通知：单条完成走 TUI poller
+      // 时当普通 prompt 提交、落库行不带声明（只有批量完成与委派通知打标），
+      // 只能按正文前缀家族识别。形状白名单与宽口径反例见
       // utils/processNotification.ts。
       // 放 default 而非最前：声明式 display_kind 优先（D058 语义），形状嗅探
       // 只兜底无声明行；放这里同时让「未来服务端新增未知 kind」不再退回气泡。
-      if (isProcessNotificationText(text)) {
-        return {label: processNotificationHeadline(text), fullText: text};
-      }
-      return null;
+      return processMarkerClassification(text);
   }
 }
 

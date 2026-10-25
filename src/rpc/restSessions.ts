@@ -16,7 +16,7 @@
 import {cronFetch} from './cron';
 import type {ProjectedMessage} from './types';
 import {coerceContentText} from '../ssh/remoteHistory';
-import {isProcessNotificationText} from '../utils/processNotification';
+import {classifyMarkerMessage} from './aggregator';
 
 /** GET /api/sessions/{id}/messages 返回的原始行（只声明用到的字段）。 */
 export interface RawSessionMessageRow {
@@ -62,10 +62,11 @@ export function getSessionMessages(
  * - content 可能是 JSON parts 数组（视觉 turn），经 coerceContentText 拍平；
  * - 空文本跳过。
  *
- * ⚠ 进程通知行（`[IMPORTANT: Background process …]`，服务端注入时是普通
- * user 行、无 display_kind）在本面板投影为 **system** 行——否则只读回放里
- * 会显示成「用户发的消息」（聊天时间线同因，见 utils/processNotification.ts）。
- * 这里保留全文（本面板灰条没有聊天那样的展开层，压成首行会丢 Command/Output）。
+ * 进程通知与声明式机器通知行（`display_kind`：process_complete 批量完成、
+ * async_delegation_complete、internal_notification、model_switch 等）在本面板
+ * 一律投影为 **system** 行——否则只读回放里会显示成「用户发的消息」（聊天时间线
+ * 同因，分类器单点见 rpc/aggregator.ts classifyMarkerMessage）。这里保留全文
+ * （本面板灰条没有聊天那样的展开层，压成首行会丢 Command/Output）。
  */
 export function projectRunMessages(
   rows: RawSessionMessageRow[],
@@ -87,10 +88,12 @@ export function projectRunMessages(
       continue;
     }
     const ts = Number(row.timestamp);
-    // 进程通知行（无 display_kind 的注入 prompt）转 system 灰条，其余按原 role
+    // 机器通知行（声明式 display_kind 或无声明的进程通知）转 system 灰条，
+    // 其余按原 role；判据复用聊天分类器单点，避免两处 kind 清单漂移
     const asSystem =
       isCompactionSummary ||
-      (role === 'user' && isProcessNotificationText(text));
+      (role === 'user' &&
+        classifyMarkerMessage(row.display_kind ?? undefined, text) !== null);
     out.push({
       role: asSystem ? 'system' : role,
       text,

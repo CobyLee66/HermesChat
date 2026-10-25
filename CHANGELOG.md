@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Background-process **batch** completion notifications (server rows tagged
+  `display_kind="process_complete"`, e.g. "2 background processes completed…")
+  no longer render as messages sent by the user. They are shown as centered
+  timeline notices like single-process notifications: the collapsed bar shows
+  the process count ("Background processes finished (2)") and tapping it reveals
+  every nested Command/Output report. The gateway only declares this kind for
+  batches (single completions still arrive undeclared), so the shape fallback
+  now also recognizes the batch header family — existing stored rows render
+  correctly without any data migration.
+- The cron run-detail replay now maps every server-declared machine notice
+  (`process_complete`, `async_delegation_complete`, `internal_notification`,
+  model/personality switches, auto-continue) to a system row instead of a user
+  bubble, reusing the same classifier as the chat timeline.
+
 ## [0.2.4] - 2026-10-18
 
 ### Changed
