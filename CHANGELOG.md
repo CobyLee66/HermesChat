@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-11-07
+
 ### Fixed
 
 - Cron run details for script-only (`no_agent`) jobs now open instead of
@@ -285,6 +287,12 @@ of this release: the APK is signed with the public debug keystore, desktop
 packages are unsigned, and LAN tunnel/direct traffic is plaintext HTTP/WS by
 design.
 
-[Unreleased]: https://github.com/CobyLee66/HermesChat/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/CobyLee66/HermesChat/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/CobyLee66/HermesChat/compare/v0.2.5...v0.2.6
+[0.2.5]: https://github.com/CobyLee66/HermesChat/compare/v0.2.4...v0.2.5
+[0.2.4]: https://github.com/CobyLee66/HermesChat/compare/v0.2.3...v0.2.4
+[0.2.3]: https://github.com/CobyLee66/HermesChat/compare/v0.2.2...v0.2.3
+[0.2.2]: https://github.com/CobyLee66/HermesChat/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/CobyLee66/HermesChat/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/CobyLee66/HermesChat/releases/tag/v0.2.0
 [0.1.0]: https://github.com/CobyLee66/HermesChat/releases/tag/v0.1.0
