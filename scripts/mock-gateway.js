@@ -119,6 +119,24 @@ const MOCK_CRON_RUN = {
   profile: 'mock',
   source: 'cron',
 };
+/**
+ * no_agent（脚本）任务的运行行：无会话可回放，id 带 cron_output: 前缀
+ * （source='cron_output'）。**刻意不配** messages 回放数据——客户端若误把它
+ * 当会话 id 打 messages 端点，此处 404 即暴露回归。
+ */
+const MOCK_CRON_OUTPUT_RUN = {
+  id: 'cron_output:cronjob-smoke-0001:2026-11-07_02-00-10',
+  title: 'FAILED · exit code 1',
+  preview: '⚠ Cron watchdog 每日站会摘要 script failed: guard rail tripped',
+  started_at: Math.floor(Date.now() / 1000) - 300,
+  last_active: Math.floor(Date.now() / 1000) - 300,
+  message_count: 0,
+  is_active: false,
+  archived: false,
+  profile: 'mock',
+  source: 'cron_output',
+};
+
 /** GET /api/sessions/{id}/messages 返回的原始行（含 tool/hidden 行供过滤断言） */
 const MOCK_CRON_MESSAGES = {
   session_id: MOCK_CRON_RUN_ID,
@@ -416,6 +434,19 @@ function demoCron(nowSec) {
         archived: false,
         profile: 'main',
         source: 'cron',
+      },
+      {
+        // no_agent（脚本）任务运行：无会话，仅摘要（刻意不配 messages 回放数据）
+        id: 'cron_output:cron-demo-001:2026-11-07_02-00-10',
+        title: 'FAILED · exit code 1',
+        preview: '⚠ Cron watchdog Nightly dependency audit script failed',
+        started_at: nowSec - 20 * 3600,
+        last_active: nowSec - 20 * 3600,
+        message_count: 0,
+        is_active: false,
+        archived: false,
+        profile: 'main',
+        source: 'cron_output',
       },
     ],
     messages: {
@@ -1308,7 +1339,7 @@ function startMockGateway({
         JSON.stringify(
           demoCronData
             ? {runs: demoCronData.runs, limit: 20}
-            : {runs: [MOCK_CRON_RUN], limit: 20},
+            : {runs: [MOCK_CRON_OUTPUT_RUN, MOCK_CRON_RUN], limit: 20},
         ),
       );
       return;
@@ -1474,4 +1505,5 @@ module.exports = {
   MOCK_CRON_RUN,
   MOCK_CRON_RUN_ID,
   MOCK_CRON_MESSAGES,
+  MOCK_CRON_OUTPUT_RUN,
 };

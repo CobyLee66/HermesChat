@@ -138,6 +138,21 @@ export function getCronJobRuns(
   );
 }
 
+/**
+ * no_agent（脚本）任务的运行记录识别：这类 fire 不产生会话，服务端以
+ * `cron_output:{job_id}:{文件名}` 前缀 id 返回（source='cron_output'，仅带
+ * ≤180 字符摘要，无消息可回放）。source 缺失时以 id 前缀兜底——「声明字段
+ * 是否在场」取决于服务端投递链（D063/D066 同款教训），双防线缺一不可。
+ */
+export function isCronOutputRun(
+  run: Pick<CronRunRow, 'id' | 'source'>,
+): boolean {
+  if (run.source === 'cron_output') {
+    return true;
+  }
+  return typeof run.id === 'string' && run.id.startsWith('cron_output:');
+}
+
 export function createCronJob(
   httpUrl: string,
   token: string,

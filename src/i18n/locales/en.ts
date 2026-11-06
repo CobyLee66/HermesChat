@@ -145,6 +145,9 @@ export const en = {
   'cron.runTimespan': 'Started {start}    Last activity {last}',
   'cron.openInChat': 'Open in chat',
   'cron.runEmpty': 'This run produced no conversation',
+  'cron.runScriptOnlyEmpty': 'No summary was recorded for this run',
+  'cron.runScriptOnlyNote':
+    'Script jobs do not create chat sessions — only this summary is available in-app',
   'cron.runsEmpty': 'No runs yet',
   'cron.nextLastRun': 'Next {next}    Last {last}',
   'cron.jobMissing': 'Job not found or deleted: {error}',

@@ -5,6 +5,9 @@
  * 无 resume 副作用，见 rpc/restSessions.ts 文件头）→ projectRunMessages
  * 投影 → 时间正序渲染。user/assistant 用聊天同款 Bubble，system/
  * 压缩摘要用灰条；tool 行不投影不渲染（与 foreign 只读视图同口径）。
+ * no_agent（脚本）任务的运行（isCronOutputRun）没有会话：id 是
+ * `cron_output:` 前缀而非会话 id，打 messages 端点必 404——直接渲染
+ * runs 行自带的元信息与 ≤180 字符摘要，不发起请求。
  * 宿主负责页面底色（要求白色与 header 一致）与居中容器。
  */
 
@@ -21,6 +24,7 @@ import {
 import {Bubble} from '../components/Bubble';
 import {Colors} from '../components/theme';
 import {useT} from '../i18n';
+import {isCronOutputRun} from '../rpc/cron';
 import {getSessionMessages, projectRunMessages} from '../rpc/restSessions';
 import type {CronRunRow, ProjectedMessage} from '../rpc/types';
 import {useConnectionStore} from '../store/connection';
@@ -48,8 +52,13 @@ export function CronRunDetailPanel({
   const [messages, setMessages] = useState<ProjectedMessage[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // no_agent（脚本）任务的运行：无会话可回放，详情由 runs 行元信息直接渲染
+  const scriptOnly = isCronOutputRun(run);
 
   const load = useCallback(async () => {
+    if (scriptOnly) {
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -69,11 +78,46 @@ export function CronRunDetailPanel({
       setError(e instanceof Error ? e.message : String(e));
       setLoading(false);
     }
-  }, [run.id, run.profile, t]);
+  }, [scriptOnly, run.id, run.profile, t]);
 
   useEffect(() => {
+    if (scriptOnly) {
+      return;
+    }
     void load();
-  }, [load]);
+  }, [load, scriptOnly]);
+
+  if (scriptOnly) {
+    const preview = (run.preview ?? '').trim();
+    return (
+      <View style={[styles.list, styles.scriptOnlyPad]}>
+        <View style={styles.metaCard}>
+          <View style={styles.metaTop}>
+            <Text style={styles.metaName} numberOfLines={1}>
+              {jobName || run.title || t('cron.runRecord')}
+            </Text>
+            {run.is_active ? (
+              <Text style={styles.activeBadge}>{t('cron.runActive')}</Text>
+            ) : (
+              <Text style={styles.doneBadge}>{t('cron.runDone')}</Text>
+            )}
+          </View>
+          <Text style={styles.metaLine}>
+            {t('cron.runTimespan', {
+              start: formatEpoch(run.started_at),
+              last: formatEpoch(run.last_active || run.started_at),
+            })}
+          </Text>
+        </View>
+        <View style={styles.summaryCard}>
+          <Text style={styles.summaryText}>
+            {preview || t('cron.runScriptOnlyEmpty')}
+          </Text>
+        </View>
+        <Text style={styles.sysNote}>{t('cron.runScriptOnlyNote')}</Text>
+      </View>
+    );
+  }
 
   if (loading && messages === null) {
     return <ActivityIndicator style={styles.loading} color={Colors.accent} />;
@@ -182,6 +226,16 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   metaLine: {fontSize: 12, color: Colors.textSecondary, marginTop: 6},
+  scriptOnlyPad: {paddingHorizontal: 12, paddingBottom: 24},
+  summaryCard: {
+    backgroundColor: Colors.card,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: Colors.border,
+    padding: 12,
+    marginBottom: 10,
+  },
+  summaryText: {fontSize: 14, color: Colors.text, lineHeight: 20},
   chatBtn: {
     alignSelf: 'flex-start',
     marginTop: 8,

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Cron run details for script-only (`no_agent`) jobs now open instead of
+  failing with "failed to load". These runs never create a chat session — the
+  server reports them with a `cron_output:{job_id}:{file}` id and at most a
+  180-character summary — but the detail panel treated that id as a session id
+  and called the read-only messages endpoint, which always returned 404. The
+  panel now recognizes such runs (declared `source` with an id-prefix
+  fallback), skips the endpoint, and renders the run metadata, the summary,
+  and a notice that script jobs do not produce chat sessions.
+
 ## [0.2.5] - 2026-10-25
 
 ### Fixed

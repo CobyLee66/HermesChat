@@ -10,6 +10,8 @@
  *   3. 提示词输入区默认高 ≈160；填 30 行文本自动撑高但封顶 25 行（≈520px）；拖拽手柄已移除；
  *   4. ⋯ 菜单 → 运行历史 → 列表渲染且内容 720 居中（900 视口 x≈90）；
  *   5. 点运行记录 → 运行详情弹层（元信息 + 对话回放；tool 行与 hidden 行不渲染）；
+ *   5b. 点脚本任务运行（cron_output，无会话）→ 详情渲染摘要 + 说明灰条，
+ *       不打 messages 端点（无「加载失败」）、无「在聊天中打开」入口；
  *   6. 返回 → 回运行历史列表；再返回 → 回任务列表。
  *
  * 前置：npx playwright-core install chromium（脚本自起 vite build+preview 与 mock）。
@@ -21,7 +23,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const {chromium} = require('playwright-core');
 
-const {startMockGateway, MOCK_CRON_JOB, MOCK_CRON_MESSAGES} = require('./mock-gateway');
+const {
+  startMockGateway,
+  MOCK_CRON_JOB,
+  MOCK_CRON_MESSAGES,
+  MOCK_CRON_OUTPUT_RUN,
+} = require('./mock-gateway');
 
 const ROOT = path.join(__dirname, '..');
 const OUT = 'docs/screenshots';
@@ -32,6 +39,8 @@ const VIEW_W = 900;
 const VIEW_H = 900;
 const JOB_NAME = MOCK_CRON_JOB.name;
 const RUN_TITLE = MOCK_CRON_JOB.name + ' · 09-10';
+const OUTPUT_TITLE = MOCK_CRON_OUTPUT_RUN.title;
+const OUTPUT_PREVIEW = MOCK_CRON_OUTPUT_RUN.preview;
 
 const EXE = chromium.executablePath();
 if (!fs.existsSync(EXE)) {
@@ -229,6 +238,28 @@ async function main() {
     await page.waitForTimeout(500);
     await page.screenshot({path: `${OUT}/web-cron-ui-5-detail.png`});
     console.log('OK 场景5：运行详情弹层（元信息/对话回放渲染，tool 与 hidden 行已过滤）');
+
+    // ─── 场景 5b：脚本任务运行（cron_output，无会话）→ 详情不 404 ────
+    // 回归：cron_output: 前缀 id 不是会话 id，误打 messages 端点必 404——
+    // 详情应直接渲染 runs 行摘要与说明灰条，无「加载失败」、无「在聊天中打开」
+    await page.getByText('‹ 返回').last().click();
+    await runRow.waitFor({timeout: 5000});
+    const outputRow = page.getByText(OUTPUT_TITLE, {exact: true}).first();
+    await outputRow.waitFor({timeout: 5000});
+    await outputRow.click();
+    await page.getByText('运行详情', {exact: true}).waitFor({timeout: 5000});
+    await page.waitForTimeout(800); // 旧行为此时已 404 落「加载失败」
+    if ((await page.getByText(/加载失败/).count()) !== 0) {
+      throw new Error('脚本任务运行详情出现「加载失败」（messages 端点被误调用）');
+    }
+    await page.getByText(OUTPUT_PREVIEW).first().waitFor({timeout: 5000});
+    await page.getByText(/脚本任务不产生会话记录/).first().waitFor({timeout: 5000});
+    if ((await page.getByText('在聊天中打开').count()) !== 0) {
+      throw new Error('脚本任务运行详情不应出现「在聊天中打开」入口');
+    }
+    await page.waitForTimeout(500);
+    await page.screenshot({path: `${OUT}/web-cron-ui-5b-script-only.png`});
+    console.log('OK 场景5b：脚本任务运行详情（摘要 + 说明灰条，无 404 / 无打开会话入口）');
 
     // ─── 场景 6：返回 → 运行历史列表 → 任务列表 ───────────────────
     await page.getByText('‹ 返回').last().click();

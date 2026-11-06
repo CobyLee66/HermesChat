@@ -136,6 +136,8 @@ export const zhCN: Record<MessageKey, string> = {
   'cron.runTimespan': '开始 {start}    最近活动 {last}',
   'cron.openInChat': '在聊天中打开',
   'cron.runEmpty': '该次运行没有产生对话内容',
+  'cron.runScriptOnlyEmpty': '该次运行没有留下摘要',
+  'cron.runScriptOnlyNote': '脚本任务不产生会话记录，App 内仅能显示此摘要',
   'cron.runsEmpty': '暂无运行记录',
   'cron.nextLastRun': '下次 {next}    上次 {last}',
   'cron.jobMissing': '任务不存在或已被删除：{error}',
