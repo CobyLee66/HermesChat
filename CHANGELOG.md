@@ -16,7 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   恢复执行 (English labels unchanged).
 - Cron run history: the list-row preview now wraps to fill the row instead of
   clipping to a single line, and the script-only run detail scrolls when its
-  content exceeds the viewport instead of being cut off.
+  content exceeds the viewport instead of being cut off. The run title (e.g.
+  `FAILED · <error>`) also wraps fully instead of clamping to one line.
 
 ## [0.2.6] - 2026-11-07
 

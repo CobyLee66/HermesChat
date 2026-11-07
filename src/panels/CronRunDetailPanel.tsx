@@ -95,7 +95,8 @@ export function CronRunDetailPanel({
       <ScrollView style={styles.list} contentContainerStyle={styles.scriptOnlyPad}>
         <View style={styles.metaCard}>
           <View style={styles.metaTop}>
-            <Text style={styles.metaName} numberOfLines={1}>
+            {/* 标题放开换行：脚本任务失败的 title 形如 FAILED · <错误详情>，压一行会截断 */}
+            <Text style={styles.metaName}>
               {jobName || run.title || t('cron.runRecord')}
             </Text>
             {run.is_active ? (
