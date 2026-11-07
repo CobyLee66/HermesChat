@@ -102,7 +102,7 @@ export const zhCN: Record<MessageKey, string> = {
   'cron.customPlaceholder': 'cron 表达式，如 0 9 * * 1-5',
 
   // ── 定时任务面板 ──
-  'cron.stateScheduled': '已调度',
+  'cron.stateScheduled': '已执行',
   'cron.statePaused': '已暂停',
   'cron.stateCompleted': '已完成',
   'cron.stateError': '出错',
@@ -124,8 +124,8 @@ export const zhCN: Record<MessageKey, string> = {
   'cron.deleteTitle': '删除定时任务',
   'cron.deleteConfirm': '确定删除「{name}」吗？该操作不可恢复。',
   'cron.deleteFailed': '删除失败',
-  'cron.resumeSchedule': '恢复调度',
-  'cron.pauseSchedule': '暂停调度',
+  'cron.resumeSchedule': '恢复执行',
+  'cron.pauseSchedule': '暂停执行',
   'cron.runningNow': '正在运行…',
   'cron.runNow': '立即运行',
   'cron.runs': '运行历史',

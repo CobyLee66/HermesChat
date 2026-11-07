@@ -15,6 +15,7 @@ import React, {useCallback, useEffect, useState} from 'react';
 import {
   ActivityIndicator,
   FlatList,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -90,7 +91,8 @@ export function CronRunDetailPanel({
   if (scriptOnly) {
     const preview = (run.preview ?? '').trim();
     return (
-      <View style={[styles.list, styles.scriptOnlyPad]}>
+      // ScrollView：摘要/元信息超出容器高度时可滚动看全（普通 View 会被裁剪）
+      <ScrollView style={styles.list} contentContainerStyle={styles.scriptOnlyPad}>
         <View style={styles.metaCard}>
           <View style={styles.metaTop}>
             <Text style={styles.metaName} numberOfLines={1}>
@@ -115,7 +117,7 @@ export function CronRunDetailPanel({
           </Text>
         </View>
         <Text style={styles.sysNote}>{t('cron.runScriptOnlyNote')}</Text>
-      </View>
+      </ScrollView>
     );
   }
 

@@ -98,7 +98,7 @@ export function CronRunsPanel({
                 {formatEpoch(item.last_active || item.started_at)}
               </Text>
             </View>
-            <Text style={styles.preview} numberOfLines={1}>
+            <Text style={styles.preview}>
               {item.preview || t('cron.viewRunDetail')}
             </Text>
           </View>

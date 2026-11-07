@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Scheduled-task rows now surface every action inline — pause/resume, run
+  now, run history, edit, delete — replacing the "⋯" overflow menu; tapping
+  the row still opens the editor. Chinese copy no longer uses "调度": the
+  scheduled badge reads 已执行 and the pause/resume actions read 暂停执行 /
+  恢复执行 (English labels unchanged).
+- Cron run history: the list-row preview now wraps to fill the row instead of
+  clipping to a single line, and the script-only run detail scrolls when its
+  content exceeds the viewport instead of being cut off.
+
 ## [0.2.6] - 2026-11-07
 
 ### Fixed

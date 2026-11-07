@@ -5,10 +5,10 @@
  * vite build+preview，直连配置走同源代理。
  *
  * 场景（对应 2026-09-10 五项交互修改 + 09-11 提示词上限修订）：
- *   1. ViewSwitcher 切「定时任务」→ 任务列表渲染（名称/已调度徽章/中文计划）；
+ *   1. ViewSwitcher 切「定时任务」→ 任务列表渲染（名称/已执行徽章/中文计划）；
  *   2. 点任务行 → 默认打开**编辑**弹层（不再是运行历史）；
  *   3. 提示词输入区默认高 ≈160；填 30 行文本自动撑高但封顶 25 行（≈520px）；拖拽手柄已移除；
- *   4. ⋯ 菜单 → 运行历史 → 列表渲染且内容 720 居中（900 视口 x≈90）；
+ *   4. 行内「运行历史」pill（testID=cron-row-runs）→ 列表渲染且内容 720 居中（900 视口 x≈90）；
  *   5. 点运行记录 → 运行详情弹层（元信息 + 对话回放；tool 行与 hidden 行不渲染）；
  *   5b. 点脚本任务运行（cron_output，无会话）→ 详情渲染摘要 + 说明灰条，
  *       不打 messages 端点（无「加载失败」）、无「在聊天中打开」入口；
@@ -150,11 +150,11 @@ async function main() {
     await page.getByText('定时任务', {exact: true}).click();
     const jobRow = page.getByText(JOB_NAME, {exact: true}).first();
     await jobRow.waitFor({timeout: 10000});
-    await page.getByText('已调度', {exact: true}).waitFor({timeout: 5000});
+    await page.getByText('已执行', {exact: true}).waitFor({timeout: 5000});
     await page.getByText(/每 1 天/).waitFor({timeout: 5000});
     await page.waitForTimeout(500);
     await page.screenshot({path: `${OUT}/web-cron-ui-1-list.png`});
-    console.log('OK 场景1：定时任务列表渲染（名称/已调度徽章/中文计划）');
+    console.log('OK 场景1：定时任务列表渲染（名称/已执行徽章/中文计划）');
 
     // ─── 场景 2：点任务行 → 默认打开编辑弹层 ─────────────────────
     await jobRow.click();
@@ -202,10 +202,8 @@ async function main() {
       '编辑弹层未关闭',
     );
 
-    // ─── 场景 4：⋯ 菜单 → 运行历史 → 列表居中渲染 ─────────────────
-    await page.getByText('⋯', {exact: true}).click();
-    await page.getByText('运行历史', {exact: true}).waitFor({timeout: 5000});
-    await page.getByText('运行历史', {exact: true}).click();
+    // ─── 场景 4：行内「运行历史」pill → 列表居中渲染 ───────────────
+    await page.getByTestId('cron-row-runs').first().click();
     await page.getByText(`运行历史 · ${JOB_NAME}`).waitFor({timeout: 5000});
     const runRow = page.getByText(RUN_TITLE).first();
     await runRow.waitFor({timeout: 5000});

@@ -1,5 +1,5 @@
 /**
- * CronPanel — 定时任务面板（profile 筛选 + 任务列表 + 行操作菜单）。
+ * CronPanel — 定时任务面板（profile 筛选 + 任务列表 + 行内动作 pills）。
  * 手机 Cron 视图与桌面壳共用；导航差异（新建/编辑/运行历史）经回调注入。
  * 数据来自 useCronStore（dashboard REST /api/cron/*，cron.changed 自动刷新）。
  */
@@ -9,7 +9,6 @@ import {
   ActivityIndicator,
   BackHandler,
   FlatList,
-  Modal,
   Platform,
   StyleSheet,
   Text,
@@ -180,31 +179,25 @@ export function CronPanel({
 
   const [menuOpen, setMenuOpen] = useState<OpenMenu>(null);
   const [menuTop, setMenuTop] = useState(0);
-  /** 行操作菜单（Modal 居中卡片，跨端一致，免行坐标锚定） */
-  const [menuJob, setMenuJob] = useState<CronJob | null>(null);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
 
-  // Android 返回键先收下拉/行菜单
+  // Android 返回键收 profile 下拉
   useEffect(() => {
-    if (!menuOpen && !menuJob) {
+    if (!menuOpen) {
       return;
     }
     if (Platform.OS === 'web') {
       return;
     }
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (menuJob) {
-        setMenuJob(null);
-      } else {
-        setMenuOpen(null);
-      }
+      setMenuOpen(null);
       return true;
     });
     return () => sub.remove();
-  }, [menuOpen, menuJob]);
+  }, [menuOpen]);
 
   const profileOptions = useMemo(() => {
     const seen = new Map<string, string>();
@@ -230,7 +223,6 @@ export function CronPanel({
       : profileOptions.find(o => o.key === profileFilter)?.label ?? profileFilter;
 
   const doPauseResume = (job: CronJob) => {
-    setMenuJob(null);
     const action = job.state === 'paused' ? resume(job) : pause(job);
     action.catch(e =>
       alertError(t('cron.opFailed'), e instanceof Error ? e.message : String(e)),
@@ -238,7 +230,6 @@ export function CronPanel({
   };
 
   const doTrigger = (job: CronJob) => {
-    setMenuJob(null);
     trigger(job).catch(e => {
       if (isCronConflict(e)) {
         alertError(t('cron.jobRunning'), t('cron.jobRunningHint'));
@@ -252,7 +243,6 @@ export function CronPanel({
   };
 
   const doRemove = (job: CronJob) => {
-    setMenuJob(null);
     void confirmDialog(
       t('cron.deleteTitle'),
       t('cron.deleteConfirm', {name: job.name}),
@@ -314,7 +304,10 @@ export function CronPanel({
               busy={!!busyJobIds[item.id]}
               triggering={triggeringJobId === item.id}
               onOpen={() => onEditJob(item)}
-              onMenu={() => setMenuJob(item)}
+              onPauseResume={() => doPauseResume(item)}
+              onTrigger={() => doTrigger(item)}
+              onRuns={() => onOpenRuns(item)}
+              onRemove={() => doRemove(item)}
             />
           )}
         />
@@ -348,92 +341,7 @@ export function CronPanel({
           </View>
         </>
       ) : null}
-
-      <MenuJobModal
-        job={menuJob}
-        triggering={!!menuJob && triggeringJobId === menuJob.id}
-        busy={!!menuJob && !!busyJobIds[menuJob.id]}
-        onClose={() => setMenuJob(null)}
-        onPauseResume={doPauseResume}
-        onTrigger={doTrigger}
-        onEdit={job => {
-          setMenuJob(null);
-          onEditJob(job);
-        }}
-        onRuns={job => {
-          setMenuJob(null);
-          onOpenRuns(job);
-        }}
-        onRemove={doRemove}
-      />
     </View>
-  );
-}
-
-/** 行操作菜单（居中 Modal 卡片；触发中禁用立即运行）。 */
-function MenuJobModal({
-  job,
-  triggering,
-  busy,
-  onClose,
-  onPauseResume,
-  onTrigger,
-  onEdit,
-  onRuns,
-  onRemove,
-}: {
-  job: CronJob | null;
-  triggering: boolean;
-  busy: boolean;
-  onClose: () => void;
-  onPauseResume: (job: CronJob) => void;
-  onTrigger: (job: CronJob) => void;
-  onEdit: (job: CronJob) => void;
-  onRuns: (job: CronJob) => void;
-  onRemove: (job: CronJob) => void;
-}) {
-  const t = useT();
-  return (
-    <Modal
-      visible={job != null}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}>
-      <TouchableWithoutFeedback onPress={onClose}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle} numberOfLines={1}>
-              {job?.name || ''}
-            </Text>
-            {job ? (
-              <>
-                <MenuOption
-                  label={
-                    job.state === 'paused'
-                      ? t('cron.resumeSchedule')
-                      : t('cron.pauseSchedule')
-                  }
-                  disabled={busy}
-                  onPick={() => onPauseResume(job)}
-                />
-                <MenuOption
-                  label={triggering ? t('cron.runningNow') : t('cron.runNow')}
-                  disabled={triggering || busy}
-                  onPick={() => onTrigger(job)}
-                />
-                <MenuOption label={t('cron.runs')} onPick={() => onRuns(job)} />
-                <MenuOption label={t('common.edit')} onPick={() => onEdit(job)} />
-                <MenuOption
-                  label={t('common.delete')}
-                  danger
-                  onPick={() => onRemove(job)}
-                />
-              </>
-            ) : null}
-          </View>
-        </View>
-      </TouchableWithoutFeedback>
-    </Modal>
   );
 }
 
@@ -443,14 +351,20 @@ function CronJobRow({
   busy,
   triggering,
   onOpen,
-  onMenu,
+  onPauseResume,
+  onTrigger,
+  onRuns,
+  onRemove,
 }: {
   job: CronJob;
   showProfile: boolean;
   busy: boolean;
   triggering: boolean;
   onOpen: () => void;
-  onMenu: () => void;
+  onPauseResume: () => void;
+  onTrigger: () => void;
+  onRuns: () => void;
+  onRemove: () => void;
 }) {
   const t = useT();
   const badge = stateBadge(job.state);
@@ -476,17 +390,6 @@ function CronJobRow({
               {job.profile_name || job.profile}
             </Text>
           ) : null}
-          <TouchableOpacity
-            style={styles.moreBtn}
-            hitSlop={8}
-            disabled={triggering}
-            onPress={onMenu}>
-            {triggering ? (
-              <ActivityIndicator size="small" color={Colors.accent} />
-            ) : (
-              <Text style={styles.moreText}>⋯</Text>
-            )}
-          </TouchableOpacity>
         </View>
         {status ? (
           <Text style={[styles.statusLine, {color: status.color}]}>
@@ -512,6 +415,54 @@ function CronJobRow({
             {detail}
           </Text>
         ) : null}
+        <View style={styles.actionRow}>
+          <TouchableOpacity
+            style={styles.actionPill}
+            activeOpacity={0.6}
+            disabled={busy}
+            onPress={onPauseResume}>
+            <Text style={styles.actionPillText}>
+              {job.state === 'paused'
+                ? t('cron.resumeSchedule')
+                : t('cron.pauseSchedule')}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.actionPill}
+            activeOpacity={0.6}
+            disabled={triggering || busy}
+            onPress={onTrigger}>
+            <Text
+              style={[
+                styles.actionPillText,
+                triggering && styles.actionPillTextActive,
+              ]}>
+              {triggering ? t('cron.runningNow') : t('cron.runNow')}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.actionPill}
+            activeOpacity={0.6}
+            onPress={onRuns}>
+            <Text style={styles.actionPillText} testID="cron-row-runs">
+              {t('cron.runs')}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.actionPill}
+            activeOpacity={0.6}
+            onPress={onOpen}>
+            <Text style={styles.actionPillText}>{t('common.edit')}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.actionPill}
+            activeOpacity={0.6}
+            onPress={onRemove}>
+            <Text style={[styles.actionPillText, styles.actionPillTextDanger]}>
+              {t('common.delete')}
+            </Text>
+          </TouchableOpacity>
+        </View>
       </View>
     </TouchableOpacity>
   );
@@ -589,30 +540,6 @@ const styles = StyleSheet.create({
   menuItemCheck: {fontSize: 14, color: Colors.accent, marginLeft: 8},
   menuItemTextDanger: {color: Colors.danger},
   menuItemTextDisabled: {color: Colors.textSecondary},
-  // 行操作菜单 Modal 卡
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalCard: {
-    width: 220,
-    backgroundColor: Colors.card,
-    borderRadius: 12,
-    paddingVertical: 6,
-    paddingHorizontal: 4,
-  },
-  modalTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: Colors.textSecondary,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: Colors.border,
-    marginBottom: 4,
-  },
   row: {
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -639,11 +566,21 @@ const styles = StyleSheet.create({
     marginLeft: 6,
     flexShrink: 1,
   },
-  moreBtn: {marginLeft: 8, paddingHorizontal: 4},
-  moreText: {fontSize: 16, color: Colors.textSecondary},
   statusLine: {fontSize: 12, marginTop: 3},
   schedule: {fontSize: 13, color: Colors.text, marginTop: 3},
   times: {fontSize: 12, color: Colors.textSecondary, marginTop: 2},
   preview: {fontSize: 13, color: Colors.textSecondary, marginTop: 2},
   errorLine: {fontSize: 12, color: Colors.danger, marginTop: 3},
+  actionRow: {flexDirection: 'row', flexWrap: 'wrap', marginTop: 2},
+  actionPill: {
+    backgroundColor: Colors.fillSubtle,
+    borderRadius: 7,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    marginRight: 6,
+    marginTop: 6,
+  },
+  actionPillText: {fontSize: 12, color: Colors.text},
+  actionPillTextActive: {color: Colors.accentDark},
+  actionPillTextDanger: {color: Colors.danger},
 });

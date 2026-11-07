@@ -10,7 +10,7 @@
  */
 
 import React from 'react';
-import {Text} from 'react-native';
+import {ScrollView, Text} from 'react-native';
 import {act, create, type ReactTestRenderer} from 'react-test-renderer';
 
 import {useConnectionStore} from '../src/store/connection';
@@ -123,6 +123,11 @@ describe('CronRunDetailPanel 脚本任务运行', () => {
   it('无摘要时落占位文案', () => {
     const tree = render(scriptRun({preview: undefined}));
     expect(joined(tree)).toContain('该次运行没有留下摘要');
+  });
+
+  it('脚本分支渲染在 ScrollView 内（内容超出容器可滚动看全）', () => {
+    const tree = render(scriptRun());
+    expect(tree.root.findByType(ScrollView)).toBeTruthy();
   });
 
   it('jobName 缺省回退 run.title', () => {
